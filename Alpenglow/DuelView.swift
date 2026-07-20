@@ -122,14 +122,14 @@ struct DuelView: View {
                             positionLabel: "Left photo",
                             aspectRatio: Self.screenAspectRatio,
                             action: { model.choose(winner: pair.first, loser: pair.second) },
-                            onIgnore: { model.skip() }
+                            onAdvance: { model.skip() }
                         )
                         DuelCard(
                             candidate: pair.second,
                             positionLabel: "Right photo",
                             aspectRatio: Self.screenAspectRatio,
                             action: { model.choose(winner: pair.second, loser: pair.first) },
-                            onIgnore: { model.skip() }
+                            onAdvance: { model.skip() }
                         )
                     }
 
@@ -186,8 +186,9 @@ private struct DuelCard: View {
     let positionLabel: String
     let aspectRatio: CGFloat
     let action: () -> Void
-    /// Advance to a fresh pair once this photo is ignored and gone from the pool.
-    let onIgnore: () -> Void
+    /// Advance to a fresh pair after this photo is ignored or judged not
+    /// wallpaper material — either way the current pair is spent.
+    let onAdvance: () -> Void
 
     @Environment(\.modelContext) private var modelContext
     @State private var image: CGImage?
@@ -237,8 +238,10 @@ private struct DuelCard: View {
             }
             Divider()
             Button("Not Wallpaper Material") {
-                // Records a bad verdict; the photo stays in the duel pool.
+                // Records a bad verdict; the photo stays in the duel pool, but
+                // this pair is spent — advance (FR-4.7).
                 CandidateActions.markNotWallpaperMaterial(candidate.localIdentifier, in: modelContext)
+                onAdvance()
             }
             Button("Ignore This Photo", role: .destructive) {
                 ignore()
@@ -266,6 +269,6 @@ private struct DuelCard: View {
 
     private func ignore() {
         CandidateActions.ignore(candidate.localIdentifier, in: modelContext)
-        onIgnore()
+        onAdvance()
     }
 }
