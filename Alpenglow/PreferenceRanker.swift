@@ -147,7 +147,7 @@ actor PreferenceRanker {
             let resolution = min(1, max(0, log2(Float(record.pixelWidth) / minWidth) / resolutionRange))
             return Entry(
                 id: record.localIdentifier,
-                vector: data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) },
+                vector: data.floatVector,
                 aesthetics: record.aestheticsScore,
                 isFavorite: record.isFavorite,
                 levelness: 1 - min(tilt, Thresholds.horizonMaxTiltDegrees) / Thresholds.horizonMaxTiltDegrees,

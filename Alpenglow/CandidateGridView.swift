@@ -197,22 +197,12 @@ nonisolated enum ThumbnailLoader {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil).firstObject else {
             return nil
         }
-
-        let options = PHImageRequestOptions()
-        options.deliveryMode = .highQualityFormat
-        options.isNetworkAccessAllowed = true
-        options.resizeMode = .fast
         let side = CGFloat(pixelSize)
-
-        return await withCheckedContinuation { continuation in
-            PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: CGSize(width: side, height: side),
-                contentMode: .aspectFill,
-                options: options
-            ) { image, _ in
-                continuation.resume(returning: image?.cgImage(forProposedRect: nil, context: nil, hints: nil))
-            }
-        }
+        return await PhotoImageLoading.image(
+            for: asset,
+            targetSize: CGSize(width: side, height: side),
+            contentMode: .aspectFill,
+            allowNetwork: true
+        )
     }
 }

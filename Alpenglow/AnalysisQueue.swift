@@ -34,7 +34,6 @@ actor AnalysisQueue {
     private enum ItemResult: Sendable {
         case analyzed(String, ImageAnalyzer.Outcome)
         case skipped(String)
-        case horizonMeasured(String, Float?)
     }
 
     /// Deferred (iCloud-only) records already retried this run session, so a
@@ -82,22 +81,9 @@ actor AnalysisQueue {
         let byIdentifier = Dictionary(uniqueKeysWithValues: batch.map { ($0.localIdentifier, $0) })
 
         // Vision work runs outside the actor; only Sendable values cross the boundary.
-        var results: [ItemResult] = []
-        results.reserveCapacity(batch.count)
         let useNetwork = allowNetwork
-        try await withThrowingTaskGroup(of: ItemResult.self) { group in
-            var pending = batch.map(\.localIdentifier).makeIterator()
-            for _ in 0..<Thresholds.analysisConcurrency {
-                if let id = pending.next() {
-                    group.addTask { await Self.analyzeAsset(id, allowNetwork: useNetwork) }
-                }
-            }
-            while let result = try await group.next() {
-                results.append(result)
-                if let id = pending.next() {
-                    group.addTask { await Self.analyzeAsset(id, allowNetwork: useNetwork) }
-                }
-            }
+        let results = try await runBatch(batch.map(\.localIdentifier)) { id in
+            await Self.analyzeAsset(id, allowNetwork: useNetwork)
         }
 
         for result in results {
@@ -119,8 +105,6 @@ actor AnalysisQueue {
                 record.isSkipped = true
                 record.analysisVersion = version
                 record.analyzedAt = Date()
-            case .horizonMeasured:
-                continue // handled in processHorizonBatch
             }
         }
         try modelContext.save()
@@ -139,24 +123,11 @@ actor AnalysisQueue {
 
         let byIdentifier = Dictionary(uniqueKeysWithValues: batch.map { ($0.localIdentifier, $0) })
 
-        var results: [ItemResult] = []
-        results.reserveCapacity(batch.count)
-        try await withThrowingTaskGroup(of: ItemResult.self) { group in
-            var pending = batch.map(\.localIdentifier).makeIterator()
-            for _ in 0..<Thresholds.analysisConcurrency {
-                if let id = pending.next() {
-                    group.addTask { await Self.measureHorizonForAsset(id) }
-                }
-            }
-            while let result = try await group.next() {
-                results.append(result)
-                if let id = pending.next() {
-                    group.addTask { await Self.measureHorizonForAsset(id) }
-                }
-            }
+        let results = try await runBatch(batch.map(\.localIdentifier)) { id in
+            await Self.measureHorizonForAsset(id)
         }
 
-        for case .horizonMeasured(let id, let angle) in results {
+        for (id, angle) in results {
             guard let record = byIdentifier[id] else { continue }
             record.horizonAngleDegrees = angle
             record.horizonMeasured = true
@@ -165,14 +136,42 @@ actor AnalysisQueue {
         return results.count
     }
 
-    private static func measureHorizonForAsset(_ identifier: String) async -> ItemResult {
+    /// Bounded-concurrency batch runner shared by the analysis and horizon
+    /// passes: seeds `Thresholds.analysisConcurrency` tasks, then refills one
+    /// at a time as each finishes, so at most that many requests are ever in
+    /// flight regardless of batch size.
+    private func runBatch<T: Sendable>(
+        _ ids: [String],
+        work: @Sendable @escaping (String) async -> T
+    ) async throws -> [T] {
+        var results: [T] = []
+        results.reserveCapacity(ids.count)
+        try await withThrowingTaskGroup(of: T.self) { group in
+            var pending = ids.makeIterator()
+            for _ in 0..<Thresholds.analysisConcurrency {
+                if let id = pending.next() {
+                    group.addTask { await work(id) }
+                }
+            }
+            while let result = try await group.next() {
+                results.append(result)
+                if let id = pending.next() {
+                    group.addTask { await work(id) }
+                }
+            }
+        }
+        return results
+    }
+
+    /// Returns nil for the angle when the photo is unmeasurable now, so the
+    /// pass still marks it measured and completes.
+    private static func measureHorizonForAsset(_ identifier: String) async -> (String, Float?) {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject,
               let image = await analysisBitmap(for: asset, allowNetwork: true) else {
-            // Unmeasurable now; mark measured with no angle so the pass completes.
-            return .horizonMeasured(identifier, nil)
+            return (identifier, nil)
         }
         let angle = (try? await ImageAnalyzer.measureHorizon(image)) ?? nil
-        return .horizonMeasured(identifier, angle)
+        return (identifier, angle)
     }
 
     func statistics() throws -> AnalysisStatistics {
@@ -213,21 +212,12 @@ actor AnalysisQueue {
     /// originals return nil and the record is deferred; the retry pass allows
     /// network downloads so deferred photos are analyzed after all local ones.
     private static func analysisBitmap(for asset: PHAsset, allowNetwork: Bool) async -> CGImage? {
-        let options = PHImageRequestOptions()
-        options.deliveryMode = .highQualityFormat
-        options.isNetworkAccessAllowed = allowNetwork
-        options.resizeMode = .fast
         let side = CGFloat(Thresholds.analysisPixelSize)
-
-        return await withCheckedContinuation { continuation in
-            PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: CGSize(width: side, height: side),
-                contentMode: .aspectFit,
-                options: options
-            ) { image, _ in
-                continuation.resume(returning: image?.cgImage(forProposedRect: nil, context: nil, hints: nil))
-            }
-        }
+        return await PhotoImageLoading.image(
+            for: asset,
+            targetSize: CGSize(width: side, height: side),
+            contentMode: .aspectFit,
+            allowNetwork: allowNetwork
+        )
     }
 }

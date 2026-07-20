@@ -27,6 +27,13 @@ nonisolated struct Candidate: Sendable, Identifiable, Equatable {
     }
 }
 
+extension Data {
+    /// Reinterprets raw bytes as a feature-print vector.
+    nonisolated var floatVector: [Float] {
+        withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+    }
+}
+
 /// SwiftData queries for the ranking pipeline.
 @ModelActor
 actor FeatureStore {
@@ -91,7 +98,7 @@ actor FeatureStore {
         for record in records {
             if kept.count >= limit && !record.isFavorite { continue }
             guard let data = record.featurePrint else { continue }
-            let vector = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+            let vector = data.floatVector
 
             let clusterIndex = keptVectors.firstIndex {
                 $0.count == vector.count && vDSP.distanceSquared($0, vector) < thresholdSquared
@@ -214,7 +221,7 @@ actor FeatureStore {
         for record in records {
             guard let score = record.preferenceScore, score > bar else { break }
             guard let data = record.featurePrint else { continue }
-            let vector = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+            let vector = data.floatVector
             let isNearDuplicate = keptVectors.contains {
                 $0.count == vector.count && vDSP.distanceSquared($0, vector) < thresholdSquared
             }
