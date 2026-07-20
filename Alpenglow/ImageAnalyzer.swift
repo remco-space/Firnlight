@@ -5,8 +5,13 @@ import os
 /// Runs the Vision pipeline on a single analysis bitmap.
 ///
 /// Rejection order is cheapest-exit-first per the pipeline rules:
-/// utility → people (any face, or human rect above threshold) → not nature.
+/// utility → people (a lot of people, or a prominent person) → not nature.
 /// The feature print is generated only for images that survive all rejections.
+///
+/// People rule (FR-3.1): cityscapes admit distant figures, so a face only
+/// rejects when it dominates the frame (height ≥ `personProminenceHeight`), when
+/// there is a crowd (count ≥ `crowdFaceCount`), or when a confident human
+/// rectangle is that prominent. Tiny background people no longer reject.
 /// `nonisolated`: must run off the main actor inside the AnalysisQueue's task group.
 nonisolated enum ImageAnalyzer {
     struct Outcome: Sendable {
@@ -29,14 +34,19 @@ nonisolated enum ImageAnalyzer {
         outcome.isUtility = aesthetics.isUtility
         if outcome.isUtility { return outcome }
 
-        // 2. People — any face at all, or any human rectangle above threshold.
+        // 2. People — a crowd, a frame-dominating face, or a prominent confident
+        // human rectangle. Distant tiny figures in a cityscape are allowed.
         let faces = try await DetectFaceRectanglesRequest().perform(on: image)
-        if !faces.isEmpty {
+        if faces.count >= Thresholds.crowdFaceCount
+            || faces.contains(where: { $0.boundingBox.height >= Thresholds.personProminenceHeight }) {
             outcome.hasPeople = true
             return outcome
         }
         let humans = try await DetectHumanRectanglesRequest().perform(on: image)
-        if humans.contains(where: { $0.confidence >= Thresholds.humanConfidenceThreshold }) {
+        if humans.contains(where: {
+            $0.confidence >= Thresholds.humanConfidenceThreshold
+                && $0.boundingBox.height >= Thresholds.personProminenceHeight
+        }) {
             outcome.hasPeople = true
             return outcome
         }

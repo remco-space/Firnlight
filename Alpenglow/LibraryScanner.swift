@@ -69,7 +69,10 @@ final class LibraryScanner {
                         }
                         // Edited since analysis (crop, adjustments, …): refresh
                         // metadata and queue for re-analysis. Only this photo
-                        // re-runs Vision — never the whole library.
+                        // re-runs Vision — never the whole library. Clear the old
+                        // analysis outputs now: if the re-analysis defers to
+                        // iCloud, the record must not re-enter the grid pairing a
+                        // stale feature print with the new dimensions.
                         if let modified = asset.modificationDate,
                            let analyzedAt = record.analyzedAt,
                            modified > analyzedAt {
@@ -78,6 +81,12 @@ final class LibraryScanner {
                             record.analysisVersion = 0
                             record.horizonMeasured = false
                             record.isSkipped = false
+                            record.isNature = false
+                            record.hasPeople = false
+                            record.isUtility = false
+                            record.aestheticsScore = 0
+                            record.featurePrint = nil
+                            record.horizonAngleDegrees = nil
                             editedQueued += 1
                             unsavedChanges += 1
                         }

@@ -208,16 +208,49 @@ actor AnalysisQueue {
         }
     }
 
-    /// Requests a ≤1024 px analysis bitmap. In the local pass, iCloud-only
-    /// originals return nil and the record is deferred; the retry pass allows
-    /// network downloads so deferred photos are analyzed after all local ones.
+    /// Requests a ≤1024 px analysis bitmap, center-cropped to the main display's
+    /// aspect ratio. In the local pass, iCloud-only originals return nil and the
+    /// record is deferred; the retry pass allows network downloads so deferred
+    /// photos are analyzed after all local ones.
+    ///
+    /// Cropping before any Vision request is deliberate: macOS fills the desktop
+    /// with a center crop and the duels judge that same crop, so the ranker must
+    /// learn from the pixels the user will actually see — not the whole panorama.
     private static func analysisBitmap(for asset: PHAsset, allowNetwork: Bool) async -> CGImage? {
         let side = CGFloat(Thresholds.analysisPixelSize)
-        return await PhotoImageLoading.image(
+        guard let image = await PhotoImageLoading.image(
             for: asset,
             targetSize: CGSize(width: side, height: side),
             contentMode: .aspectFit,
             allowNetwork: allowNetwork
-        )
+        ) else { return nil }
+        return centerCropped(image, toAspect: mainDisplayAspectRatio)
+    }
+
+    /// Main display's aspect ratio (width / height). Read via CoreGraphics so it
+    /// is safe off the main actor; falls back to 16:10 when the bounds are
+    /// unavailable (e.g. headless) and would otherwise be zero.
+    private static var mainDisplayAspectRatio: CGFloat {
+        let bounds = CGDisplayBounds(CGMainDisplayID())
+        guard bounds.width > 0, bounds.height > 0 else { return 16.0 / 10.0 }
+        return bounds.width / bounds.height
+    }
+
+    /// Center-crops `image` to `aspect` (width / height), trimming whichever
+    /// pair of edges overhangs. Returns the original if cropping fails.
+    private static func centerCropped(_ image: CGImage, toAspect aspect: CGFloat) -> CGImage {
+        let width = CGFloat(image.width)
+        let height = CGFloat(image.height)
+        let cropRect: CGRect
+        if width / height > aspect {
+            // Too wide — trim the sides.
+            let cropWidth = (height * aspect).rounded()
+            cropRect = CGRect(x: ((width - cropWidth) / 2).rounded(), y: 0, width: cropWidth, height: height)
+        } else {
+            // Too tall — trim top and bottom.
+            let cropHeight = (width / aspect).rounded()
+            cropRect = CGRect(x: 0, y: ((height - cropHeight) / 2).rounded(), width: width, height: cropHeight)
+        }
+        return image.cropping(to: cropRect) ?? image
     }
 }

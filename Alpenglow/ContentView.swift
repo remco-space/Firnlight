@@ -31,15 +31,23 @@ struct ContentView: View {
 /// Library tab: Photos authorization flow, then the scan → analyze pipeline.
 private struct LibraryTab: View {
     let authorization: PhotoLibraryAuthorization
+    @Environment(\.modelContext) private var modelContext
     @State private var scanner = LibraryScanner()
+    @State private var analysisModel = AnalysisModel()
+
+    /// Guards the once-per-session startup auto-resync.
+    @State private var didAutoResync = false
 
     var body: some View {
         if authorization.isAuthorized {
             ScrollView {
                 VStack(spacing: 20) {
                     VStack(spacing: 20) {
+                        if authorization.status == .limited {
+                            limitedAccessBanner
+                        }
                         ScanView(scanner: scanner)
-                        AnalysisView(scanToken: scanCompletionToken)
+                        AnalysisView(model: analysisModel, scanToken: scanCompletionToken)
                     }
                     .frame(maxWidth: 560)
 
@@ -48,9 +56,34 @@ private struct LibraryTab: View {
                 .padding(24)
             }
             .frame(maxWidth: .infinity)
+            // Auto-resync once per session: scan, then analyze to completion,
+            // exactly as clicking the buttons would. This branch only exists
+            // while authorized, so it also fires right after the user grants.
+            .task {
+                guard !didAutoResync else { return }
+                didAutoResync = true
+                await scanner.scan(into: modelContext)
+                await analysisModel.start(container: modelContext.container).value
+                RankingClock.shared.bump()
+            }
         } else {
             authorizationPrompt
         }
+    }
+
+    private var limitedAccessBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "lock.badge.exclamationmark")
+                .foregroundStyle(.orange)
+            Text("Only your selected photos are available to Alpenglow.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 12)
+            Button("Open Photos Settings") { openPrivacySettings() }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 
     /// Non-nil once a scan has finished; value changes when results change.

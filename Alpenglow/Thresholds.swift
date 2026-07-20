@@ -24,7 +24,7 @@ nonisolated enum Thresholds {
     // MARK: Vision analysis (Phase 3)
 
     /// Bump when analysis logic changes; records with an older version are re-analyzed.
-    static let currentAnalysisVersion = 1
+    static let currentAnalysisVersion = 2 // v2 analyzes the display-aspect center crop
 
     /// Records analyzed and saved per batch; a killed app loses at most one batch.
     static let analysisBatchSize = 32
@@ -37,6 +37,19 @@ nonisolated enum Thresholds {
 
     /// Minimum DetectHumanRectanglesRequest confidence that counts as a person.
     static let humanConfidenceThreshold: Float = 0.3
+
+    /// A face (or confident human rectangle) taller than this fraction of the
+    /// analysis frame height reads as a foreground portrait subject, not a
+    /// distant passer-by, and rejects the photo. Shared between faces and human
+    /// rectangles: a body this tall is scenery-dominating either way.
+    /// (FR-3.1 revision 2026-07-20: cityscapes admit distant people; only a lot
+    /// of people, or a prominent one, reject.)
+    /// CGFloat to match Vision's normalized bounding-box height.
+    static let personProminenceHeight: CGFloat = 0.08
+
+    /// Face count at or above which the frame reads as a crowd and rejects,
+    /// regardless of how small any individual face is.
+    static let crowdFaceCount = 6
 
     /// Minimum classification confidence for a label to count toward the nature check.
     static let natureConfidenceThreshold: Float = 0.4
@@ -181,5 +194,9 @@ nonisolated enum Thresholds {
 
         // Scenic cultivated landscapes & trails
         "vineyard", "orchard", "rice_field", "trail",
+
+        // Cityscapes & landmarks (FR-3.1 revision 2026-07-20)
+        "cityscape", "skyscraper", "bridge", "castle", "lighthouse",
+        "harbour", "monument", "belltower", "clock_tower",
     ]
 }

@@ -18,13 +18,18 @@ final class AnalysisModel {
         stats = try? await ensureQueue(container).statistics()
     }
 
-    func start(container: ModelContainer) {
-        guard !isRunning else { return }
+    /// Starts the batch loop if idle and returns the running task, so callers
+    /// that must await completion (the startup auto-resync) can, while the
+    /// manual button ignores the result. Re-entry while running returns the
+    /// in-flight task, so a user click and the auto-resync never double-run.
+    @discardableResult
+    func start(container: ModelContainer) -> Task<Void, Never> {
+        if let runTask, isRunning { return runTask }
         isRunning = true
         lastError = nil
         let queue = ensureQueue(container)
 
-        runTask = Task {
+        let task = Task {
             do {
                 await queue.beginSession()
                 while !Task.isCancelled {
@@ -39,6 +44,8 @@ final class AnalysisModel {
             stats = try? await queue.statistics()
             isRunning = false
         }
+        runTask = task
+        return task
     }
 
     /// Stops after the in-flight batch; progress is already saved per batch.
@@ -58,7 +65,10 @@ final class AnalysisModel {
 /// Vision analysis card: progress, per-reason rejection counts, run controls.
 struct AnalysisView: View {
     @Environment(\.modelContext) private var modelContext
-    @State private var model = AnalysisModel()
+
+    /// Owned by the Library tab so the startup auto-resync can drive the same
+    /// loop the manual buttons do.
+    let model: AnalysisModel
 
     /// Changes when a scan completes, triggering a statistics refresh.
     let scanToken: Int?
