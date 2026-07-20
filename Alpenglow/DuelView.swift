@@ -181,6 +181,9 @@ private struct DuelCard: View {
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+            // Bound clicking/right-clicking to the visible card; a panorama's
+            // scaledToFill overflow is clipped visually but not for hit-testing.
+            .contentShape(RoundedRectangle(cornerRadius: 10))
             .overlay {
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(isHovering ? Color.accentColor : .clear, lineWidth: 3)

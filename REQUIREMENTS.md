@@ -96,6 +96,10 @@ third-party dependencies, no network calls, no telemetry.
 - **FR-4.7** "Not Wallpaper Material" permanently excludes the photo from the
   grid, future duels, the album-size calibration, and (on next sync) the
   album. Excluding a photo mid-duel advances to a fresh pair.
+- **FR-4.8** Every image tile renders at a fixed aspect ratio with the photo
+  center-crop-filled, and its click/right-click area matches the visible tile
+  exactly — panoramas must not draw over or steal clicks from neighboring
+  cells or gaps.
 
 ## 5. Preference learning (Duel tab)
 

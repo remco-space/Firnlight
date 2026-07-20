@@ -107,6 +107,10 @@ struct ThumbnailCell: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            // clipShape clips drawing but NOT hit-testing: a panorama's
+            // scaledToFill overflow would otherwise be clickable far beyond
+            // the visible tile. contentShape bounds interaction to the tile.
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         .overlay(alignment: .topLeading) {
             if candidate.isFavorite {
                 Image(systemName: "heart.fill")
