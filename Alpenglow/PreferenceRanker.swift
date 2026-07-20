@@ -138,7 +138,11 @@ actor PreferenceRanker {
     /// Fetches the current nature, non-excluded candidates into `entries` and
     /// rebuilds `indexByID`. Weights are untouched.
     private func loadEntries() {
-        let records = (try? modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature && !$0.isExcluded }))) ?? []
+        // Sorted by identifier so the deterministic favorite seeding never
+        // depends on SwiftData's unspecified default fetch order.
+        var descriptor = FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature && !$0.isExcluded })
+        descriptor.sortBy = [SortDescriptor(\.localIdentifier)]
+        let records = (try? modelContext.fetch(descriptor)) ?? []
         let minWidth = Float(Thresholds.minimumCandidatePixelWidth)
         let resolutionRange = log2(Thresholds.resolutionFullScoreWidth / minWidth)
         entries = records.compactMap { record in

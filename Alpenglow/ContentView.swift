@@ -63,8 +63,8 @@ private struct LibraryTab: View {
                 guard !didAutoResync else { return }
                 didAutoResync = true
                 await scanner.scan(into: modelContext)
+                // start() rescores and bumps RankingClock when it finishes.
                 await analysisModel.start(container: modelContext.container).value
-                RankingClock.shared.bump()
             }
         } else {
             authorizationPrompt

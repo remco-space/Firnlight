@@ -25,6 +25,11 @@ final class DuelModel {
 
     private var ranker: PreferenceRanker?
 
+    /// Set right before a bump this model itself causes: record() has already
+    /// rescored and saved, so the clock-driven reload would redo the whole
+    /// library's rescore-and-persist for nothing on every single choice.
+    private var suppressNextReload = false
+
     func start(container: ModelContainer) async {
         guard ranker == nil else { return }
         isPreparing = true
@@ -51,6 +56,10 @@ final class DuelModel {
             await start(container: container)
             return
         }
+        if suppressNextReload {
+            suppressNextReload = false
+            return
+        }
         do {
             try await ranker.reload()
             if let pair, await !ranker.contains(pair) {
@@ -69,6 +78,7 @@ final class DuelModel {
             do {
                 try await ranker.record(winnerID: winner.localIdentifier, loserID: loser.localIdentifier)
                 choiceCount = await ranker.choiceCount
+                suppressNextReload = true
                 RankingClock.shared.bump()
             } catch {
                 lastError = error.localizedDescription
@@ -94,6 +104,7 @@ final class DuelModel {
                     [pair.first.localIdentifier, pair.second.localIdentifier],
                     isGood: isGood
                 )
+                suppressNextReload = true // verdicts don't change the pool
                 RankingClock.shared.bump() // suggestion recalibrates
             } catch {
                 lastError = error.localizedDescription

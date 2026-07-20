@@ -78,6 +78,7 @@ final class LibraryScanner {
                            modified > analyzedAt {
                             record.pixelWidth = asset.pixelWidth
                             record.pixelHeight = asset.pixelHeight
+                            record.preferenceScore = nil // pre-edit rank is stale too
                             record.analysisVersion = 0
                             record.horizonMeasured = false
                             record.isSkipped = false

@@ -87,14 +87,20 @@ actor FeatureStore {
         )
         let fetched = try modelContext.fetch(descriptor)
 
-        // Rank by the learned raw preference score once the ranker has scored a
-        // record; until then fall back to aesthetics plus the favorite prior.
-        // (Raw scores and the fallback are different scales, but unscored
-        // records only exist until the ranker first runs.)
-        func rankScore(_ record: PhotoRecord) -> Float {
-            record.preferenceScore ?? (record.aestheticsScore + (record.isFavorite ? Thresholds.favoriteRankBoost : 0))
+        // Two tiers: records the ranker has scored rank by their raw score;
+        // unscored ones (new scans, edited photos awaiting rescore) sit BELOW
+        // all of them, ordered by aesthetics plus the favorite prior. Raw
+        // scores are unbounded and the prior is 0–1, so the two scales must
+        // never interleave. Unscored records are short-lived: analysis
+        // completion triggers a ranker rescore (AnalysisModel).
+        func rankKey(_ record: PhotoRecord) -> (Int, Float) {
+            if let score = record.preferenceScore {
+                (1, score)
+            } else {
+                (0, record.aestheticsScore + (record.isFavorite ? Thresholds.favoriteRankBoost : 0))
+            }
         }
-        let records = fetched.sorted { rankScore($0) > rankScore($1) }
+        let records = fetched.sorted { rankKey($0) > rankKey($1) }
 
         let thresholdSquared = Thresholds.nearDuplicateDistance * Thresholds.nearDuplicateDistance
         var kept: [Candidate] = []
@@ -103,8 +109,11 @@ actor FeatureStore {
 
         // The walk continues past `limit` so a favorite ranked below the
         // cutoff can still claim its duplicate cluster's slot. Non-favorites
-        // past the limit can't append or matter, so skip them before the
-        // costly vector decode + distance check.
+        // past the limit are skipped before the costly vector decode — a
+        // deliberate trade: `suppressed` counts only duplicates found down to
+        // the cutoff, and a below-cutoff non-favorite no longer displaces a
+        // slightly more tilted twin, in exchange for the walk not being
+        // O(library × limit × dims) on every load.
         for record in records {
             if kept.count >= limit && !record.isFavorite { continue }
             guard let data = record.featurePrint else { continue }

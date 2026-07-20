@@ -42,6 +42,11 @@ final class AnalysisModel {
                 lastError = error.localizedDescription
             }
             stats = try? await queue.statistics()
+            // Newly accepted photos carry no cached preference score and would
+            // otherwise sit unranked at the bottom of the grid until the Duel
+            // tab runs; rescore now so ranking is current, then tell views.
+            try? await PreferenceRanker(modelContainer: container).prepare()
+            RankingClock.shared.bump()
             isRunning = false
         }
         runTask = task
