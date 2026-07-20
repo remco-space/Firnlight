@@ -73,7 +73,7 @@ private struct LibraryTab: View {
 
     private var limitedAccessBanner: some View {
         HStack(spacing: 12) {
-            Image(systemName: "lock.badge.exclamationmark")
+            Image(systemName: "lock.trianglebadge.exclamationmark")
                 .foregroundStyle(.orange)
             Text("Only your selected photos are available to Alpenglow.")
                 .foregroundStyle(.secondary)
