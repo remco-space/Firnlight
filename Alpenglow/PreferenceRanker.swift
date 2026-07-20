@@ -5,7 +5,9 @@ import os
 
 /// Online logistic (Bradley–Terry) preference ranker over Vision feature prints.
 ///
-/// Raw score: s = w · featurePrint + b · aestheticsScore
+/// Raw score: s = w·featurePrint + b₁·aesthetics + b₂·levelness + b₃·resolution
+/// (levelness and resolution weights are learned from duels, never hard-coded —
+/// low-resolution or tilted photos are penalized only as much as choices imply).
 /// Choice model: P(winner beats loser) = sigmoid(s_winner − s_loser)
 /// One SGD step per recorded choice; `PhotoRecord.preferenceScore` caches
 /// sigmoid(s) after every update so the grid can re-rank live.

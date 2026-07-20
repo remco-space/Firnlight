@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "xcode": {
+      "type": "stdio",
+      "command": "xcrun",
+      "args": [
+        "mcpbridge"
+      ],
+      "env": {
+        "DEVELOPER_DIR": "/Applications/Xcode-27.0.0-Beta.3.app/Contents/Developer"
+      }
+    },
+    "XcodeBuildMCP": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "xcodebuildmcp@latest",
+        "mcp"
+      ],
+      "env": {
+        "DEVELOPER_DIR": "/Applications/Xcode-27.0.0-Beta.3.app/Contents/Developer"
+      }
+    }
+  }
+}

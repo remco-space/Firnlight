@@ -1,178 +1,162 @@
-# Alpenglow — Functional Requirements
+# Alpenglow — Product Brief
 
 A native macOS app that curates desktop wallpapers from the user's own Photos
-library: it finds high-resolution nature photos without people, ranks them by
-learned personal preference, and maintains a Photos album that System Settings
-can use for rotating wallpaper. Everything runs on-device.
+library: it finds high-resolution nature photos without people, learns the
+user's personal taste from quick pairwise comparisons, and maintains a Photos
+album that System Settings can rotate as wallpaper.
 
-Target: macOS 27+, Apple Silicon. Swift 6 (strict concurrency), SwiftUI,
-PhotoKit, Vision (modern async struct API), SwiftData, Accelerate. No
-third-party dependencies, no network calls, no telemetry.
+This document is the product brief: WHAT the user experiences and WHY, in
+human-readable language. Product and UX design must always be verifiable
+against it. It deliberately contains no APIs, algorithms, or thresholds — the
+technical documentation is the code itself (see CLAUDE.md for the contract).
+
+The app has three tabs matching the three stages of the journey:
+**Library** (find & rank) → **Duel** (learn taste) → **Export** (the album).
 
 ---
 
 ## 1. Photos access & privacy
 
-- **FR-1.1** The app requests Photos authorization (`.readWrite` level) on
-  explicit user action, never automatically at launch.
-- **FR-1.2** The Library tab reflects the authorization state (not determined /
-  authorized / limited / denied / restricted) and offers the grant flow or a
-  shortcut to Privacy Settings as appropriate.
-- **FR-1.3** Authorization status is re-checked whenever the app becomes
-  active, so a grant made in System Settings applies without relaunch.
-- **FR-1.4** Library writes are strictly limited to wallpaper-album creation
-  and album membership. Assets are never modified or deleted.
-  *(Revision of the original "never write to the library" rule — approved by
-  the user for the album-based export, 2026-07-19.)*
-- **FR-1.5** All processing happens on-device; photo content never leaves the
-  Mac.
-- **FR-1.6** Only one app instance runs at a time: a second launch defers to
-  (and activates) the existing instance, protecting the data store.
+- **FR-1.1** The app asks for Photos access only when the user takes an
+  explicit action, never silently at launch. *(Why: no surprise permission
+  prompts.)*
+- **FR-1.2** The Library tab reflects the current access state (not yet asked /
+  granted / limited / denied / restricted) and offers the right next step for
+  each: a grant button, or a shortcut into Privacy Settings.
+- **FR-1.3** A grant made in System Settings while the app is open takes
+  effect when the user returns to the app — no relaunch needed.
+- **FR-1.4** The app only ever adds or removes photos in its own wallpaper
+  album; it never edits or deletes the user's actual photos. *(Why: trust —
+  the library is safe. Revision of the original "never write to the library"
+  rule, approved by the user for the album-based export, 2026-07-19.)*
+- **FR-1.5** Everything happens on the user's Mac; photo content never leaves
+  the device. *(Why: privacy is a headline feature of the product.)*
+- **FR-1.6** Launching the app twice just brings the already-running window
+  forward instead of opening a second one. *(Why: protects the user's data.)*
 
-## 2. Library scan (metadata pre-filter)
+## 2. Finding candidate photos (Library tab)
 
-- **FR-2.1** The scan enumerates image assets only and pre-filters on metadata
-  before any pixel data is requested: landscape orientation
-  (width > height), width ≥ 3264 px (admits iPhone 5s-era 8 MP photos — older
-  photos are rarer and should not be hard-excluded), not a screenshot.
-- **FR-2.2** Each candidate is persisted once, keyed by the PhotoKit asset
-  identifier; re-scans are idempotent (only new assets are added).
-- **FR-2.3** Re-scans refresh mutable metadata on existing records —
-  specifically the Photos favorite flag.
-- **FR-2.4** The scan shows live progress and finishes with a candidate count
-  plus what changed (new / edited-queued / removed).
-- **FR-2.5** Photos edited since their analysis (detected via the asset's
-  modification date) are queued for re-analysis by the same resumable
-  pipeline — only the edited photos re-run Vision, never the whole library.
-- **FR-2.6** Records are removed when their asset is deleted from the library
-  or edited out of candidacy (e.g. cropped below the minimum size).
+- **FR-2.1** The app looks for photos that could plausibly work as wallpaper:
+  wide (landscape) orientation, high enough resolution for a modern display,
+  and not screenshots. Older, smaller photos are not hard-excluded — they are
+  admitted and simply ranked lower if the user's choices show they matter.
+  *(Why: photos from older cameras are rarer and shouldn't be thrown away
+  outright.)*
+- **FR-2.2** Re-scanning is always safe to repeat: it only adds genuinely new
+  photos, never duplicates.
+- **FR-2.3** Re-scans refresh what can change in Photos — in particular the
+  favorite heart.
+- **FR-2.4** Scanning shows live progress and ends with a clear summary: how
+  many candidates there are and what changed (new / re-queued / removed).
+- **FR-2.5** If the user edits a photo (crop, adjustments) after it was
+  examined, only that photo is re-examined — never the whole library.
+  *(Why: fast, and respects the user's edits.)*
+- **FR-2.6** Photos deleted from the library, or edited until they no longer
+  qualify (e.g. cropped too small), drop out of the app automatically.
 
-## 3. Vision analysis
+## 3. Analysis (Library tab)
 
-- **FR-3.1** Analysis bitmaps are requested at ≤1024 px long edge; full-res
-  images are never analyzed.
-- **FR-3.2** Rejection order, cheapest first: utility images (screenshots-like
-  content per aesthetics analysis) → photos with people (any detected face, or
-  human rectangle with confidence ≥ 0.3) → photos that aren't nature.
-- **FR-3.3** "Nature" = any Vision classification label from a curated
-  allowlist at confidence ≥ 0.4. The allowlist contains only identifiers
-  verified to exist in the Vision taxonomy (101 entries; note that intuitive
-  labels like "sunset", "cloud", "sea" do not exist — the actual identifiers
-  are "sunset_sunrise", "cloudy", "ocean", …).
-- **FR-3.4** Accepted photos additionally get: an aesthetics score, a feature
-  print (embedding), and a horizon angle (nil when no horizon is visible —
-  treated as neutral, never penalized).
-- **FR-3.5** Analysis runs in batches of 32 with bounded concurrency, saving
-  after each batch; killing the app mid-run loses at most one batch and the
-  run resumes on relaunch.
-- **FR-3.6** iCloud-only originals are deferred, not skipped: the local pass
-  completes first, then deferred photos are retried with network downloads
-  allowed. Progress reporting distinguishes the phases and never claims
-  completion while deferred work remains.
-- **FR-3.7** Per-reason rejection counts (people / utility / not nature /
-  deferred) are displayed.
-- **FR-3.8** Analysis is versioned; bumping the version re-runs the pipeline
-  incrementally. One-time backfill passes (e.g. horizon measurement for
-  records analyzed before that feature existed) never appear for fresh
-  installs.
+- **FR-3.1** The app examines each candidate on-device to keep only nature
+  photos without people or city scapes without a lot of people; screenshots and utility images are set aside too.
+- **FR-3.2** After analysis, the user sees a breakdown of why photos were set
+  aside: contains people, utility image, not nature, or waiting on iCloud.
+- **FR-3.3** Analysis can be interrupted at any time; quitting mid-run loses
+  almost no progress, and the next launch picks up where it left off.
+- **FR-3.4** Photos stored only in iCloud are deferred, not skipped: the app
+  finishes everything local first, then comes back to download and examine the
+  rest. Progress honestly distinguishes "waiting on iCloud" from "done" — the
+  app never claims completion while deferred work remains.
+- **FR-3.5** The Library tab always offers the one obvious next action as the
+  pipeline progresses ("Analyze N Photos", "Resume", "Retry N iCloud Photos",
+  and finally "Analysis complete").
 
-## 4. Candidate grid (Library tab)
+## 4. The ranked grid (Library tab)
 
-- **FR-4.1** Accepted candidates are shown in a lazily-loading thumbnail grid,
-  ranked best-first, and must scroll smoothly at 500+ items.
-- **FR-4.2** Near-duplicate suppression: walking the ranked list, a candidate
-  is hidden when its feature-print distance to an already-shown photo is below
-  threshold (tuned to 0.5 on real library data after 0.35 let same-subject
-  re-takes through).
-- **FR-4.3** Within a near-duplicate cluster, the kept representative is
-  chosen by: Photos favorite first, then the more level horizon (≥0.5°
-  improvement required).
-- **FR-4.4** Favorites are marked (heart badge); each cell shows its current
-  score.
-- **FR-4.5** The grid re-ranks live as the preference ranker learns.
-- **FR-4.6** Right-clicking any image in the app (grid, export preview, duel)
-  shows a standard context menu with "Open in Photos" (deep link to the asset)
-  and "Not Wallpaper Material".
-- **FR-4.7** "Not Wallpaper Material" permanently excludes the photo from the
-  grid, future duels, the album-size calibration, and (on next sync) the
-  album. Excluding a photo mid-duel advances to a fresh pair.
-- **FR-4.8** Every image tile renders at a fixed aspect ratio with the photo
-  center-crop-filled, and its click/right-click area matches the visible tile
-  exactly — panoramas must not draw over or steal clicks from neighboring
-  cells or gaps.
+- **FR-4.1** Accepted photos appear as a thumbnail grid, best first, scrolling
+  smoothly even with many hundreds of items.
+- **FR-4.2** Near-duplicate shots of the same scene are collapsed so the grid
+  isn't cluttered with the same view repeated. *(Why: re-takes of one vista
+  should compete as one wallpaper, not crowd out variety.)*
+- **FR-4.3** When duplicates are collapsed, the app keeps the best of the
+  bunch — preferring a Photos favorite, then the one with the visibly
+  straighter horizon.
+- **FR-4.4** Favorites show a heart badge, and every thumbnail shows its
+  current score.
+- **FR-4.5** The grid re-orders itself live as the app learns the user's taste
+  from duels.
+- **FR-4.6** Right-clicking any photo anywhere in the app (grid, export
+  preview, duel) offers "Open in Photos" and "Not Wallpaper Material".
+- **FR-4.7** "Not Wallpaper Material" permanently removes a photo from the
+  grid, future duels, the album-size suggestion, and (on next sync) the album.
+  Using it mid-duel advances to a fresh pair.
+- **FR-4.8** Every thumbnail is a clean, fixed-shape tile with the photo
+  filling it; clicks and right-clicks land only on the visible tile — a wide
+  panorama must not spill over or steal clicks from neighboring cells.
 
-## 5. Preference learning (Duel tab)
+## 5. Learning taste (Duel tab)
 
-- **FR-5.1** The user compares photo pairs ("Which makes the better
-  wallpaper?") and clicks the winner. Images are center-cropped to the main
-  display's aspect ratio, so choices judge the actual wallpaper crop.
-- **FR-5.2** Ranking model: online logistic (Bradley–Terry) over Vision
-  feature prints — P(A beats B) = sigmoid(sᴀ − s_B) with
-  s = w·featurePrint + b₁·aesthetics + b₂·levelness + b₃·resolution. One SGD
-  step per choice. Levelness derives from the horizon angle (level or no
-  horizon = 1, ≥45° tilt = 0); resolution is log-scaled from the minimum
-  candidate width (0) to 6000 px (1). Both weights are learned from duels, not
-  hard-coded — low-resolution photos are penalized only as much as the user's
-  choices imply.
-- **FR-5.3** Every choice is stored permanently. Weights persist to a file;
-  a missing/invalid file — including any algorithm-version mismatch — triggers
-  an automatic rebuild: seed from favorites, replay all choices, re-rank.
-- **FR-5.4** Fresh weights are seeded from Photos favorites (pseudo-choices:
-  favorite beats random non-favorite), so ranking starts from the user's
-  existing taste.
-- **FR-5.5** Pair selection is uncertainty sampling: closest-scored pairs from
-  an adaptive pool, excluding near-duplicate pairs and already-judged pairs;
-  sides are shuffled against position bias.
-- **FR-5.6** The duel pool is always wider than the export set: top 75% of all
-  candidates until the quality bar is calibrated, then everything above
-  (bar − margin) with a floor of 200 — narrowing over time as the bar firms up.
-- **FR-5.7** "Both Are Great" / "Both Are Bad" buttons record absolute quality
-  verdicts on both photos (they do not train the pairwise weights) and advance
-  to the next pair. A plain Skip is also available.
+- **FR-5.1** The user is shown two photos — "Which makes the better
+  wallpaper?" — and clicks the winner. Both are cropped to the shape of the
+  user's screen, so the choice judges what the wallpaper would actually look
+  like.
+- **FR-5.2** Ranking is learned entirely from the user's choices. Nothing is
+  hard-coded: a low-resolution or tilted photo is penalized only as much as
+  the user's own decisions imply.
+- **FR-5.3** Every choice is remembered permanently, and the accumulated
+  choices are always enough to rebuild the ranking from scratch — the user's
+  invested judgment is never lost.
+- **FR-5.4** Ranking starts from the user's existing Photos favorites, so
+  recommendations feel personal from the very first duel. *(Why: no cold
+  start.)*
+- **FR-5.5** The app picks pairs it is most unsure about, avoids re-asking
+  decided pairs, avoids near-identical pairs, and randomizes sides. *(Why:
+  every click should teach the app as much as possible, without position
+  bias.)*
+- **FR-5.6** Duels deliberately probe a wider set than the album will hold, so
+  the app also learns where the quality cutoff belongs — narrowing over time
+  as that cutoff firms up.
+- **FR-5.7** Besides picking a winner, the user can say "Both Are Great",
+  "Both Are Bad", or Skip. Great/Bad record absolute quality (used to size the
+  album, not to rank); Skip just moves on.
+- **FR-5.8** The Duel tab shows how many choices the user has made, and a
+  friendly empty state when there aren't yet two candidates to compare.
 
-## 6. Export (wallpaper album)
+## 6. The wallpaper album (Export tab)
 
-- **FR-6.1** Export maintains a Photos album ("Alpenglow") whose membership is
-  exactly the top-N ranked, deduplicated candidates. Syncing adds newcomers
-  and removes photos that dropped out; results are reported as
-  total (+added, −removed).
-- **FR-6.2** Album order maximizes visual variety: greedy max-min feature-print
-  separation against the last 5 placed photos, so consecutive wallpapers look
-  as different as possible (relevant for "rotate in order").
-- **FR-6.3** N is user-adjustable with **no hardcoded maximum** — the ceiling
-  is the library itself ("it may be that all the pictures are awesome").
-- **FR-6.4** The app suggests N automatically:
-  - Primary: verdict calibration — the score threshold that best separates
-    "both great" from "both bad" verdicts (valued at current scores, so the
-    bar moves as the ranker learns); N = deduplicated candidates above the
-    bar, uncapped.
-  - Fallback (fewer than 2 bad verdicts): the knee of the ranked score curve
-    (Kneedle: max deviation from the endpoint chord).
-  - The suggestion is displayed, auto-adopted only initially, and never
-    overrides a manual stepper change.
-- **FR-6.5** The Export tab previews exactly the photos a sync would put in
-  the album, in the same grid style as the Library tab and in the album's
-  actual (diversity) order.
-- **FR-6.6** After every sync, the app reads the album back and verifies the
-  resulting sequence matches the requested order, logging the result.
+- **FR-6.1** The app maintains a Photos album named "Alpenglow" holding
+  exactly the user's top-ranked, de-duplicated photos. Each sync reports the
+  total plus how many were added and removed.
+- **FR-6.2** The album is ordered for visual variety, so that on "rotate in
+  order" consecutive wallpapers look as different as possible. *(Why: avoid
+  samey streaks of the same scene or mood.)*
+- **FR-6.3** The user picks how many photos go in the album, with **no upper
+  limit** — if the whole library is awesome, the whole library can be the
+  album.
+- **FR-6.4** The app suggests a count — where quality drops off in the user's
+  own ranking, informed by their Great/Bad verdicts. The suggestion is
+  displayed, adopted automatically only the first time, and never overrides a
+  manual adjustment.
+- **FR-6.5** Before syncing, the Export tab previews exactly the photos a sync
+  would put in the album, in the album's actual order, in the same grid style
+  as the Library tab.
+- **FR-6.6** After every sync, the app verifies the album really ended up in
+  the requested order.
+- **FR-6.7** The Export tab explains how to point System Settings → Wallpaper
+  at the album for automatic rotation. *(Why: the hand-off to the OS is the
+  product's finish line; the user should never have to guess it.)*
 
-## 7. Persistence & operational requirements
+## 7. Durability
 
-- **FR-7.1** SwiftData store keyed by asset identifier: photo records
-  (metadata, analysis results, feature print, cached preference score),
-  choice records, and verdict records. Choices and verdicts are never pruned —
-  they are sufficient to rebuild the ranker from scratch.
-- **FR-7.2** Every stage (scan, analysis, horizon backfill, iCloud retry) is
-  resumable across app restarts.
-- **FR-7.3** All tunable constants live in one file (`Thresholds.swift`), each
-  with a one-line rationale; several were tuned against the real library
-  (dedupe distance, suggestion caps removed, allowlist contents).
-- **FR-7.4** Signing uses a stable development identity so Photos permission
-  survives rebuilds (TCC binds grants to the code signature).
+- **FR-7.1** All of the user's invested effort — scan results, analysis,
+  choices, verdicts, exclusions — survives quitting, relaunching, and app
+  updates. Long-running work always resumes where it stopped.
+- **FR-7.2** The user's choice and verdict history is never pruned.
+- **FR-7.3** Rebuilding or upgrading the app never requires the user to
+  re-grant Photos access or re-train their taste from scratch.
 
 ## Deferred ideas (explicitly parked)
 
-- Auto-leveling the horizon (via the observation's transform) if the app ever
-  sets wallpapers directly rather than via the album.
-- Using "both great/bad" verdicts as ranker training signal (currently they
+- Auto-leveling the horizon if the app ever sets wallpapers directly rather
+  than via the album.
+- Using "both great/bad" verdicts as ranking training signal (currently they
   only calibrate the album size).

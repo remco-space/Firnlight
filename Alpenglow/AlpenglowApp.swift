@@ -2,6 +2,15 @@ import SwiftUI
 import SwiftData
 import AppKit
 
+/// App entry point.
+///
+/// Platform constraints baked into the whole design: macOS 27+, Apple Silicon,
+/// Swift 6 strict concurrency, SwiftUI + PhotoKit + Vision (modern async struct
+/// API) + SwiftData + Accelerate. No third-party dependencies, no network
+/// calls, no telemetry — everything runs on-device (the product's privacy
+/// promise; see REQUIREMENTS.md). Every stage that touches the store runs as a
+/// @ModelActor actor off the main thread; values crossing actor boundaries are
+/// nonisolated Sendable structs.
 @main
 struct AlpenglowApp: App {
     init() {

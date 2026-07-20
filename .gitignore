@@ -1,0 +1,59 @@
+# ---- macOS ----
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# ---- Xcode ----
+# Build products & derived data
+build/
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# User-specific Xcode state (schemes/breakpoints/window layout)
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Xcode project — keep the project itself, drop only per-user state
+Alpenglow.xcodeproj/project.xcworkspace/xcuserdata/
+Alpenglow.xcodeproj/xcuserdata/
+Alpenglow.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+Alpenglow.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/configuration/
+
+# ---- SourceKit-LSP (xcode-build-server) ----
+# Machine-specific build/index paths; regenerate with `xcode-build-server config`.
+buildServer.json
+.bsp/
+.compile
+
+# ---- Swift Package Manager ----
+.build/
+.swiftpm/xcode/package.xcworkspace/xcuserdata/
+.swiftpm/xcode/xcuserdata/
+Package.resolved
+
+# ---- Python (SwiftLens MCP venv) ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.python-version
+
+# ---- Claude Code (keep shared config, drop local/secret) ----
+.claude/settings.local.json
+.claude/**/*.local.json
+
+# ---- Editor / misc ----
+*.swp
+*~
+.idea/
+.vscode/
