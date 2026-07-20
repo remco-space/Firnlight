@@ -9,6 +9,7 @@ import AppKit
 @Observable
 final class GridModel {
     private(set) var result: FeatureStore.RankedResult?
+    private(set) var ignored: [Candidate] = []
     private(set) var isLoading = false
 
     private var store: FeatureStore?
@@ -24,12 +25,22 @@ final class GridModel {
         isLoading = true
         defer { isLoading = false }
 
-        let store = self.store ?? FeatureStore(modelContainer: container)
-        self.store = store
+        let store = store(container)
         repeat {
             pendingReload = false
             result = try? await store.rankedCandidates()
         } while pendingReload
+    }
+
+    /// Loads the ignored photos for the "Show Ignored" review filter.
+    func loadIgnored(container: ModelContainer) async {
+        ignored = (try? await store(container).ignoredCandidates()) ?? []
+    }
+
+    private func store(_ container: ModelContainer) -> FeatureStore {
+        let store = self.store ?? FeatureStore(modelContainer: container)
+        self.store = store
+        return store
     }
 }
 
@@ -37,31 +48,63 @@ final class GridModel {
 struct CandidateGridView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var model = GridModel()
+    @State private var showingIgnored = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
-            if let result = model.result, !result.candidates.isEmpty {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 220, maximum: 340), spacing: 12)],
-                    spacing: 12
-                ) {
-                    ForEach(result.candidates) { candidate in
-                        ThumbnailCell(candidate: candidate)
-                    }
-                }
-            } else if model.result != nil {
-                ContentUnavailableView(
-                    "No Candidates Yet",
-                    systemImage: "photo.stack",
-                    description: Text("Run the scan and analysis above — accepted photos appear here, best first.")
-                )
+            if showingIgnored {
+                ignoredGrid
+            } else {
+                candidateGrid
             }
         }
-        .task(id: RankingClock.shared.version) {
-            // Reloads on appearance and after every duel choice re-trains the ranker.
-            await model.load(container: modelContext.container)
+        .task(id: "\(showingIgnored)|\(RankingClock.shared.version)") {
+            // Reloads on appearance and after every duel choice re-trains the
+            // ranker; also on toggling the ignored filter.
+            if showingIgnored {
+                await model.loadIgnored(container: modelContext.container)
+            } else {
+                await model.load(container: modelContext.container)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var candidateGrid: some View {
+        if let result = model.result, !result.candidates.isEmpty {
+            grid(result.candidates, ignoredMode: false)
+        } else if model.result != nil {
+            ContentUnavailableView(
+                "No Candidates Yet",
+                systemImage: "photo.stack",
+                description: Text("Run the scan and analysis above — accepted photos appear here, best first.")
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var ignoredGrid: some View {
+        if model.ignored.isEmpty {
+            ContentUnavailableView(
+                "No Ignored Photos",
+                systemImage: "eye.slash",
+                description: Text("Photos you ignore appear here so you can restore them.")
+            )
+        } else {
+            grid(model.ignored, ignoredMode: true)
+        }
+    }
+
+    private func grid(_ candidates: [Candidate], ignoredMode: Bool) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 220, maximum: 340), spacing: 12)],
+            spacing: 12
+        ) {
+            ForEach(candidates) { candidate in
+                ThumbnailCell(candidate: candidate, isIgnoredMode: ignoredMode)
+            }
         }
     }
 
@@ -71,7 +114,7 @@ struct CandidateGridView: View {
             Text("Top Candidates")
                 .font(.headline)
 
-            if let result = model.result {
+            if let result = model.result, !showingIgnored {
                 Text("\(result.candidates.count) of \(result.acceptedCount) accepted · \(result.suppressedCount) near-duplicates hidden")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -79,10 +122,14 @@ struct CandidateGridView: View {
 
             Spacer()
 
-            if model.isLoading {
+            Toggle("Show Ignored", isOn: $showingIgnored)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+
+            if model.isLoading && !showingIgnored {
                 ProgressView()
                     .controlSize(.small)
-            } else {
+            } else if !showingIgnored {
                 Button("Refresh") {
                     Task { await model.load(container: modelContext.container) }
                 }
@@ -95,6 +142,9 @@ struct CandidateGridView: View {
 /// Shared by the Library grid and the Export album preview.
 struct ThumbnailCell: View {
     let candidate: Candidate
+    /// When shown in the Library "Show Ignored" filter: the cell badges an
+    /// ignored marker instead of a score and offers "Un-ignore".
+    var isIgnoredMode = false
     @Environment(\.modelContext) private var modelContext
     @State private var thumbnail: CGImage?
 
@@ -129,7 +179,29 @@ struct ThumbnailCell: View {
                     .padding(5)
             }
         }
-        .overlay(alignment: .bottomTrailing) {
+        .overlay(alignment: .bottomTrailing) { badge }
+        .contextMenu { menu }
+        .task {
+            if thumbnail == nil {
+                thumbnail = await ThumbnailLoader.load(candidate.localIdentifier)
+            }
+        }
+        // One accessibility element per cell: an unlabeled score/badge overlay
+        // is invisible to VoiceOver otherwise.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    @ViewBuilder
+    private var badge: some View {
+        if isIgnoredMode {
+            Image(systemName: "eye.slash.fill")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(4)
+                .background(.ultraThinMaterial, in: Circle())
+                .padding(5)
+        } else {
             // Learned preference (sigmoid of the raw score) once the ranker is
             // live, aesthetics prior before.
             Text(
@@ -142,28 +214,34 @@ struct ThumbnailCell: View {
                 .background(.ultraThinMaterial, in: Capsule())
                 .padding(5)
         }
-        .contextMenu {
-            Button("Open in Photos") {
-                openInPhotos()
-            }
-            Divider()
-            Button("Not Wallpaper Material", role: .destructive) {
-                excludeFromWallpapers()
-            }
+    }
+
+    @ViewBuilder
+    private var menu: some View {
+        Button("Open in Photos") {
+            CandidateActions.openInPhotos(candidate.localIdentifier)
         }
-        .task {
-            if thumbnail == nil {
-                thumbnail = await ThumbnailLoader.load(candidate.localIdentifier)
+        Divider()
+        if isIgnoredMode {
+            Button("Un-ignore") {
+                CandidateActions.unignore(candidate.localIdentifier, in: modelContext)
+            }
+        } else {
+            Button("Not Wallpaper Material") {
+                CandidateActions.markNotWallpaperMaterial(candidate.localIdentifier, in: modelContext)
+            }
+            Button("Ignore This Photo", role: .destructive) {
+                CandidateActions.ignore(candidate.localIdentifier, in: modelContext)
             }
         }
     }
 
-    private func openInPhotos() {
-        CandidateActions.openInPhotos(candidate.localIdentifier)
-    }
-
-    private func excludeFromWallpapers() {
-        CandidateActions.exclude(candidate.localIdentifier, in: modelContext)
+    private var accessibilityLabel: String {
+        if isIgnoredMode {
+            return candidate.isFavorite ? "Ignored photo, favorite" : "Ignored photo"
+        }
+        let score = candidate.displayScore.formatted(.number.precision(.fractionLength(2)))
+        return candidate.isFavorite ? "Score \(score), favorite" : "Score \(score)"
     }
 }
 
@@ -178,14 +256,36 @@ enum CandidateActions {
         NSWorkspace.shared.open(url)
     }
 
-    /// Permanently drops the photo from the grid, duels, and (on next sync)
-    /// the wallpaper album.
-    static func exclude(_ localIdentifier: String, in modelContext: ModelContext) {
+    /// "Not Wallpaper Material": the human judges this a bad wallpaper on face
+    /// value. This does NOT exclude — it records the same absolute bad-quality
+    /// verdict the duel's "Both Are Bad" writes, so the photo stays in the
+    /// ranking and duels but drags the album-size calibration's quality bar.
+    /// (It may still rank high enough to appear, though that's unlikely.)
+    static func markNotWallpaperMaterial(_ localIdentifier: String, in modelContext: ModelContext) {
+        modelContext.insert(VerdictRecord(localIdentifier: localIdentifier, isGood: false, timestamp: Date()))
+        try? modelContext.save()
+        RankingClock.shared.bump() // calibration + dependent views reload
+    }
+
+    /// "Ignore This Photo": fully drop it from the grid, duels, calibration,
+    /// and (on next sync) the wallpaper album. Reviewable/reversible via the
+    /// Library tab's "Show Ignored" filter. Sets the ignored flag (stored as
+    /// `isExcluded` — see PhotoRecord).
+    static func ignore(_ localIdentifier: String, in modelContext: ModelContext) {
+        setIgnored(localIdentifier, true, in: modelContext)
+    }
+
+    /// Reverses `ignore`, returning the photo to the normal pipeline.
+    static func unignore(_ localIdentifier: String, in modelContext: ModelContext) {
+        setIgnored(localIdentifier, false, in: modelContext)
+    }
+
+    private static func setIgnored(_ localIdentifier: String, _ ignored: Bool, in modelContext: ModelContext) {
         let descriptor = FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.localIdentifier == localIdentifier }
         )
         guard let record = try? modelContext.fetch(descriptor).first else { return }
-        record.isExcluded = true
+        record.isExcluded = ignored
         try? modelContext.save()
         RankingClock.shared.bump() // grid + export preview + suggestion reload
     }

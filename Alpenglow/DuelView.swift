@@ -119,15 +119,17 @@ struct DuelView: View {
                     HStack(spacing: 16) {
                         DuelCard(
                             candidate: pair.first,
+                            positionLabel: "Left photo",
                             aspectRatio: Self.screenAspectRatio,
                             action: { model.choose(winner: pair.first, loser: pair.second) },
-                            onExclude: { model.skip() }
+                            onIgnore: { model.skip() }
                         )
                         DuelCard(
                             candidate: pair.second,
+                            positionLabel: "Right photo",
                             aspectRatio: Self.screenAspectRatio,
                             action: { model.choose(winner: pair.second, loser: pair.first) },
-                            onExclude: { model.skip() }
+                            onIgnore: { model.skip() }
                         )
                     }
 
@@ -180,9 +182,12 @@ struct DuelView: View {
 /// One side of the duel: the photo center-cropped to the display's shape, clickable.
 private struct DuelCard: View {
     let candidate: Candidate
+    /// VoiceOver label for the pick button, e.g. "Left photo" / "Right photo".
+    let positionLabel: String
     let aspectRatio: CGFloat
     let action: () -> Void
-    let onExclude: () -> Void
+    /// Advance to a fresh pair once this photo is ignored and gone from the pool.
+    let onIgnore: () -> Void
 
     @Environment(\.modelContext) private var modelContext
     @State private var image: CGImage?
@@ -222,14 +227,21 @@ private struct DuelCard: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(candidate.isFavorite ? "\(positionLabel), favorite" : positionLabel)
+        // Ignore lives in its own button overlaid on (in front of) the pick
+        // button, so its taps aren't swallowed as a duel choice.
+        .overlay(alignment: .topTrailing) { ignoreButton }
         .contextMenu {
             Button("Open in Photos") {
                 CandidateActions.openInPhotos(candidate.localIdentifier)
             }
             Divider()
-            Button("Not Wallpaper Material", role: .destructive) {
-                CandidateActions.exclude(candidate.localIdentifier, in: modelContext)
-                onExclude()
+            Button("Not Wallpaper Material") {
+                // Records a bad verdict; the photo stays in the duel pool.
+                CandidateActions.markNotWallpaperMaterial(candidate.localIdentifier, in: modelContext)
+            }
+            Button("Ignore This Photo", role: .destructive) {
+                ignore()
             }
         }
         .onHover { isHovering = $0 }
@@ -237,5 +249,23 @@ private struct DuelCard: View {
             image = nil
             image = await ThumbnailLoader.load(candidate.localIdentifier, pixelSize: Thresholds.duelImagePixelSize)
         }
+    }
+
+    private var ignoreButton: some View {
+        Button(action: ignore) {
+            Image(systemName: "eye.slash")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(6)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .padding(6)
+        .accessibilityLabel("Ignore \(positionLabel)")
+    }
+
+    private func ignore() {
+        CandidateActions.ignore(candidate.localIdentifier, in: modelContext)
+        onIgnore()
     }
 }

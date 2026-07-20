@@ -71,6 +71,16 @@ actor FeatureStore {
         )
     }
 
+    /// Ignored photos (isExcluded), newest first — for the Library tab's
+    /// "Show Ignored" review filter, where they can be un-ignored.
+    func ignoredCandidates() throws -> [Candidate] {
+        let descriptor = FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate { $0.isExcluded },
+            sortBy: [SortDescriptor(\.creationDate, order: .reverse)]
+        )
+        return try modelContext.fetch(descriptor).map { candidate(for: $0) }
+    }
+
     private func rankedCore(limit: Int) throws -> (kept: [Candidate], vectors: [[Float]], accepted: Int, suppressed: Int) {
         let descriptor = FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.isNature && !$0.isExcluded }
