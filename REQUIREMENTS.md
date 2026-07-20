@@ -22,7 +22,9 @@ The app has three tabs matching the three stages of the journey:
   prompts.)*
 - **FR-1.2** The Library tab reflects the current access state (not yet asked /
   granted / limited / denied / restricted) and offers the right next step for
-  each: a grant button, or a shortcut into Privacy Settings.
+  each: a grant button, or a shortcut into Privacy Settings. When access is
+  limited to a selection of photos, the tab says so plainly and offers a
+  shortcut to change the selection in Photos settings.
 - **FR-1.3** A grant made in System Settings while the app is open takes
   effect when the user returns to the app — no relaunch needed.
 - **FR-1.4** The app only ever adds or removes photos in its own wallpaper
@@ -53,11 +55,18 @@ The app has three tabs matching the three stages of the journey:
   *(Why: fast, and respects the user's edits.)*
 - **FR-2.6** Photos deleted from the library, or edited until they no longer
   qualify (e.g. cropped too small), drop out of the app automatically.
+- **FR-2.7** When Photos access is already granted, launching the app
+  automatically re-syncs: scanning and analysis run to completion in the
+  background, with the same live progress the manual buttons show, without the
+  user clicking anything. Manual re-scan and retry controls remain available
+  at any time. *(Why: the library stays current without the user having to
+  remember to click Scan.)*
 
 ## 3. Analysis (Library tab)
 
 - **FR-3.1** The app examines each candidate on-device to keep only nature
-  photos without people or city scapes without a lot of people; screenshots and utility images are set aside too.
+  photos without people, or cityscapes without a lot of people; screenshots and
+  utility images are set aside too.
 - **FR-3.2** After analysis, the user sees a breakdown of why photos were set
   aside: contains people, utility image, not nature, or waiting on iCloud.
 - **FR-3.3** Analysis can be interrupted at any time; quitting mid-run loses
@@ -85,20 +94,38 @@ The app has three tabs matching the three stages of the journey:
 - **FR-4.5** The grid re-orders itself live as the app learns the user's taste
   from duels.
 - **FR-4.6** Right-clicking any photo anywhere in the app (grid, export
-  preview, duel) offers "Open in Photos" and "Not Wallpaper Material".
-- **FR-4.7** "Not Wallpaper Material" permanently removes a photo from the
-  grid, future duels, the album-size suggestion, and (on next sync) the album.
-  Using it mid-duel advances to a fresh pair.
-- **FR-4.8** Every thumbnail is a clean, fixed-shape tile with the photo
+  preview, duel) offers three actions: "Open in Photos", "Not Wallpaper
+  Material", and "Ignore This Photo".
+- **FR-4.7** "Not Wallpaper Material" records that the human judges this a bad
+  wallpaper on its face — the same absolute bad-quality verdict as "Both Are
+  Bad" in a duel. It does **not** remove the photo: it stays in the grid,
+  future duels, and the album-size suggestion, and the learned ranking may
+  still place it high later (unlikely, but not prevented). Using it mid-duel
+  advances to a fresh pair.
+- **FR-4.8** "Ignore This Photo" fully removes a photo from the grid, future
+  duels, the album-size suggestion, and (on next sync) the album. *(Why: some
+  photos are a genuinely good shot but personally unwanted as a wallpaper —
+  e.g. emotionally triggering — and should disappear entirely rather than
+  merely be marked poor quality.)* Using it mid-duel advances to a fresh pair.
+- **FR-4.9** The Library tab has a "Show Ignored" filter to review ignored
+  photos and un-ignore any of them, returning them to the normal grid, duels,
+  and album sizing.
+- **FR-4.10** Every thumbnail is a clean, fixed-shape tile with the photo
   filling it; clicks and right-clicks land only on the visible tile — a wide
   panorama must not spill over or steal clicks from neighboring cells.
+- **FR-4.11** Switching tabs is instant: each tab's content loads lazily in
+  the background behind a progress placeholder, so no tab — especially
+  Export — blocks the rest of the app while it loads.
 
 ## 5. Learning taste (Duel tab)
 
 - **FR-5.1** The user is shown two photos — "Which makes the better
   wallpaper?" — and clicks the winner. Both are cropped to the shape of the
   user's screen, so the choice judges what the wallpaper would actually look
-  like.
+  like. The learned ranking judges that same screen-shaped crop, not the whole
+  photo, so what the app learns always matches what the user actually judged
+  — important for panoramas, where the crop can look very different from the
+  full photo.
 - **FR-5.2** Ranking is learned entirely from the user's choices. Nothing is
   hard-coded: a low-resolution or tilted photo is penalized only as much as
   the user's own decisions imply.
@@ -120,6 +147,10 @@ The app has three tabs matching the three stages of the journey:
   album, not to rank); Skip just moves on.
 - **FR-5.8** The Duel tab shows how many choices the user has made, and a
   friendly empty state when there aren't yet two candidates to compare.
+- **FR-5.9** Each duel card has its own visible ignore control, for a photo
+  that doesn't belong in consideration at all — distinct from "Both Are Bad",
+  which judges quality rather than removing the photo. Ignoring advances to a
+  fresh pair.
 
 ## 6. The wallpaper album (Export tab)
 
@@ -129,21 +160,28 @@ The app has three tabs matching the three stages of the journey:
 - **FR-6.2** The album is ordered for visual variety, so that on "rotate in
   order" consecutive wallpapers look as different as possible. *(Why: avoid
   samey streaks of the same scene or mood.)*
-- **FR-6.3** The user picks how many photos go in the album, with **no upper
-  limit** — if the whole library is awesome, the whole library can be the
-  album.
+- **FR-6.3** The user picks how many photos go in the album by typing an exact
+  number or nudging a stepper, with **no upper limit** — if the whole library
+  is awesome, the whole library can be the album. The count is clamped to what
+  the library actually has available.
 - **FR-6.4** The app suggests a count — where quality drops off in the user's
   own ranking, informed by their Great/Bad verdicts. The suggestion is
   displayed, adopted automatically only the first time, and never overrides a
   manual adjustment.
 - **FR-6.5** Before syncing, the Export tab previews exactly the photos a sync
   would put in the album, in the album's actual order, in the same grid style
-  as the Library tab.
+  as the Library tab. While the candidate pool is still loading, the tab shows
+  a loading state rather than a fake or default count.
 - **FR-6.6** After every sync, the app verifies the album really ended up in
   the requested order.
 - **FR-6.7** The Export tab explains how to point System Settings → Wallpaper
   at the album for automatic rotation. *(Why: the hand-off to the OS is the
   product's finish line; the user should never have to guess it.)*
+- **FR-6.8** If a sync into the album fails partway through, the app restores
+  the album to its previous contents rather than leaving it empty or the
+  user's live wallpaper rotation broken.
+- **FR-6.9** The album survives being renamed by the user in Photos — a
+  rename never orphans it or spawns a duplicate album on the next sync.
 
 ## 7. Durability
 
