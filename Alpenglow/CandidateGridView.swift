@@ -293,6 +293,12 @@ enum CandidateActions {
 
 /// Fetches display bitmaps from PhotoKit at a requested size.
 nonisolated enum ThumbnailLoader {
+    // @concurrent: the synchronous PHAsset.fetchAssets lookup below would
+    // otherwise run on the calling view's main actor (a plain `nonisolated`
+    // async func doesn't hop off its caller's actor until it actually
+    // suspends) — with a full grid that's one blocking PhotoKit call per
+    // cell on every tab switch.
+    @concurrent
     static func load(_ localIdentifier: String, pixelSize: Int = Thresholds.gridThumbnailPixelSize) async -> CGImage? {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil).firstObject else {
             return nil

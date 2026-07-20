@@ -9,10 +9,13 @@ struct ExportView: View {
     @State private var suggestion: Int?
     @State private var hasAdoptedSuggestion = false
     @State private var preview: [Candidate] = []
-    @State private var totalAccepted = 500
+    /// nil until the first `albumCandidates` load completes; the count/stepper
+    /// bounds have no sane fallback before then, so the controls stay disabled.
+    @State private var totalAccepted: Int?
     @State private var isSyncing = false
     @State private var outcome: WallpaperAlbumSync.Outcome?
     @State private var errorMessage: String?
+    @FocusState private var countFieldFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -20,7 +23,10 @@ struct ExportView: View {
                 controls
                     .frame(maxWidth: 560)
 
-                if !preview.isEmpty {
+                if totalAccepted == nil {
+                    ProgressView("Loading candidates…")
+                        .padding(.top, 40)
+                } else if !preview.isEmpty {
                     LazyVGrid(
                         columns: [GridItem(.adaptive(minimum: 220, maximum: 340), spacing: 12)],
                         spacing: 12
@@ -38,27 +44,42 @@ struct ExportView: View {
             // Recompute when duels re-rank; only auto-adopt the very first time
             // so the stepper never fights a manual choice.
             let store = FeatureStore(modelContainer: modelContext.container)
-            guard let suggested = try? await store.suggestedAlbumSize() else { return }
-            suggestion = suggested
-            if !hasAdoptedSuggestion {
-                count = suggested
-                hasAdoptedSuggestion = true
+            do {
+                let suggested = try await store.suggestedAlbumSize()
+                suggestion = suggested
+                if !hasAdoptedSuggestion {
+                    count = suggested
+                    hasAdoptedSuggestion = true
+                }
+            } catch {
+                errorMessage = error.localizedDescription
             }
         }
         .task(id: "\(count)|\(RankingClock.shared.version)") {
             // The preview shows exactly what a sync would put in the album,
             // in the album's actual (diversity) order.
             let store = FeatureStore(modelContainer: modelContext.container)
-            let result = try? await store.albumCandidates(limit: count)
-            preview = result?.candidates ?? []
-            if let accepted = result?.acceptedCount {
-                totalAccepted = accepted
+            do {
+                let result = try await store.albumCandidates(limit: count)
+                preview = result.candidates
+                totalAccepted = result.acceptedCount
+                // The default count and an adopted suggestion can both exceed
+                // a small library; clamp once the real ceiling is known.
+                if count > result.acceptedCount {
+                    count = max(1, result.acceptedCount)
+                }
+            } catch {
+                errorMessage = error.localizedDescription
             }
         }
     }
 
     private var stepperUpperBound: Int {
-        max(10, ((totalAccepted + 9) / 10) * 10)
+        max(1, totalAccepted ?? count)
+    }
+
+    private func commitCount() {
+        count = min(max(count, 1), stepperUpperBound)
     }
 
     private var controls: some View {
@@ -70,10 +91,24 @@ struct ExportView: View {
                 Text("Keeps a “\(Thresholds.wallpaperAlbumName)” album in Photos in sync with your top-ranked wallpapers, previewed below. In System Settings → Wallpaper, choose “Add Photo Album” and pick it for automatic rotation.")
                     .foregroundStyle(.secondary)
 
-                // No hardcoded ceiling: if every photo is awesome, the album
-                // can be the whole candidate pool.
-                Stepper("Top \(count) photos", value: $count, in: 10...stepperUpperBound, step: 10)
-                    .frame(maxWidth: 240)
+                // Typed entry for an exact count, plus stepper arrows for quick
+                // nudges. No hardcoded ceiling: if every photo is awesome, the
+                // album can be the whole candidate pool.
+                HStack(spacing: 8) {
+                    Text("Top")
+                    TextField("Count", value: $count, format: .number)
+                        .labelsHidden()
+                        .frame(width: 64)
+                        .multilineTextAlignment(.trailing)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($countFieldFocused)
+                        .onSubmit { commitCount() }
+                        .onChange(of: countFieldFocused) { _, focused in
+                            if !focused { commitCount() }
+                        }
+                    Stepper("photos", value: $count, in: 1...stepperUpperBound, step: 10)
+                }
+                .disabled(totalAccepted == nil)
 
                 if let suggestion {
                     HStack(spacing: 8) {
@@ -81,8 +116,11 @@ struct ExportView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                         if suggestion != count {
-                            Button("Use") { count = suggestion }
-                                .controlSize(.small)
+                            Button("Use") {
+                                count = suggestion
+                                commitCount()
+                            }
+                            .controlSize(.small)
                         }
                     }
                 }

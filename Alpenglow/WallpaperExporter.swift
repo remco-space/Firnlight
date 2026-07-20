@@ -10,6 +10,15 @@ import os
 /// strictly limited to album creation and album membership — assets themselves
 /// are never modified or deleted. (The original never-write rule was revised
 /// to album-membership-only with explicit user approval.)
+///
+/// The album is tracked by `localIdentifier`, persisted in `UserDefaults`, not
+/// by title: a title match would orphan the album on user rename (the next
+/// sync would create a duplicate while System Settings keeps rotating the
+/// stale one) and could hijack an unrelated pre-existing "Alpenglow" album.
+/// The stored identifier is looked up first; title match is only a fallback
+/// for the very first sync (or if the stored identifier no longer resolves,
+/// e.g. the album was deleted), and any title match immediately persists its
+/// identifier for next time.
 nonisolated enum WallpaperAlbumSync {
     struct Outcome: Sendable, Equatable {
         var added = 0
@@ -63,8 +72,21 @@ nonisolated enum WallpaperAlbumSync {
                 PHAssetCollectionChangeRequest(for: album)?.removeAssets(current)
             }
         }
-        try await PHPhotoLibrary.shared().performChanges {
-            PHAssetCollectionChangeRequest(for: album)?.addAssets(orderedAssets as NSArray)
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetCollectionChangeRequest(for: album)?.addAssets(orderedAssets as NSArray)
+            }
+        } catch {
+            // The re-add failed after the remove already committed, which
+            // would otherwise leave the album — and the user's live wallpaper
+            // rotation — empty. Best-effort restore what was just removed.
+            log.error("Re-add failed after remove; restoring previous album membership: \(error.localizedDescription, privacy: .public)")
+            if current.count > 0 {
+                try? await PHPhotoLibrary.shared().performChanges {
+                    PHAssetCollectionChangeRequest(for: album)?.addAssets(current)
+                }
+            }
+            throw error
         }
 
         // Verify the album actually ended up in the requested order.
@@ -85,8 +107,21 @@ nonisolated enum WallpaperAlbumSync {
         return outcome
     }
 
+    private static let storedIdentifierDefaultsKey = "WallpaperAlbumSync.albumLocalIdentifier"
+
     private static func fetchOrCreateAlbum(named name: String) async throws -> PHAssetCollection {
-        if let existing = fetchAlbum(named: name) { return existing }
+        if let storedID = UserDefaults.standard.string(forKey: storedIdentifierDefaultsKey),
+           let byIdentifier = fetchAlbum(identifier: storedID) {
+            return byIdentifier
+        }
+
+        // Stored identifier missing or stale (first run, or the album was
+        // deleted): fall back to a title match, adopting its identifier so
+        // subsequent syncs survive a rename.
+        if let byTitle = fetchAlbum(named: name) {
+            UserDefaults.standard.set(byTitle.localIdentifier, forKey: storedIdentifierDefaultsKey)
+            return byTitle
+        }
 
         try await PHPhotoLibrary.shared().performChanges {
             _ = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: name)
@@ -94,8 +129,15 @@ nonisolated enum WallpaperAlbumSync {
         guard let created = fetchAlbum(named: name) else {
             throw SyncError.albumCreationFailed
         }
+        UserDefaults.standard.set(created.localIdentifier, forKey: storedIdentifierDefaultsKey)
         log.info("Created album “\(name, privacy: .public)”")
         return created
+    }
+
+    private static func fetchAlbum(identifier: String) -> PHAssetCollection? {
+        PHAssetCollection
+            .fetchAssetCollections(withLocalIdentifiers: [identifier], options: nil)
+            .firstObject
     }
 
     private static func fetchAlbum(named name: String) -> PHAssetCollection? {

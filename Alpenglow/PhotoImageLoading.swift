@@ -23,6 +23,11 @@ nonisolated enum PhotoImageLoading {
         }
     }
 
+    // @concurrent: forces this onto the background concurrent executor even
+    // when called from a @MainActor view's `.task` — otherwise the call runs
+    // synchronously on the caller's actor up to its first suspension point,
+    // which for a plain `nonisolated` async func means the main actor.
+    @concurrent
     static func image(
         for asset: PHAsset,
         targetSize: CGSize,
