@@ -1,0 +1,233 @@
+import AppKit
+import Foundation
+import Photos
+import SwiftData
+import os
+
+/// Aggregate analysis counters across the whole store.
+/// `nonisolated`: plain value type, produced inside the AnalysisQueue actor.
+nonisolated struct AnalysisStatistics: Sendable, Equatable {
+    var total = 0
+    var pending = 0
+    var accepted = 0
+    var utility = 0
+    var people = 0
+    var notNature = 0
+    var skipped = 0
+    var horizonPending = 0
+
+    var analyzed: Int { total - pending }
+
+    /// Fully analyzed — deferred iCloud records don't count until they're done.
+    var completed: Int { total - pending - skipped }
+}
+
+/// Resumable Vision pipeline over the candidate store.
+///
+/// Processes records in batches of `Thresholds.analysisBatchSize`, saving after
+/// each batch, so killing the app mid-analysis loses at most one batch. Pending
+/// work is simply every record with `analysisVersion < currentAnalysisVersion`.
+@ModelActor
+actor AnalysisQueue {
+    private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "AnalysisQueue")
+
+    private enum ItemResult: Sendable {
+        case analyzed(String, ImageAnalyzer.Outcome)
+        case skipped(String)
+        case horizonMeasured(String, Float?)
+    }
+
+    /// Deferred (iCloud-only) records already retried this run session, so a
+    /// record whose download keeps failing can't loop forever.
+    private var attemptedNetworkRetries: Set<String> = []
+
+    /// Starts a fresh run session, making deferred records eligible for retry again.
+    func beginSession() {
+        attemptedNetworkRetries.removeAll()
+    }
+
+    /// Analyzes the next batch and saves. Returns the number of records
+    /// processed, or nil when nothing is left to do this session.
+    ///
+    /// Two passes: first every pending record, local resources only. Once none
+    /// are pending, deferred iCloud-only records are retried with network
+    /// downloads allowed — so local photos always finish first.
+    func processNextBatch() async throws -> Int? {
+        let version = Thresholds.currentAnalysisVersion
+        var descriptor = FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate { $0.analysisVersion < version }
+        )
+        descriptor.fetchLimit = Thresholds.analysisBatchSize
+        var batch = try modelContext.fetch(descriptor)
+        var allowNetwork = false
+
+        if batch.isEmpty {
+            let attempted = Array(attemptedNetworkRetries)
+            var retryDescriptor = FetchDescriptor<PhotoRecord>(
+                predicate: #Predicate { $0.isSkipped && !attempted.contains($0.localIdentifier) }
+            )
+            retryDescriptor.fetchLimit = Thresholds.analysisBatchSize
+            batch = try modelContext.fetch(retryDescriptor)
+            allowNetwork = true
+            attemptedNetworkRetries.formUnion(batch.map(\.localIdentifier))
+        }
+
+        // Third pass: horizon backfill for accepted photos analyzed before the
+        // horizon prior existed. New analyses measure it inline.
+        if batch.isEmpty {
+            return try await processHorizonBatch()
+        }
+        guard !batch.isEmpty else { return nil }
+
+        let byIdentifier = Dictionary(uniqueKeysWithValues: batch.map { ($0.localIdentifier, $0) })
+
+        // Vision work runs outside the actor; only Sendable values cross the boundary.
+        var results: [ItemResult] = []
+        results.reserveCapacity(batch.count)
+        let useNetwork = allowNetwork
+        try await withThrowingTaskGroup(of: ItemResult.self) { group in
+            var pending = batch.map(\.localIdentifier).makeIterator()
+            for _ in 0..<Thresholds.analysisConcurrency {
+                if let id = pending.next() {
+                    group.addTask { await Self.analyzeAsset(id, allowNetwork: useNetwork) }
+                }
+            }
+            while let result = try await group.next() {
+                results.append(result)
+                if let id = pending.next() {
+                    group.addTask { await Self.analyzeAsset(id, allowNetwork: useNetwork) }
+                }
+            }
+        }
+
+        for result in results {
+            switch result {
+            case .analyzed(let id, let outcome):
+                guard let record = byIdentifier[id] else { continue }
+                record.isUtility = outcome.isUtility
+                record.hasPeople = outcome.hasPeople
+                record.isNature = outcome.isNature
+                record.aestheticsScore = outcome.aestheticsScore
+                record.featurePrint = outcome.featurePrint
+                record.horizonAngleDegrees = outcome.horizonAngleDegrees
+                record.horizonMeasured = true
+                record.isSkipped = false
+                record.analysisVersion = version
+                record.analyzedAt = Date()
+            case .skipped(let id):
+                guard let record = byIdentifier[id] else { continue }
+                record.isSkipped = true
+                record.analysisVersion = version
+                record.analyzedAt = Date()
+            case .horizonMeasured:
+                continue // handled in processHorizonBatch
+            }
+        }
+        try modelContext.save()
+        return results.count
+    }
+
+    /// Measures horizon tilt for accepted records that predate the horizon
+    /// prior. Returns nil when none remain.
+    private func processHorizonBatch() async throws -> Int? {
+        var descriptor = FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate { $0.isNature && !$0.horizonMeasured }
+        )
+        descriptor.fetchLimit = Thresholds.analysisBatchSize
+        let batch = try modelContext.fetch(descriptor)
+        guard !batch.isEmpty else { return nil }
+
+        let byIdentifier = Dictionary(uniqueKeysWithValues: batch.map { ($0.localIdentifier, $0) })
+
+        var results: [ItemResult] = []
+        results.reserveCapacity(batch.count)
+        try await withThrowingTaskGroup(of: ItemResult.self) { group in
+            var pending = batch.map(\.localIdentifier).makeIterator()
+            for _ in 0..<Thresholds.analysisConcurrency {
+                if let id = pending.next() {
+                    group.addTask { await Self.measureHorizonForAsset(id) }
+                }
+            }
+            while let result = try await group.next() {
+                results.append(result)
+                if let id = pending.next() {
+                    group.addTask { await Self.measureHorizonForAsset(id) }
+                }
+            }
+        }
+
+        for case .horizonMeasured(let id, let angle) in results {
+            guard let record = byIdentifier[id] else { continue }
+            record.horizonAngleDegrees = angle
+            record.horizonMeasured = true
+        }
+        try modelContext.save()
+        return results.count
+    }
+
+    private static func measureHorizonForAsset(_ identifier: String) async -> ItemResult {
+        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject,
+              let image = await analysisBitmap(for: asset, allowNetwork: true) else {
+            // Unmeasurable now; mark measured with no angle so the pass completes.
+            return .horizonMeasured(identifier, nil)
+        }
+        let angle = (try? await ImageAnalyzer.measureHorizon(image)) ?? nil
+        return .horizonMeasured(identifier, angle)
+    }
+
+    func statistics() throws -> AnalysisStatistics {
+        let version = Thresholds.currentAnalysisVersion
+        func count(_ predicate: Predicate<PhotoRecord>) throws -> Int {
+            try modelContext.fetchCount(FetchDescriptor(predicate: predicate))
+        }
+        var stats = AnalysisStatistics()
+        stats.total = try modelContext.fetchCount(FetchDescriptor<PhotoRecord>())
+        stats.pending = try count(#Predicate { $0.analysisVersion < version })
+        stats.accepted = try count(#Predicate { $0.isNature })
+        stats.utility = try count(#Predicate { $0.isUtility })
+        stats.people = try count(#Predicate { $0.hasPeople })
+        stats.notNature = try count(#Predicate {
+            $0.analysisVersion == version && !$0.isNature && !$0.isUtility && !$0.hasPeople && !$0.isSkipped
+        })
+        stats.skipped = try count(#Predicate { $0.isSkipped })
+        stats.horizonPending = try count(#Predicate { $0.isNature && !$0.horizonMeasured })
+        return stats
+    }
+
+    // MARK: Per-asset work (off-actor; no model objects cross this boundary)
+
+    private static func analyzeAsset(_ identifier: String, allowNetwork: Bool) async -> ItemResult {
+        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject,
+              let image = await analysisBitmap(for: asset, allowNetwork: allowNetwork) else {
+            return .skipped(identifier)
+        }
+        do {
+            return .analyzed(identifier, try await ImageAnalyzer.analyze(image))
+        } catch {
+            log.error("Vision analysis failed for \(identifier, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return .skipped(identifier)
+        }
+    }
+
+    /// Requests a ≤1024 px analysis bitmap. In the local pass, iCloud-only
+    /// originals return nil and the record is deferred; the retry pass allows
+    /// network downloads so deferred photos are analyzed after all local ones.
+    private static func analysisBitmap(for asset: PHAsset, allowNetwork: Bool) async -> CGImage? {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .highQualityFormat
+        options.isNetworkAccessAllowed = allowNetwork
+        options.resizeMode = .fast
+        let side = CGFloat(Thresholds.analysisPixelSize)
+
+        return await withCheckedContinuation { continuation in
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: CGSize(width: side, height: side),
+                contentMode: .aspectFit,
+                options: options
+            ) { image, _ in
+                continuation.resume(returning: image?.cgImage(forProposedRect: nil, context: nil, hints: nil))
+            }
+        }
+    }
+}
