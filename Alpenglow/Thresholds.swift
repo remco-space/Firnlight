@@ -64,10 +64,18 @@ nonisolated enum Thresholds {
     /// seeding, learning rate semantics). A mismatch with the stored weights
     /// file triggers an automatic rebuild: re-seed from current favorites,
     /// replay all choices, re-rank everything.
-    static let rankerAlgorithmVersion = 3 // v3: resolution feature added
+    static let rankerAlgorithmVersion = 4 // v4: raw-score cache
 
     /// SGD learning rate for the online Bradley–Terry ranker.
     static let rankerLearningRate: Float = 0.5
+
+    /// L2 weight-decay factor applied before each SGD step; bounds weight growth
+    /// so raw scores stay in a sane range and one duel can't swing the ranking.
+    static let rankerWeightDecay: Float = 0.01
+
+    /// Fixed seed for the deterministic RNG used when seeding fresh weights from
+    /// favorites, so an identical choice history rebuilds the same ranking.
+    static let rankerSeedRNG: UInt64 = 0x616C70656E676C6F // "alpenglo"
 
     /// Without verdict calibration, duels draw from this top fraction of all
     /// candidates — wide, so "both bad" verdicts can find the quality floor.
@@ -78,7 +86,9 @@ nonisolated enum Thresholds {
 
     /// With calibration, the duel pool is everything scoring above
     /// (verdict bar − this margin): export candidates plus a probing band below.
-    static let duelPoolScoreMargin: Float = 0.1
+    /// Raw-score units: the sigmoid slope at the center is ¼, so this 0.5 raw
+    /// margin ≈ the old 0.1 sigmoid margin.
+    static let duelPoolScoreMargin: Float = 0.5
 
     /// Random pair samples per duel; the closest-scored valid pair wins (uncertainty sampling).
     static let duelPairSamples = 32

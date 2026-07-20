@@ -23,8 +23,9 @@ final class PhotoRecord {
     /// Raw Float array from GenerateImageFeaturePrintRequest; nil until analyzed.
     var featurePrint: Data?
 
-    /// Denormalized cache of the ranker's current score for this photo.
-    var preferenceScore: Float
+    /// Denormalized cache of the ranker's raw (pre-sigmoid) score for this
+    /// photo; nil until the ranker has scored it.
+    var preferenceScore: Float?
     var analyzedAt: Date?
 
     /// True when analysis couldn't run (e.g. iCloud-only original with no local bitmap).
@@ -55,7 +56,7 @@ final class PhotoRecord {
         self.isUtility = false
         self.aestheticsScore = 0
         self.featurePrint = nil
-        self.preferenceScore = 0
+        self.preferenceScore = nil
         self.analyzedAt = nil
         self.isSkipped = false
         self.isFavorite = isFavorite

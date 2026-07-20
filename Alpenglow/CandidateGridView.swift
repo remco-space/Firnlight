@@ -12,16 +12,24 @@ final class GridModel {
     private(set) var isLoading = false
 
     private var store: FeatureStore?
+    private var pendingReload = false
 
     func load(container: ModelContainer) async {
+        // Coalesce overlapping requests: while a load runs, remember that one
+        // more is wanted and run it once at the end instead of queuing each.
+        if isLoading {
+            pendingReload = true
+            return
+        }
         isLoading = true
         defer { isLoading = false }
 
         let store = self.store ?? FeatureStore(modelContainer: container)
         self.store = store
-        // FeatureStore is an actor, so overlapping loads serialize; the last
-        // caller's assignment wins, which matches the freshest ranking.
-        result = try? await store.rankedCandidates()
+        repeat {
+            pendingReload = false
+            result = try? await store.rankedCandidates()
+        } while pendingReload
     }
 }
 
@@ -122,9 +130,10 @@ struct ThumbnailCell: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            // Learned preference once the ranker is live, aesthetics prior before.
+            // Learned preference (sigmoid of the raw score) once the ranker is
+            // live, aesthetics prior before.
             Text(
-                candidate.preferenceScore != 0 ? candidate.preferenceScore : candidate.aestheticsScore,
+                candidate.displayScore,
                 format: .number.precision(.fractionLength(2))
             )
                 .font(.caption2.monospacedDigit())

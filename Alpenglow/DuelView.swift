@@ -31,11 +31,31 @@ final class DuelModel {
         defer { isPreparing = false }
 
         let ranker = PreferenceRanker(modelContainer: container)
-        self.ranker = ranker
         do {
             try await ranker.prepare()
+            // Assign only after a clean prepare, so a thrown error leaves ranker
+            // nil and a retry actually re-runs instead of no-opping.
+            self.ranker = ranker
             choiceCount = await ranker.choiceCount
             pair = await ranker.nextPair()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    /// Refreshes the ranker's candidate snapshot (new scans, exclusions) so the
+    /// duel pool isn't stale until relaunch. Advances if the visible pair now
+    /// references a photo that's gone.
+    func reload(container: ModelContainer) async {
+        guard let ranker else {
+            await start(container: container)
+            return
+        }
+        do {
+            try await ranker.reload()
+            if let pair, await !ranker.contains(pair) {
+                self.pair = await ranker.nextPair()
+            }
         } catch {
             lastError = error.localizedDescription
         }
@@ -142,8 +162,10 @@ struct DuelView: View {
                 )
             }
         }
-        .task {
-            await model.start(container: modelContext.container)
+        .task(id: RankingClock.shared.version) {
+            // Prepares on first appearance; on later re-rank/exclusion bumps,
+            // reloads the candidate snapshot so new/excluded photos show up.
+            await model.reload(container: modelContext.container)
         }
     }
 

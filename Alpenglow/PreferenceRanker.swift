@@ -9,8 +9,8 @@ import os
 /// (levelness and resolution weights are learned from duels, never hard-coded —
 /// low-resolution or tilted photos are penalized only as much as choices imply).
 /// Choice model: P(winner beats loser) = sigmoid(s_winner − s_loser)
-/// One SGD step per recorded choice; `PhotoRecord.preferenceScore` caches
-/// sigmoid(s) after every update so the grid can re-rank live.
+/// One SGD step per recorded choice; `PhotoRecord.preferenceScore` caches the
+/// raw score s after every update so the grid can re-rank live.
 ///
 /// Weights persist as JSON in Application Support. If the file is missing,
 /// weights are rebuilt by seeding from Photos favorites (pseudo-choices:
@@ -21,6 +21,21 @@ actor PreferenceRanker {
     struct DuelPair: Sendable, Equatable {
         let first: Candidate
         let second: Candidate
+    }
+
+    /// Deterministic RNG (SplitMix64) so seeding a fresh weights file from the
+    /// same favorites + choice history rebuilds the exact same ranking — the
+    /// choices must be sufficient to reproduce it (FR-7.1).
+    private struct SplitMix64: RandomNumberGenerator {
+        private var state: UInt64
+        init(seed: UInt64) { state = seed }
+        mutating func next() -> UInt64 {
+            state &+= 0x9E3779B97F4A7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+            z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+            return z ^ (z >> 31)
+        }
     }
 
     private struct Entry {
@@ -67,24 +82,7 @@ actor PreferenceRanker {
     func prepare() throws {
         guard !isPrepared else { return }
 
-        let records = try modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature && !$0.isExcluded }))
-        let minWidth = Float(Thresholds.minimumCandidatePixelWidth)
-        let resolutionRange = log2(Thresholds.resolutionFullScoreWidth / minWidth)
-        entries = records.compactMap { record in
-            guard let data = record.featurePrint else { return nil }
-            let tilt = abs(record.horizonAngleDegrees ?? 0)
-            let resolution = min(1, max(0, log2(Float(record.pixelWidth) / minWidth) / resolutionRange))
-            return Entry(
-                id: record.localIdentifier,
-                vector: data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) },
-                aesthetics: record.aestheticsScore,
-                isFavorite: record.isFavorite,
-                levelness: 1 - min(tilt, Thresholds.horizonMaxTiltDegrees) / Thresholds.horizonMaxTiltDegrees,
-                tiltDegrees: tilt,
-                resolution: resolution
-            )
-        }
-        indexByID = Dictionary(uniqueKeysWithValues: entries.enumerated().map { ($0.element.id, $0.offset) })
+        loadEntries()
 
         let choices = try modelContext.fetch(
             FetchDescriptor<ChoiceRecord>(sortBy: [SortDescriptor(\.timestamp)])
@@ -121,6 +119,45 @@ actor PreferenceRanker {
         isPrepared = true
     }
 
+    /// Refreshes the candidate snapshot from the store (new scans, exclusions)
+    /// and rescores against the already-loaded weights, so the duel screen sees
+    /// current photos without a relaunch. Prepares from scratch if not yet done.
+    func reload() throws {
+        guard isPrepared else { try prepare(); return }
+        loadEntries()
+        recomputeScores()
+        try writePreferenceCache()
+    }
+
+    /// True while both photos of a served pair are still live candidates.
+    func contains(_ pair: DuelPair) -> Bool {
+        indexByID[pair.first.localIdentifier] != nil
+            && indexByID[pair.second.localIdentifier] != nil
+    }
+
+    /// Fetches the current nature, non-excluded candidates into `entries` and
+    /// rebuilds `indexByID`. Weights are untouched.
+    private func loadEntries() {
+        let records = (try? modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature && !$0.isExcluded }))) ?? []
+        let minWidth = Float(Thresholds.minimumCandidatePixelWidth)
+        let resolutionRange = log2(Thresholds.resolutionFullScoreWidth / minWidth)
+        entries = records.compactMap { record in
+            guard let data = record.featurePrint else { return nil }
+            let tilt = abs(record.horizonAngleDegrees ?? 0)
+            let resolution = min(1, max(0, log2(Float(record.pixelWidth) / minWidth) / resolutionRange))
+            return Entry(
+                id: record.localIdentifier,
+                vector: data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) },
+                aesthetics: record.aestheticsScore,
+                isFavorite: record.isFavorite,
+                levelness: 1 - min(tilt, Thresholds.horizonMaxTiltDegrees) / Thresholds.horizonMaxTiltDegrees,
+                tiltDegrees: tilt,
+                resolution: resolution
+            )
+        }
+        indexByID = Dictionary(uniqueKeysWithValues: entries.enumerated().map { ($0.element.id, $0.offset) })
+    }
+
     // MARK: Duels
 
     /// Uncertainty sampling: from the adaptive duel pool, pick the
@@ -148,10 +185,19 @@ actor PreferenceRanker {
             }
         }
 
-        // All samples judged or near-duplicates: fall back to any distinct pair.
+        // All samples judged or near-duplicates: fall back to the first
+        // still-unjudged pair. Re-serving a judged pair would double-count its
+        // SGD step. If every pair is judged, return nil (view has an empty state).
         if best == nil {
             let shuffled = pool.shuffled()
-            best = (shuffled[0], shuffled[1], 0)
+            outer: for i in shuffled.indices {
+                for j in shuffled.indices[(i + 1)...] {
+                    if !judgedPairs.contains(Self.pairKey(shuffled[i].id, shuffled[j].id)) {
+                        best = (shuffled[i], shuffled[j], 0)
+                        break outer
+                    }
+                }
+            }
         }
 
         guard let best else { return nil }
@@ -173,12 +219,12 @@ actor PreferenceRanker {
             return Array(sorted.prefix(fractionCount))
         }
         let cut = bar - Thresholds.duelPoolScoreMargin
-        let aboveCut = sorted.prefix { Self.sigmoid($0.score) > cut }.count
+        let aboveCut = sorted.prefix { $0.score > cut }.count
         let bounded = min(max(aboveCut, Thresholds.duelPoolMinimum), fractionCount)
         return Array(sorted.prefix(bounded))
     }
 
-    /// The quality bar from "both great"/"both bad" verdicts: the preference
+    /// The quality bar from "both great"/"both bad" verdicts: the raw preference
     /// score that best separates good from bad. Nil until enough bad verdicts.
     private func verdictBar() throws -> Float? {
         let verdicts = try modelContext.fetch(
@@ -186,28 +232,17 @@ actor PreferenceRanker {
         )
         guard !verdicts.isEmpty else { return nil }
 
-        var latest: [String: Bool] = [:]
-        for verdict in verdicts { latest[verdict.localIdentifier] = verdict.isGood }
-
+        let latest = VerdictCalibration.latestByPhoto(verdicts)
         var good: [Float] = []
         var bad: [Float] = []
         for (id, isGood) in latest {
             guard let index = indexByID[id] else { continue }
-            let score = Self.sigmoid(entries[index].score)
+            let score = entries[index].score
             if isGood { good.append(score) } else { bad.append(score) }
         }
         guard bad.count >= Thresholds.albumCalibrationMinimumBadVerdicts else { return nil }
 
-        var bestThreshold = bad.max() ?? 0
-        var bestErrors = Int.max
-        for threshold in (good + bad).sorted() {
-            let errors = good.count(where: { $0 <= threshold }) + bad.count(where: { $0 > threshold })
-            if errors <= bestErrors {
-                bestErrors = errors
-                bestThreshold = threshold
-            }
-        }
-        return bestThreshold
+        return VerdictCalibration.optimalSplitThreshold(good: good, bad: bad)
     }
 
     /// Records absolute quality verdicts ("both great" / "both bad") for the
@@ -240,8 +275,15 @@ actor PreferenceRanker {
         guard let w = indexByID[winnerID], let l = indexByID[loserID] else { return }
         let winner = entries[w], loser = entries[l]
 
-        let probability = Self.sigmoid(rawScore(winner) - rawScore(loser))
+        let probability = Candidate.sigmoid(rawScore(winner) - rawScore(loser))
         let gradient = (1 - probability) * Thresholds.rankerLearningRate
+
+        // L2 weight decay before the gradient step, bounding weight growth.
+        let decay = 1 - Thresholds.rankerLearningRate * Thresholds.rankerWeightDecay
+        weights.feature = vDSP.multiply(decay, weights.feature)
+        weights.aesthetics *= decay
+        weights.horizon *= decay
+        weights.resolution *= decay
 
         let difference = vDSP.subtract(winner.vector, loser.vector)
         weights.feature = vDSP.add(weights.feature, vDSP.multiply(gradient, difference))
@@ -258,11 +300,13 @@ actor PreferenceRanker {
             return
         }
 
+        // Deterministic RNG so an identical rebuild reproduces the same seeding.
+        var rng = SplitMix64(seed: Thresholds.rankerSeedRNG)
         var pairs = 0
-        outer: for favorite in favorites.shuffled() {
+        outer: for favorite in favorites.shuffled(using: &rng) {
             for _ in 0..<Thresholds.favoriteSeedOpponents {
                 guard pairs < Thresholds.favoriteSeedMaxPairs else { break outer }
-                sgdStep(winnerID: entries[favorite].id, loserID: entries[others.randomElement()!].id)
+                sgdStep(winnerID: entries[favorite].id, loserID: entries[others.randomElement(using: &rng)!].id)
                 pairs += 1
             }
         }
@@ -283,12 +327,12 @@ actor PreferenceRanker {
         }
     }
 
-    /// Denormalizes sigmoid(score) into PhotoRecord.preferenceScore and saves.
+    /// Denormalizes the raw score into PhotoRecord.preferenceScore and saves.
     private func writePreferenceCache() throws {
         let records = try modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature && !$0.isExcluded }))
         for record in records {
             guard let index = indexByID[record.localIdentifier] else { continue }
-            let score = Self.sigmoid(entries[index].score)
+            let score = entries[index].score
             if record.preferenceScore != score {
                 record.preferenceScore = score
             }
@@ -322,16 +366,12 @@ actor PreferenceRanker {
             localIdentifier: entry.id,
             aestheticsScore: entry.aesthetics,
             isFavorite: entry.isFavorite,
-            preferenceScore: Self.sigmoid(entry.score),
+            preferenceScore: entry.score,
             tiltDegrees: entry.tiltDegrees
         )
     }
 
     private static func pairKey(_ a: String, _ b: String) -> String {
         a < b ? "\(a)|\(b)" : "\(b)|\(a)"
-    }
-
-    private static func sigmoid(_ z: Float) -> Float {
-        1 / (1 + exp(-max(-30, min(30, z))))
     }
 }

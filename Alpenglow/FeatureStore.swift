@@ -8,11 +8,23 @@ nonisolated struct Candidate: Sendable, Identifiable, Equatable {
     let localIdentifier: String
     let aestheticsScore: Float
     let isFavorite: Bool
-    let preferenceScore: Float
+    /// Raw (pre-sigmoid) preference score; nil until the ranker has scored it.
+    let preferenceScore: Float?
     /// Horizon tilt in degrees; 0 when level or no horizon detected.
     let tiltDegrees: Float
 
     var id: String { localIdentifier }
+
+    /// 0–1 number for the UI: sigmoid of the raw preference score once the
+    /// ranker has run, else the aesthetics prior.
+    var displayScore: Float {
+        preferenceScore.map(Candidate.sigmoid) ?? aestheticsScore
+    }
+
+    /// Logistic squash shared by the ranker and the display layer.
+    static func sigmoid(_ z: Float) -> Float {
+        1 / (1 + exp(-max(-30, min(30, z))))
+    }
 }
 
 /// SwiftData queries for the ranking pipeline.
@@ -58,14 +70,12 @@ actor FeatureStore {
         )
         let fetched = try modelContext.fetch(descriptor)
 
-        // Once the preference ranker has written its cache, rank by learned
-        // preference (favorites influence it via seeding). Until then, fall
-        // back to aesthetics plus the favorite prior.
-        let usePreference = fetched.contains { $0.preferenceScore != 0 }
+        // Rank by the learned raw preference score once the ranker has scored a
+        // record; until then fall back to aesthetics plus the favorite prior.
+        // (Raw scores and the fallback are different scales, but unscored
+        // records only exist until the ranker first runs.)
         func rankScore(_ record: PhotoRecord) -> Float {
-            usePreference
-                ? record.preferenceScore
-                : record.aestheticsScore + (record.isFavorite ? Thresholds.favoriteRankBoost : 0)
+            record.preferenceScore ?? (record.aestheticsScore + (record.isFavorite ? Thresholds.favoriteRankBoost : 0))
         }
         let records = fetched.sorted { rankScore($0) > rankScore($1) }
 
@@ -75,8 +85,11 @@ actor FeatureStore {
         var suppressed = 0
 
         // The walk continues past `limit` so a favorite ranked below the
-        // cutoff can still claim its duplicate cluster's slot.
+        // cutoff can still claim its duplicate cluster's slot. Non-favorites
+        // past the limit can't append or matter, so skip them before the
+        // costly vector decode + distance check.
         for record in records {
+            if kept.count >= limit && !record.isFavorite { continue }
             guard let data = record.featurePrint else { continue }
             let vector = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
 
@@ -147,7 +160,7 @@ actor FeatureStore {
         }
 
         let candidates = try rankedCandidates(limit: Thresholds.albumSuggestionScanLimit).candidates
-        let scores = candidates.map { $0.preferenceScore != 0 ? $0.preferenceScore : $0.aestheticsScore }
+        let scores = candidates.map { $0.displayScore }
         guard scores.count > Thresholds.albumSuggestionMinimum else {
             return max(1, min(scores.count, Thresholds.defaultWallpaperCount))
         }
@@ -161,9 +174,8 @@ actor FeatureStore {
         )
         guard !verdicts.isEmpty else { return nil }
 
-        // Latest verdict per photo wins, valued at the photo's current score.
-        var latest: [String: Bool] = [:]
-        for verdict in verdicts { latest[verdict.localIdentifier] = verdict.isGood }
+        // Latest verdict per photo wins, valued at the photo's current raw score.
+        let latest = VerdictCalibration.latestByPhoto(verdicts)
         let ids = Array(latest.keys)
         let records = try modelContext.fetch(
             FetchDescriptor<PhotoRecord>(predicate: #Predicate { ids.contains($0.localIdentifier) })
@@ -171,25 +183,17 @@ actor FeatureStore {
         var good: [Float] = []
         var bad: [Float] = []
         for record in records {
+            guard let score = record.preferenceScore else { continue }
             if latest[record.localIdentifier] == true {
-                good.append(record.preferenceScore)
+                good.append(score)
             } else {
-                bad.append(record.preferenceScore)
+                bad.append(score)
             }
         }
         guard bad.count >= Thresholds.albumCalibrationMinimumBadVerdicts else { return nil }
 
-        // Optimal 1-D split: minimize (goods below t) + (bads above t);
-        // ascending scan means ties resolve to the higher (stricter) threshold.
-        var bestThreshold = bad.max() ?? 0
-        var bestErrors = Int.max
-        for threshold in (good + bad).sorted() {
-            let errors = good.count(where: { $0 <= threshold }) + bad.count(where: { $0 > threshold })
-            if errors <= bestErrors {
-                bestErrors = errors
-                bestThreshold = threshold
-            }
-        }
+        let bestThreshold = VerdictCalibration.optimalSplitThreshold(good: good, bad: bad)
+        let bestErrors = good.count(where: { $0 <= bestThreshold }) + bad.count(where: { $0 > bestThreshold })
 
         let above = try dedupedCount(aboveBar: bestThreshold)
         let clamped = max(Thresholds.albumSuggestionMinimum, above)
@@ -202,12 +206,13 @@ actor FeatureStore {
     /// and stops at the bar, so cost scales with album size, not library size.
     private func dedupedCount(aboveBar bar: Float) throws -> Int {
         let fetched = try modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature && !$0.isExcluded }))
-        let records = fetched.sorted { $0.preferenceScore > $1.preferenceScore }
+        // Unscored records sort to the bottom and break the walk at the bar.
+        let records = fetched.sorted { ($0.preferenceScore ?? -.greatestFiniteMagnitude) > ($1.preferenceScore ?? -.greatestFiniteMagnitude) }
         let thresholdSquared = Thresholds.nearDuplicateDistance * Thresholds.nearDuplicateDistance
 
         var keptVectors: [[Float]] = []
         for record in records {
-            guard record.preferenceScore > bar else { break }
+            guard let score = record.preferenceScore, score > bar else { break }
             guard let data = record.featurePrint else { continue }
             let vector = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
             let isNearDuplicate = keptVectors.contains {
@@ -266,6 +271,7 @@ actor FeatureStore {
             isFavorite: record.isFavorite,
             preferenceScore: record.preferenceScore,
             tiltDegrees: abs(record.horizonAngleDegrees ?? 0)
+            // preferenceScore is the record's raw cached score (nil = unscored).
         )
     }
 }
