@@ -119,7 +119,9 @@ struct AnalysisView: View {
             statRow("checkmark.seal", .green, "Wallpaper candidates", stats.accepted)
             statRow("person.2.slash", .secondary, "People", stats.people)
             statRow("doc.viewfinder", .secondary, "Utility images", stats.utility)
-            statRow("leaf.arrow.trianglehead.clockwise", .secondary, "Not nature", stats.notNature)
+            // Plain leaf: the row label carries the negation (no leaf.slash
+            // exists, and the arrow variant is the recycling symbol).
+            statRow("leaf", .secondary, "Not nature", stats.notNature)
             statRow("icloud.and.arrow.down", .orange, "iCloud (deferred)", stats.skipped)
         }
         .font(.callout.monospacedDigit())
