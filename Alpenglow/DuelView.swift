@@ -97,12 +97,18 @@ struct DuelView: View {
                         .font(.title3.bold())
 
                     HStack(spacing: 16) {
-                        DuelCard(candidate: pair.first, aspectRatio: Self.screenAspectRatio) {
-                            model.choose(winner: pair.first, loser: pair.second)
-                        }
-                        DuelCard(candidate: pair.second, aspectRatio: Self.screenAspectRatio) {
-                            model.choose(winner: pair.second, loser: pair.first)
-                        }
+                        DuelCard(
+                            candidate: pair.first,
+                            aspectRatio: Self.screenAspectRatio,
+                            action: { model.choose(winner: pair.first, loser: pair.second) },
+                            onExclude: { model.skip() }
+                        )
+                        DuelCard(
+                            candidate: pair.second,
+                            aspectRatio: Self.screenAspectRatio,
+                            action: { model.choose(winner: pair.second, loser: pair.first) },
+                            onExclude: { model.skip() }
+                        )
                     }
 
                     HStack(spacing: 12) {
@@ -154,7 +160,9 @@ private struct DuelCard: View {
     let candidate: Candidate
     let aspectRatio: CGFloat
     let action: () -> Void
+    let onExclude: () -> Void
 
+    @Environment(\.modelContext) private var modelContext
     @State private var image: CGImage?
     @State private var isHovering = false
 
@@ -189,6 +197,16 @@ private struct DuelCard: View {
             }
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Open in Photos") {
+                CandidateActions.openInPhotos(candidate.localIdentifier)
+            }
+            Divider()
+            Button("Not Wallpaper Material", role: .destructive) {
+                CandidateActions.exclude(candidate.localIdentifier, in: modelContext)
+                onExclude()
+            }
+        }
         .onHover { isHovering = $0 }
         .task(id: candidate.localIdentifier) {
             image = nil

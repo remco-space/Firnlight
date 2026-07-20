@@ -55,8 +55,8 @@ private struct LibraryTab: View {
 
     /// Non-nil once a scan has finished; value changes when results change.
     private var scanCompletionToken: Int? {
-        if case .finished(let candidates, _, let newlyAdded) = scanner.phase {
-            candidates &+ newlyAdded
+        if case .finished(let candidates, _, let newlyAdded, let editedQueued, let removed) = scanner.phase {
+            candidates &+ newlyAdded &+ editedQueued &+ removed
         } else {
             nil
         }
@@ -140,10 +140,10 @@ private struct ScanView: View {
                         .font(.callout.monospacedDigit())
                         .foregroundStyle(.secondary)
 
-                case .finished(let candidates, let examined, let newlyAdded):
+                case .finished(let candidates, let examined, let newlyAdded, let editedQueued, let removed):
                     Label("\(candidates) wallpaper candidates", systemImage: "photo.stack")
                         .font(.callout.weight(.semibold))
-                    Text("Examined \(examined) photos, added \(newlyAdded) new candidates.")
+                    Text(scanSummary(examined: examined, newlyAdded: newlyAdded, editedQueued: editedQueued, removed: removed))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     scanButton(title: "Scan Again")
@@ -159,6 +159,17 @@ private struct ScanView: View {
             }
             .padding(8)
         }
+    }
+
+    private func scanSummary(examined: Int, newlyAdded: Int, editedQueued: Int, removed: Int) -> String {
+        var parts = ["Examined \(examined) photos", "added \(newlyAdded) new"]
+        if editedQueued > 0 {
+            parts.append("queued \(editedQueued) edited for re-analysis")
+        }
+        if removed > 0 {
+            parts.append("removed \(removed)")
+        }
+        return parts.joined(separator: ", ") + "."
     }
 
     private func scanButton(title: String) -> some View {

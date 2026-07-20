@@ -33,6 +33,10 @@ final class PhotoRecord {
     /// Mirrors PHAsset.isFavorite; refreshed on every scan.
     var isFavorite: Bool = false
 
+    /// User marked this photo as never wallpaper-suitable (context menu).
+    /// Excluded photos leave the grid, duels, and album on next sync.
+    var isExcluded: Bool = false
+
     /// Detected horizon tilt in degrees (0 = level); nil when no horizon is
     /// visible (e.g. forest interiors) — treated as neutral, not penalized.
     var horizonAngleDegrees: Float?
@@ -55,5 +59,6 @@ final class PhotoRecord {
         self.analyzedAt = nil
         self.isSkipped = false
         self.isFavorite = isFavorite
+        self.isExcluded = false
     }
 }

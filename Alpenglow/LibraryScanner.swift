@@ -16,7 +16,7 @@ final class LibraryScanner {
     enum Phase: Equatable {
         case idle
         case scanning(examined: Int, total: Int)
-        case finished(candidates: Int, examined: Int, newlyAdded: Int)
+        case finished(candidates: Int, examined: Int, newlyAdded: Int, editedQueued: Int, removed: Int)
         case failed(String)
     }
 
@@ -28,15 +28,15 @@ final class LibraryScanner {
         if case .scanning = phase { true } else { false }
     }
 
-    /// Runs a full metadata scan, inserting records for candidates not seen before.
-    /// Safe to re-run: existing records are left untouched.
+    /// Runs a full metadata scan. Inserts records for new candidates, refreshes
+    /// mutable metadata (favorites), queues photos edited since their analysis
+    /// for targeted re-analysis, and removes records whose assets were deleted
+    /// or no longer qualify.
     func scan(into context: ModelContext) async {
         guard !isScanning else { return }
         phase = .scanning(examined: 0, total: 0)
 
         do {
-            // Existing records by identifier: re-scans insert new assets and
-            // refresh mutable metadata (favorites) on known ones.
             let existingRecords = try context.fetch(FetchDescriptor<PhotoRecord>())
             let recordsByIdentifier = Dictionary(uniqueKeysWithValues: existingRecords.map { ($0.localIdentifier, $0) })
 
@@ -48,15 +48,37 @@ final class LibraryScanner {
             log.info("Scan started: \(total) images in library, \(existingRecords.count) records already stored")
 
             var newlyAdded = 0
+            var editedQueued = 0
+            var removed = 0
             var unsavedChanges = 0
+            var seenIdentifiers: Set<String> = []
+            seenIdentifiers.reserveCapacity(existingRecords.count)
 
             for index in 0..<total {
                 let asset = assets.object(at: index)
+                let record = recordsByIdentifier[asset.localIdentifier]
+                if record != nil {
+                    seenIdentifiers.insert(asset.localIdentifier)
+                }
 
                 if isCandidate(asset) {
-                    if let record = recordsByIdentifier[asset.localIdentifier] {
+                    if let record {
                         if record.isFavorite != asset.isFavorite {
                             record.isFavorite = asset.isFavorite
+                            unsavedChanges += 1
+                        }
+                        // Edited since analysis (crop, adjustments, …): refresh
+                        // metadata and queue for re-analysis. Only this photo
+                        // re-runs Vision — never the whole library.
+                        if let modified = asset.modificationDate,
+                           let analyzedAt = record.analyzedAt,
+                           modified > analyzedAt {
+                            record.pixelWidth = asset.pixelWidth
+                            record.pixelHeight = asset.pixelHeight
+                            record.analysisVersion = 0
+                            record.horizonMeasured = false
+                            record.isSkipped = false
+                            editedQueued += 1
                             unsavedChanges += 1
                         }
                     } else {
@@ -70,6 +92,12 @@ final class LibraryScanner {
                         newlyAdded += 1
                         unsavedChanges += 1
                     }
+                } else if let record {
+                    // Edited out of candidacy (e.g. cropped to portrait or below
+                    // the minimum width).
+                    context.delete(record)
+                    removed += 1
+                    unsavedChanges += 1
                 }
 
                 if unsavedChanges >= Thresholds.scanSaveBatchSize {
@@ -84,10 +112,16 @@ final class LibraryScanner {
                 }
             }
 
+            // Assets deleted from the library leave orphaned records — clean up.
+            for (identifier, record) in recordsByIdentifier where !seenIdentifiers.contains(identifier) {
+                context.delete(record)
+                removed += 1
+            }
+
             try context.save()
             let candidates = try context.fetchCount(FetchDescriptor<PhotoRecord>())
-            phase = .finished(candidates: candidates, examined: total, newlyAdded: newlyAdded)
-            log.info("Scan finished: \(total) examined, \(candidates) candidates (\(newlyAdded) new)")
+            phase = .finished(candidates: candidates, examined: total, newlyAdded: newlyAdded, editedQueued: editedQueued, removed: removed)
+            log.info("Scan finished: \(total) examined, \(candidates) candidates (\(newlyAdded) new, \(editedQueued) edited queued for re-analysis, \(removed) removed)")
         } catch {
             log.error("Scan failed: \(error.localizedDescription)")
             phase = .failed(error.localizedDescription)

@@ -65,7 +65,7 @@ actor PreferenceRanker {
     func prepare() throws {
         guard !isPrepared else { return }
 
-        let records = try modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature }))
+        let records = try modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature && !$0.isExcluded }))
         let minWidth = Float(Thresholds.minimumCandidatePixelWidth)
         let resolutionRange = log2(Thresholds.resolutionFullScoreWidth / minWidth)
         entries = records.compactMap { record in
@@ -283,7 +283,7 @@ actor PreferenceRanker {
 
     /// Denormalizes sigmoid(score) into PhotoRecord.preferenceScore and saves.
     private func writePreferenceCache() throws {
-        let records = try modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature }))
+        let records = try modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature && !$0.isExcluded }))
         for record in records {
             guard let index = indexByID[record.localIdentifier] else { continue }
             let score = Self.sigmoid(entries[index].score)

@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import Photos
 import Observation
+import AppKit
 
 /// Loads the ranked, deduplicated candidate list off the main actor.
 @MainActor
@@ -86,6 +87,7 @@ struct CandidateGridView: View {
 /// Shared by the Library grid and the Export album preview.
 struct ThumbnailCell: View {
     let candidate: Candidate
+    @Environment(\.modelContext) private var modelContext
     @State private var thumbnail: CGImage?
 
     var body: some View {
@@ -127,11 +129,52 @@ struct ThumbnailCell: View {
                 .background(.ultraThinMaterial, in: Capsule())
                 .padding(5)
         }
+        .contextMenu {
+            Button("Open in Photos") {
+                openInPhotos()
+            }
+            Divider()
+            Button("Not Wallpaper Material", role: .destructive) {
+                excludeFromWallpapers()
+            }
+        }
         .task {
             if thumbnail == nil {
                 thumbnail = await ThumbnailLoader.load(candidate.localIdentifier)
             }
         }
+    }
+
+    private func openInPhotos() {
+        CandidateActions.openInPhotos(candidate.localIdentifier)
+    }
+
+    private func excludeFromWallpapers() {
+        CandidateActions.exclude(candidate.localIdentifier, in: modelContext)
+    }
+}
+
+/// Context-menu actions shared by every image shown in the app.
+@MainActor
+enum CandidateActions {
+    /// Best-effort deep link; the scheme is undocumented but widely used.
+    /// Falls back to just opening Photos if navigation isn't supported.
+    static func openInPhotos(_ localIdentifier: String) {
+        let uuid = localIdentifier.components(separatedBy: "/").first ?? localIdentifier
+        guard let url = URL(string: "photos://asset?uuid=\(uuid)") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Permanently drops the photo from the grid, duels, and (on next sync)
+    /// the wallpaper album.
+    static func exclude(_ localIdentifier: String, in modelContext: ModelContext) {
+        let descriptor = FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate { $0.localIdentifier == localIdentifier }
+        )
+        guard let record = try? modelContext.fetch(descriptor).first else { return }
+        record.isExcluded = true
+        try? modelContext.save()
+        RankingClock.shared.bump() // grid + export preview + suggestion reload
     }
 }
 

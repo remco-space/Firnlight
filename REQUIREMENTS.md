@@ -39,7 +39,13 @@ third-party dependencies, no network calls, no telemetry.
   identifier; re-scans are idempotent (only new assets are added).
 - **FR-2.3** Re-scans refresh mutable metadata on existing records —
   specifically the Photos favorite flag.
-- **FR-2.4** The scan shows live progress and finishes with a candidate count.
+- **FR-2.4** The scan shows live progress and finishes with a candidate count
+  plus what changed (new / edited-queued / removed).
+- **FR-2.5** Photos edited since their analysis (detected via the asset's
+  modification date) are queued for re-analysis by the same resumable
+  pipeline — only the edited photos re-run Vision, never the whole library.
+- **FR-2.6** Records are removed when their asset is deleted from the library
+  or edited out of candidacy (e.g. cropped below the minimum size).
 
 ## 3. Vision analysis
 
@@ -84,6 +90,12 @@ third-party dependencies, no network calls, no telemetry.
 - **FR-4.4** Favorites are marked (heart badge); each cell shows its current
   score.
 - **FR-4.5** The grid re-ranks live as the preference ranker learns.
+- **FR-4.6** Right-clicking any image in the app (grid, export preview, duel)
+  shows a standard context menu with "Open in Photos" (deep link to the asset)
+  and "Not Wallpaper Material".
+- **FR-4.7** "Not Wallpaper Material" permanently excludes the photo from the
+  grid, future duels, the album-size calibration, and (on next sync) the
+  album. Excluding a photo mid-duel advances to a fresh pair.
 
 ## 5. Preference learning (Duel tab)
 

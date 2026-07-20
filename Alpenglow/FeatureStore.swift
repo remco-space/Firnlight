@@ -54,7 +54,7 @@ actor FeatureStore {
 
     private func rankedCore(limit: Int) throws -> (kept: [Candidate], vectors: [[Float]], accepted: Int, suppressed: Int) {
         let descriptor = FetchDescriptor<PhotoRecord>(
-            predicate: #Predicate { $0.isNature }
+            predicate: #Predicate { $0.isNature && !$0.isExcluded }
         )
         let fetched = try modelContext.fetch(descriptor)
 
@@ -201,7 +201,7 @@ actor FeatureStore {
     /// Deduplicated candidates scoring above the bar — walks the ranked list
     /// and stops at the bar, so cost scales with album size, not library size.
     private func dedupedCount(aboveBar bar: Float) throws -> Int {
-        let fetched = try modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature }))
+        let fetched = try modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature && !$0.isExcluded }))
         let records = fetched.sorted { $0.preferenceScore > $1.preferenceScore }
         let thresholdSquared = Thresholds.nearDuplicateDistance * Thresholds.nearDuplicateDistance
 
