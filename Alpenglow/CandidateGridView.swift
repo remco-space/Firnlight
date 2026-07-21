@@ -177,6 +177,7 @@ struct ThumbnailCell: View {
                     .padding(4)
                     .background(.ultraThinMaterial, in: Circle())
                     .padding(5)
+                    .help("You marked this photo as a favorite in Photos, which boosts its ranking.")
             }
         }
         .overlay(alignment: .bottomTrailing) { badge }
@@ -201,6 +202,7 @@ struct ThumbnailCell: View {
                 .padding(4)
                 .background(.ultraThinMaterial, in: Circle())
                 .padding(5)
+                .help("You ignored this photo — it stays out of the grid, duels, and the wallpaper album. Right-click to un-ignore it.")
         } else {
             // Learned preference (sigmoid of the raw score) once the ranker is
             // live, aesthetics prior before.
@@ -213,6 +215,7 @@ struct ThumbnailCell: View {
                 .padding(.vertical, 2)
                 .background(.ultraThinMaterial, in: Capsule())
                 .padding(5)
+                .help("Predicted wallpaper appeal, 0–1 — higher scores rank earlier. Learned from your duel choices.")
         }
     }
 

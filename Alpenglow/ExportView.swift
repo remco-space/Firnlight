@@ -139,6 +139,7 @@ struct ExportView: View {
                         )
                         .foregroundStyle(.green)
                         .font(.callout.monospacedDigit())
+                        .help("The sync finished — the Photos album now matches the preview below.")
                     }
                 }
 

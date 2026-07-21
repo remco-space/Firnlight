@@ -235,6 +235,7 @@ private struct DuelCard: View {
                         .padding(4)
                         .background(.ultraThinMaterial, in: Circle())
                         .padding(6)
+                        .help("You marked this photo as a favorite in Photos, which boosts its ranking.")
                 }
             }
         }
@@ -276,6 +277,7 @@ private struct DuelCard: View {
         .buttonStyle(.plain)
         .padding(6)
         .accessibilityLabel("Ignore \(positionLabel)")
+        .help("Click to ignore this photo — it leaves the grid, duels, and the wallpaper album (reversible via “Show Ignored” in the Library tab).")
     }
 
     private func ignore() {

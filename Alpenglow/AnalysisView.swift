@@ -116,13 +116,18 @@ struct AnalysisView: View {
             .foregroundStyle(.secondary)
 
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
-            statRow("checkmark.seal", .green, "Wallpaper candidates", stats.accepted)
-            statRow("person.2.slash", .secondary, "People", stats.people)
-            statRow("doc.viewfinder", .secondary, "Utility images", stats.utility)
+            statRow("checkmark.seal", .green, "Wallpaper candidates", stats.accepted,
+                    help: "Photos that passed every analysis check and compete for the wallpaper album.")
+            statRow("person.2.slash", .secondary, "People", stats.people,
+                    help: "Rejected: people were detected in these photos.")
+            statRow("doc.viewfinder", .secondary, "Utility images", stats.utility,
+                    help: "Rejected: these look like documents, screenshots, or other utility images.")
             // Plain leaf: the row label carries the negation (no leaf.slash
             // exists, and the arrow variant is the recycling symbol).
-            statRow("leaf", .secondary, "Not nature", stats.notNature)
-            statRow("icloud.and.arrow.down", .orange, "iCloud (deferred)", stats.skipped)
+            statRow("leaf", .secondary, "Not nature", stats.notNature,
+                    help: "Rejected: these don't look like nature scenes.")
+            statRow("icloud.and.arrow.down", .orange, "iCloud (deferred)", stats.skipped,
+                    help: "Skipped for now: the originals are in iCloud and not downloaded; retrying fetches and analyzes them.")
         }
         .font(.callout.monospacedDigit())
 
@@ -148,6 +153,7 @@ struct AnalysisView: View {
             } else {
                 Label("Analysis complete", systemImage: "checkmark.circle")
                     .foregroundStyle(.green)
+                    .help("Every scanned candidate has been analyzed; results are tallied above.")
             }
         }
     }
@@ -162,10 +168,11 @@ struct AnalysisView: View {
         }
     }
 
-    private func statRow(_ symbol: String, _ color: Color, _ label: String, _ value: Int) -> some View {
+    private func statRow(_ symbol: String, _ color: Color, _ label: String, _ value: Int, help: LocalizedStringKey) -> some View {
         GridRow {
             Label(label, systemImage: symbol)
                 .foregroundStyle(color == .secondary ? Color.secondary : color)
+                .help(help)
             Text("\(value)")
                 .gridColumnAlignment(.trailing)
         }

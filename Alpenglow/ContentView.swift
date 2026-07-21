@@ -75,6 +75,7 @@ private struct LibraryTab: View {
         HStack(spacing: 12) {
             Image(systemName: "lock.trianglebadge.exclamationmark")
                 .foregroundStyle(.orange)
+                .help("Photos access is limited — Alpenglow only sees the photos you selected, so wallpapers can only come from that selection.")
             Text("Only your selected photos are available to Alpenglow.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -100,6 +101,7 @@ private struct LibraryTab: View {
             Image(systemName: "lock.rectangle")
                 .font(.system(size: 52))
                 .foregroundStyle(.secondary)
+                .help("Alpenglow can't read your Photos library yet — grant access to start finding wallpapers.")
 
             Text("Photos Access")
                 .font(.title2.bold())
@@ -176,6 +178,7 @@ private struct ScanView: View {
                 case .finished(let candidates, let examined, let newlyAdded, let editedQueued, let removed):
                     Label("\(candidates) wallpaper candidates", systemImage: "photo.stack")
                         .font(.callout.weight(.semibold))
+                        .help("Photos whose size and shape qualify them for the wallpaper pipeline; Vision analysis filters them further.")
                     Text(scanSummary(examined: examined, newlyAdded: newlyAdded, editedQueued: editedQueued, removed: removed))
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -184,6 +187,7 @@ private struct ScanView: View {
                 case .failed(let message):
                     Label("Scan failed", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
+                        .help("The library scan stopped with the error below; scanning again is safe.")
                     Text(message)
                         .font(.callout)
                         .foregroundStyle(.secondary)

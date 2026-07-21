@@ -19,6 +19,60 @@ import os
 /// for the very first sync (or if the stored identifier no longer resolves,
 /// e.g. the album was deleted), and any title match immediately persists its
 /// identifier for next time.
+/// Tracks whether an album sync is inside its remove→re-add span so app
+/// termination (FR-1.7's quit-on-window-close) can wait for it.
+///
+/// `sync` rebuilds the album in two Photos transactions; its rollback only
+/// runs on a caught error, not on process death. One click on the close
+/// button in that gap would strand the album empty — violating FR-6.8's
+/// restore promise — so `AppDelegate.applicationShouldTerminate` defers the
+/// quit until this gate is idle. The gate lives here, set by `sync` itself
+/// around the critical section, so no caller can forget it (ExportView's
+/// `isSyncing` @State is view-local and dies with the view while the sync
+/// task keeps running — unusable by the delegate).
+///
+/// Lock-based rather than @MainActor/@Observable: `applicationShouldTerminate`
+/// must read it synchronously on the main actor while `sync` (nonisolated
+/// async) sets it from wherever it resumes, and nobody needs SwiftUI
+/// observation — just the one "now idle" callback. A begin-count (not a Bool)
+/// keeps it correct even if two syncs ever overlap.
+nonisolated final class AlbumSyncGate: Sendable {
+    static let shared = AlbumSyncGate()
+
+    private struct State {
+        var active = 0
+        var idleWaiters: [@Sendable () -> Void] = []
+    }
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    var isActive: Bool { state.withLock { $0.active > 0 } }
+
+    func begin() { state.withLock { $0.active += 1 } }
+
+    func end() {
+        let waiters: [@Sendable () -> Void] = state.withLock {
+            $0.active -= 1
+            guard $0.active == 0 else { return [] }
+            let waiting = $0.idleWaiters
+            $0.idleWaiters = []
+            return waiting
+        }
+        for waiter in waiters { waiter() }
+    }
+
+    /// Runs `action` immediately if no critical section is active, otherwise
+    /// once the last one ends. `action` must hop to whatever isolation it
+    /// needs — it may be called from the context that calls `end()`.
+    func whenIdle(_ action: @escaping @Sendable () -> Void) {
+        let runNow = state.withLock {
+            if $0.active == 0 { return true }
+            $0.idleWaiters.append(action)
+            return false
+        }
+        if runNow { action() }
+    }
+}
+
 nonisolated enum WallpaperAlbumSync {
     struct Outcome: Sendable, Equatable {
         var added = 0
@@ -63,6 +117,15 @@ nonisolated enum WallpaperAlbumSync {
         var assetByID: [String: PHAsset] = [:]
         fetchedTargets.enumerateObjects { asset, _, _ in assetByID[asset.localIdentifier] = asset }
         let orderedAssets = orderedIDs.compactMap { assetByID[$0] }
+
+        // Hold the termination gate across the remove→re-add span below and
+        // its rollback: quitting between the two transactions would strand
+        // the album empty with no rollback (see AlbumSyncGate). Everything
+        // above this line is read-only, so termination there is harmless;
+        // `defer` also covers the trailing verification, but those are only
+        // fast reads — a small price for covering every throw path.
+        AlbumSyncGate.shared.begin()
+        defer { AlbumSyncGate.shared.end() }
 
         // Two transactions: remove-and-re-add within a single change request
         // lets Photos keep surviving assets at their old positions, which

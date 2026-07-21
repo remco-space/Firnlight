@@ -31,10 +31,21 @@ The app has three tabs matching the three stages of the journey:
   album; it never edits or deletes the user's actual photos. *(Why: trust —
   the library is safe. Revision of the original "never write to the library"
   rule, approved by the user for the album-based export, 2026-07-19.)*
-- **FR-1.5** Everything happens on the user's Mac; photo content never leaves
-  the device. *(Why: privacy is a headline feature of the product.)*
+- **FR-1.5** Everything happens on the user's Mac and photo content never
+  leaves it for third-party servers. *(Why: privacy is a headline feature of
+  the product.)* The one sanctioned exception is Apple's Private Cloud Compute
+  — which extends the device's privacy guarantees to Apple silicon servers and
+  retains no data — permitted where a task needs a higher-level foundation
+  model than can run locally.
 - **FR-1.6** Launching the app twice just brings the already-running window
   forward instead of opening a second one. *(Why: protects the user's data.)*
+- **FR-1.7** Closing the app's window quits the app entirely, instead of
+  leaving it running with no window (the usual macOS default). *(Why: Alpenglow
+  is a single-window utility — a windowless, still-running state is just a
+  confusing no-op with nothing for the user to do.)* The one exception: if a
+  process such as an album sync is in progress, the quit waits for it to finish
+  (or safely roll back) first, so closing the window mid-sync can never leave
+  application state or the photos album half-written (see FR-6.8).
 
 ## 2. Finding candidate photos (Library tab)
 
@@ -116,6 +127,19 @@ The app has three tabs matching the three stages of the journey:
 - **FR-4.11** Switching tabs is instant: each tab's content loads lazily in
   the background behind a progress placeholder, so no tab — especially
   Export — blocks the rest of the app while it loads.
+- **FR-4.12** A photo that comes from the user's shared library shows a small
+  "shared library" badge on its thumbnail. *(Why: helps the user tell at a
+  glance whether they took a photo themselves or it came from someone else in
+  the shared library.)* **Known unimplementable as of macOS 27 beta 4:** the
+  system exposes no supported way for an app to tell whether a photo belongs to
+  the iCloud Shared Photo Library (the legacy Shared Albums signal is a
+  different feature and would mislabel photos). Kept as a requirement to
+  revisit when the OS provides this.
+- **FR-4.13** Every status-indicator icon anywhere in the app carries a
+  tooltip that explains what the icon indicates and, when the icon is
+  clickable, hints at what clicking it will do. *(Why: an icon alone is
+  ambiguous; a hover explanation makes the app self-describing without
+  cluttering the interface with permanent labels.)*
 
 ## 5. Learning taste (Duel tab)
 
