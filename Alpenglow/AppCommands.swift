@@ -14,6 +14,12 @@ import SwiftData
 /// below sits inside an `if authorization.isAuthorized` branch (or, for the
 /// photo actions, inside a view that only exists once there's a photo to
 /// show), so there's nothing to publish when the precondition doesn't hold.
+/// A deliberate consequence: Scan, Sync Album, and Show Ignored are enabled
+/// only while their owning tab is mounted (a `focusedSceneValue` publishes
+/// only from views in the hierarchy). That errs safe — a disabled item is
+/// never wrong, and the enabled state always reflects a target that really
+/// can act — at the cost of the commands being tab-scoped rather than
+/// app-global.
 ///
 /// Every value published here is a reference type (a `@MainActor
 /// @Observable` model, or `ModelContext`, itself a class) or a plain
@@ -202,6 +208,8 @@ struct AppCommands: Commands {
     }
 
     private var scanTitle: String {
-        libraryCommandTarget?.scanner.phase == .idle ? "Scan Library" : "Scan Again"
+        // Defaults to "Scan Library" when no target is published (item
+        // disabled on other tabs) — "Scan Again" would misstate a first run.
+        libraryCommandTarget.map { $0.scanner.phase == .idle } ?? true ? "Scan Library" : "Scan Again"
     }
 }

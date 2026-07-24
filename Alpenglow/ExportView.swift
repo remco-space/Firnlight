@@ -188,7 +188,9 @@ struct ExportView: View {
                         model.sync(container: modelContext.container)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(model.isSyncing)
+                    // Same gate as the menu command: also disabled while the
+                    // pool is still loading or empty, not just mid-sync.
+                    .disabled(!model.canSync)
 
                     if let outcome = model.outcome {
                         if outcome.orderVerified {
