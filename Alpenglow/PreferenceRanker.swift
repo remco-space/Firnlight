@@ -61,7 +61,6 @@ actor PreferenceRanker {
         var aesthetics: Float
         var horizon: Float
         var resolution: Float
-        var trainedChoices: Int
         var seededWithFavorites: Bool
     }
 
@@ -69,7 +68,7 @@ actor PreferenceRanker {
 
     private var entries: [Entry] = []
     private var indexByID: [String: Int] = [:]
-    private var weights = Weights(feature: [], aesthetics: 1, horizon: 0, resolution: 0, trainedChoices: 0, seededWithFavorites: false)
+    private var weights = Weights(feature: [], aesthetics: 1, horizon: 0, resolution: 0, seededWithFavorites: false)
     private var judgedPairs: Set<String> = []
     private var isPrepared = false
 
@@ -106,14 +105,12 @@ actor PreferenceRanker {
                 aesthetics: 1,
                 horizon: 0,
                 resolution: 0,
-                trainedChoices: 0,
                 seededWithFavorites: false
             )
             seedFromFavorites()
             for choice in choices {
                 sgdStep(winnerID: choice.winnerID, loserID: choice.loserID)
             }
-            weights.trainedChoices = choices.count
             saveWeights()
             Self.log.info("Rebuilt weights: seeded=\(self.weights.seededWithFavorites), replayed \(choices.count) choices")
         }
@@ -301,7 +298,6 @@ actor PreferenceRanker {
         judgedPairs.insert(Self.pairKey(winnerID, loserID))
 
         sgdStep(winnerID: winnerID, loserID: loserID)
-        weights.trainedChoices += 1
         choiceCount += 1
         saveWeights()
 

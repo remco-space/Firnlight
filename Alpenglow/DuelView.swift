@@ -184,7 +184,6 @@ struct DuelView: View {
                             positionLabel: "Left photo",
                             aspectRatio: Self.screenAspectRatio,
                             action: { model.choose(winner: pair.first, loser: pair.second) },
-                            onAdvance: { model.skip() },
                             duelModel: model
                         )
                         DuelCard(
@@ -192,7 +191,6 @@ struct DuelView: View {
                             positionLabel: "Right photo",
                             aspectRatio: Self.screenAspectRatio,
                             action: { model.choose(winner: pair.second, loser: pair.first) },
-                            onAdvance: { model.skip() },
                             duelModel: model
                         )
                     }
@@ -252,11 +250,10 @@ private struct DuelCard: View {
     let positionLabel: String
     let aspectRatio: CGFloat
     let action: () -> Void
-    /// Advance to a fresh pair after this photo is ignored or judged not
-    /// wallpaper material — either way the current pair is spent.
-    let onAdvance: () -> Void
-    /// Published inside `FocusedPhoto` so the menu-bar photo actions can
-    /// advance the pair too (FR-4.7/FR-4.8) — see AppCommands.swift.
+    /// Advances to a fresh pair after this photo is ignored or judged not
+    /// wallpaper material (either way the current pair is spent), and is
+    /// published inside `FocusedPhoto` so the menu-bar photo actions can do
+    /// the same (FR-4.7/FR-4.8) — see AppCommands.swift.
     let duelModel: DuelModel
 
     @Environment(\.modelContext) private var modelContext
@@ -311,7 +308,7 @@ private struct DuelCard: View {
                 // Records a bad verdict; the photo stays in the duel pool, but
                 // this pair is spent — advance (FR-4.7).
                 CandidateActions.markNotWallpaperMaterial(candidate.localIdentifier, in: modelContext)
-                onAdvance()
+                duelModel.skip()
             }
             Button("Ignore This Photo", role: .destructive) {
                 ignore()
@@ -350,6 +347,6 @@ private struct DuelCard: View {
 
     private func ignore() {
         CandidateActions.ignore(candidate.localIdentifier, in: modelContext)
-        onAdvance()
+        duelModel.skip()
     }
 }

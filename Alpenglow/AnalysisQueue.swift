@@ -76,7 +76,6 @@ actor AnalysisQueue {
         if batch.isEmpty {
             return try await processHorizonBatch()
         }
-        guard !batch.isEmpty else { return nil }
 
         let byIdentifier = Dictionary(uniqueKeysWithValues: batch.map { ($0.localIdentifier, $0) })
 
