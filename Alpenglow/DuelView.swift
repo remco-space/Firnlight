@@ -25,10 +25,21 @@ final class DuelModel {
 
     private var ranker: PreferenceRanker?
 
-    /// Set right before a bump this model itself causes: record() has already
-    /// rescored and saved, so the clock-driven reload would redo the whole
-    /// library's rescore-and-persist for nothing on every single choice.
+    /// Set right before a bump this model itself causes (a verdict), so the
+    /// resulting clock-driven `.task` re-run skips reloading the candidate
+    /// snapshot the model has already advanced past. Duel *choices* no longer
+    /// bump here at all — PreferenceRanker owns the bump, firing it only when
+    /// its debounced cache flush actually persists new scores (see `choose`).
     private var suppressNextReload = false
+
+    // FR-8.1: persist the in-progress duel pair so relaunching resumes on
+    // exactly the same two photos instead of silently discarding whatever
+    // the user was mid-way through judging. Plain `UserDefaults` (not a new
+    // SwiftData model, per the task): this is UI-restoration state, not
+    // durable app data — losing it just means falling back to a fresh pair,
+    // never data loss (choices themselves are the durable record, FR-5.3).
+    private static let duelPairFirstKey = "duelPairFirst"
+    private static let duelPairSecondKey = "duelPairSecond"
 
     func start(container: ModelContainer) async {
         guard ranker == nil else { return }
@@ -42,7 +53,16 @@ final class DuelModel {
             // nil and a retry actually re-runs instead of no-opping.
             self.ranker = ranker
             choiceCount = await ranker.choiceCount
-            pair = await ranker.nextPair()
+            // FR-8.1: try to resume the pair the user was looking at last
+            // launch. `PreferenceRanker.pair(first:second:)` returns nil if
+            // either photo is no longer a live candidate (deleted, edited
+            // out, ignored, etc. — see FR-2.6/FR-4.8), in which case we just
+            // fall back to a fresh pair like a normal first launch.
+            if let restored = await restoredPair(ranker: ranker) {
+                setPair(restored)
+            } else {
+                setPair(await ranker.nextPair())
+            }
         } catch {
             lastError = error.localizedDescription
         }
@@ -63,7 +83,7 @@ final class DuelModel {
         do {
             try await ranker.reload()
             if let pair, await !ranker.contains(pair) {
-                self.pair = await ranker.nextPair()
+                setPair(await ranker.nextPair())
             }
         } catch {
             lastError = error.localizedDescription
@@ -76,21 +96,25 @@ final class DuelModel {
 
         Task {
             do {
+                // record() persists the choice durably and updates the ranker's
+                // in-memory scores immediately; nextPair() below draws from those
+                // fresh scores. The store-side preferenceScore cache is flushed on
+                // a debounce inside the ranker, which bumps RankingClock once it
+                // persists — so we neither write the whole library nor fan out a
+                // grid/export reload here on every single choice (FR-8.2).
                 try await ranker.record(winnerID: winner.localIdentifier, loserID: loser.localIdentifier)
                 choiceCount = await ranker.choiceCount
-                suppressNextReload = true
-                RankingClock.shared.bump()
             } catch {
                 lastError = error.localizedDescription
             }
-            pair = await ranker.nextPair()
+            setPair(await ranker.nextPair())
             isRecording = false
         }
     }
 
     func skip() {
         guard !isRecording, let ranker else { return }
-        Task { pair = await ranker.nextPair() }
+        Task { setPair(await ranker.nextPair()) }
     }
 
     /// "Both great" / "both bad": an absolute quality verdict on both photos,
@@ -109,8 +133,35 @@ final class DuelModel {
             } catch {
                 lastError = error.localizedDescription
             }
-            self.pair = await ranker.nextPair()
+            setPair(await ranker.nextPair())
             isRecording = false
+        }
+    }
+
+    /// Looks up the persisted pair from last launch, if any, and hands back a
+    /// live `DuelPair` only if both photos are still candidates.
+    private func restoredPair(ranker: PreferenceRanker) async -> PreferenceRanker.DuelPair? {
+        let defaults = UserDefaults.standard
+        guard let first = defaults.string(forKey: Self.duelPairFirstKey),
+              let second = defaults.string(forKey: Self.duelPairSecondKey) else {
+            return nil
+        }
+        return await ranker.pair(first: first, second: second)
+    }
+
+    /// Sets `pair` and keeps the persisted identifiers in lockstep: written
+    /// whenever a new pair is served (covers choice/skip/verdict/ignore, all
+    /// of which route through here), cleared when the pair becomes nil (no
+    /// more candidates to compare) so a stale pair is never resumed.
+    private func setPair(_ newPair: PreferenceRanker.DuelPair?) {
+        pair = newPair
+        let defaults = UserDefaults.standard
+        if let newPair {
+            defaults.set(newPair.first.localIdentifier, forKey: Self.duelPairFirstKey)
+            defaults.set(newPair.second.localIdentifier, forKey: Self.duelPairSecondKey)
+        } else {
+            defaults.removeObject(forKey: Self.duelPairFirstKey)
+            defaults.removeObject(forKey: Self.duelPairSecondKey)
         }
     }
 }
@@ -133,14 +184,14 @@ struct DuelView: View {
                             positionLabel: "Left photo",
                             aspectRatio: Self.screenAspectRatio,
                             action: { model.choose(winner: pair.first, loser: pair.second) },
-                            onAdvance: { model.skip() }
+                            duelModel: model
                         )
                         DuelCard(
                             candidate: pair.second,
                             positionLabel: "Right photo",
                             aspectRatio: Self.screenAspectRatio,
                             action: { model.choose(winner: pair.second, loser: pair.first) },
-                            onAdvance: { model.skip() }
+                            duelModel: model
                         )
                     }
 
@@ -176,8 +227,10 @@ struct DuelView: View {
             }
         }
         .task(id: RankingClock.shared.version) {
-            // Prepares on first appearance; on later re-rank/exclusion bumps,
-            // reloads the candidate snapshot so new/excluded photos show up.
+            // Prepares on first appearance; on later bumps (a scan/exclusion, or
+            // the ranker's own debounced cache flush landing) reloads the
+            // candidate snapshot so new/excluded photos show up. Coalesced to
+            // flush boundaries now, not fired per choice.
             await model.reload(container: modelContext.container)
         }
     }
@@ -197,9 +250,11 @@ private struct DuelCard: View {
     let positionLabel: String
     let aspectRatio: CGFloat
     let action: () -> Void
-    /// Advance to a fresh pair after this photo is ignored or judged not
-    /// wallpaper material — either way the current pair is spent.
-    let onAdvance: () -> Void
+    /// Advances to a fresh pair after this photo is ignored or judged not
+    /// wallpaper material (either way the current pair is spent), and is
+    /// published inside `FocusedPhoto` so the menu-bar photo actions can do
+    /// the same (FR-4.7/FR-4.8) — see AppCommands.swift.
+    let duelModel: DuelModel
 
     @Environment(\.modelContext) private var modelContext
     @State private var image: CGImage?
@@ -253,13 +308,23 @@ private struct DuelCard: View {
                 // Records a bad verdict; the photo stays in the duel pool, but
                 // this pair is spent — advance (FR-4.7).
                 CandidateActions.markNotWallpaperMaterial(candidate.localIdentifier, in: modelContext)
-                onAdvance()
+                duelModel.skip()
             }
             Button("Ignore This Photo", role: .destructive) {
                 ignore()
             }
         }
         .onHover { isHovering = $0 }
+        // Duel cards are already focusable (they're Buttons); publish the
+        // focused candidate the same way ThumbnailCell does, so the Photo
+        // menu (FR-4.6) reaches duel cards too. Never in "ignored" mode —
+        // an ignored photo can't reach a duel pair.
+        .focusedValue(\.focusedPhoto, FocusedPhoto(
+            localIdentifier: candidate.localIdentifier,
+            isIgnored: false,
+            modelContext: modelContext,
+            duelModel: duelModel
+        ))
         .task(id: candidate.localIdentifier) {
             image = nil
             image = await ThumbnailLoader.load(candidate.localIdentifier, pixelSize: Thresholds.duelImagePixelSize)
@@ -282,6 +347,6 @@ private struct DuelCard: View {
 
     private func ignore() {
         CandidateActions.ignore(candidate.localIdentifier, in: modelContext)
-        onAdvance()
+        duelModel.skip()
     }
 }

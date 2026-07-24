@@ -16,8 +16,16 @@ import os
 /// weights are rebuilt by seeding from Photos favorites (pseudo-choices:
 /// favorite beats random non-favorite) and then replaying every ChoiceRecord
 /// in timestamp order.
-@ModelActor
+/// Plain actor with its own `ModelContext`, not `@ModelActor`, so its work
+/// truly runs off the main thread — see FeatureStore's doc comment for the
+/// `DefaultSerialModelExecutor` caller-thread pitfall this avoids (FR-8.2).
 actor PreferenceRanker {
+    private let modelContext: ModelContext
+
+    init(modelContainer: ModelContainer) {
+        self.modelContext = ModelContext(modelContainer)
+    }
+
     struct DuelPair: Sendable, Equatable {
         let first: Candidate
         let second: Candidate
@@ -61,7 +69,6 @@ actor PreferenceRanker {
         var aesthetics: Float
         var horizon: Float
         var resolution: Float
-        var trainedChoices: Int
         var seededWithFavorites: Bool
     }
 
@@ -69,9 +76,13 @@ actor PreferenceRanker {
 
     private var entries: [Entry] = []
     private var indexByID: [String: Int] = [:]
-    private var weights = Weights(feature: [], aesthetics: 1, horizon: 0, resolution: 0, trainedChoices: 0, seededWithFavorites: false)
+    private var weights = Weights(feature: [], aesthetics: 1, horizon: 0, resolution: 0, seededWithFavorites: false)
     private var judgedPairs: Set<String> = []
     private var isPrepared = false
+
+    /// Debounced preference-cache flush state (see `scheduleCacheFlush`).
+    private var flushTask: Task<Void, Never>?
+    private var unflushedChoices = 0
 
     private(set) var choiceCount = 0
 
@@ -102,14 +113,12 @@ actor PreferenceRanker {
                 aesthetics: 1,
                 horizon: 0,
                 resolution: 0,
-                trainedChoices: 0,
                 seededWithFavorites: false
             )
             seedFromFavorites()
             for choice in choices {
                 sgdStep(winnerID: choice.winnerID, loserID: choice.loserID)
             }
-            weights.trainedChoices = choices.count
             saveWeights()
             Self.log.info("Rebuilt weights: seeded=\(self.weights.seededWithFavorites), replayed \(choices.count) choices")
         }
@@ -126,6 +135,11 @@ actor PreferenceRanker {
         guard isPrepared else { try prepare(); return }
         loadEntries()
         recomputeScores()
+        // A reload is a flush boundary: any pending debounced write is folded
+        // into this synchronous one, so callers that read the cache right after
+        // a reload (FeatureStore.rankedCandidates/albumCandidates/…) never see
+        // scores older than the last choice.
+        cancelPendingFlush()
         try writePreferenceCache()
     }
 
@@ -133,6 +147,23 @@ actor PreferenceRanker {
     func contains(_ pair: DuelPair) -> Bool {
         indexByID[pair.first.localIdentifier] != nil
             && indexByID[pair.second.localIdentifier] != nil
+    }
+
+    /// Reconstructs a `DuelPair` from two persisted local identifiers — used
+    /// to resume the exact pair the user was looking at on the previous
+    /// launch (FR-8.1). Returns nil if either photo is no longer a live
+    /// candidate (deleted, edited out, ignored, etc.), or if the pair was
+    /// already judged — a choice can persist before the next pair's
+    /// identifiers do (process death in the window between them), and
+    /// re-serving a judged pair would double-count its SGD step — in either
+    /// case the caller should fall back to `nextPair()` as if this were a
+    /// fresh start.
+    func pair(first: String, second: String) -> DuelPair? {
+        guard let firstIndex = indexByID[first], let secondIndex = indexByID[second],
+              !judgedPairs.contains(Self.pairKey(first, second)) else {
+            return nil
+        }
+        return DuelPair(first: candidate(for: entries[firstIndex]), second: candidate(for: entries[secondIndex]))
     }
 
     /// Fetches the current nature, non-excluded candidates into `entries` and
@@ -259,18 +290,27 @@ actor PreferenceRanker {
         try modelContext.save()
     }
 
-    /// Records a choice, takes one SGD step, persists weights + score cache.
+    /// Records a choice, takes one SGD step, and updates the in-memory scores.
+    ///
+    /// The choice itself is durable, rebuild-critical state (FR-5.3/FR-7.1), so
+    /// its `ChoiceRecord` is saved synchronously — a crash never loses a
+    /// judgment. The heavy part — rewriting every `PhotoRecord.preferenceScore`
+    /// and saving — is only a denormalized cache (replayable from the choices in
+    /// prepare()), so it is *not* done here per choice; that per-choice full
+    /// write is what beachballed the UI (FR-8.2). Instead the new scores live in
+    /// `entries` immediately and the store cache is flushed on a debounce (see
+    /// `scheduleCacheFlush`). Weights are a small file write, kept synchronous.
     func record(winnerID: String, loserID: String) throws {
         modelContext.insert(ChoiceRecord(winnerID: winnerID, loserID: loserID, timestamp: Date()))
+        try modelContext.save()
         judgedPairs.insert(Self.pairKey(winnerID, loserID))
 
         sgdStep(winnerID: winnerID, loserID: loserID)
-        weights.trainedChoices += 1
         choiceCount += 1
         saveWeights()
 
         recomputeScores()
-        try writePreferenceCache()
+        scheduleCacheFlush()
     }
 
     // MARK: Model
@@ -331,17 +371,86 @@ actor PreferenceRanker {
         }
     }
 
-    /// Denormalizes the raw score into PhotoRecord.preferenceScore and saves.
-    private func writePreferenceCache() throws {
+    // MARK: Preference-cache flush (debounced)
+    //
+    // `writePreferenceCache` rewrites `PhotoRecord.preferenceScore` for the whole
+    // candidate set and saves — a heavy write transaction that holds the store's
+    // write lock. Running it per duel choice starved the main context's reads and
+    // autosave, beachballing the UI (FR-8.2). Instead each choice updates the
+    // in-memory `entries` scores (cheap) and calls `scheduleCacheFlush`; the store
+    // is written once a burst settles (batch-size or idle bound, whichever first).
+    //
+    // The RankingClock bump that tells the grid/export to re-read the cache fires
+    // *from the flush*, only when a flush actually persisted new scores — so those
+    // reads never see a value older than the last flush, and no per-choice writer
+    // contends with them (FR-4.5 tolerates this short coalescing delay).
+    //
+    // Convergence — the cache is only a denormalized, replayable cache — is
+    // guaranteed by: the idle-timer flush after the user pauses; the synchronous
+    // boundary flush in reload()/prepare(); and prepare() rewriting the whole
+    // cache on every launch. So a deferred (or process-death-dropped) flush is
+    // always eventually reconciled without any data loss.
+
+    /// Coalesces per-choice score writes: bumps the pending count and either
+    /// flushes immediately once a burst reaches the batch bound, or (re)arms the
+    /// idle timer so a pause flushes what's pending.
+    private func scheduleCacheFlush() {
+        unflushedChoices += 1
+        if unflushedChoices >= Thresholds.preferenceCacheFlushBatchSize {
+            flushCacheNow()
+            return
+        }
+        flushTask?.cancel()
+        flushTask = Task { [weak self] in
+            try? await Task.sleep(for: Thresholds.preferenceCacheFlushIdleInterval)
+            guard !Task.isCancelled else { return }
+            await self?.flushCacheNow()
+        }
+    }
+
+    /// Writes the pending score changes; if any were material, tells the ranked
+    /// views to re-read. Safe to call with nothing pending (writes nothing).
+    private func flushCacheNow() {
+        flushTask?.cancel()
+        flushTask = nil
+        unflushedChoices = 0
+        let changed = (try? writePreferenceCache()) ?? false
+        if changed {
+            Task { @MainActor in RankingClock.shared.bump() }
+        }
+    }
+
+    /// Drops a pending debounced flush without writing — used when a boundary
+    /// flush (reload/prepare) is about to write everything synchronously anyway.
+    private func cancelPendingFlush() {
+        flushTask?.cancel()
+        flushTask = nil
+        unflushedChoices = 0
+    }
+
+    /// Denormalizes each candidate's raw score into `PhotoRecord.preferenceScore`
+    /// and saves. Only rows whose cached value moved by more than
+    /// `preferenceCacheEpsilon` are touched, so the float-noise nudges from a
+    /// single SGD step don't dirty (and rewrite) the entire table. Returns
+    /// whether any row actually changed, so a no-op flush skips both the save and
+    /// the dependent-view bump.
+    @discardableResult
+    private func writePreferenceCache() throws -> Bool {
         let records = try modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature && !$0.isExcluded }))
+        var changed = false
         for record in records {
             guard let index = indexByID[record.localIdentifier] else { continue }
             let score = entries[index].score
-            if record.preferenceScore != score {
-                record.preferenceScore = score
+            if let current = record.preferenceScore {
+                guard abs(current - score) > Thresholds.preferenceCacheEpsilon else { continue }
             }
+            record.preferenceScore = score
+            changed = true
         }
-        try modelContext.save()
+        if changed {
+            try modelContext.save()
+        }
+        return changed
     }
 
     // MARK: Persistence

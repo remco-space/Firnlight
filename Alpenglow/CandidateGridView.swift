@@ -11,6 +11,13 @@ final class GridModel {
     private(set) var result: FeatureStore.RankedResult?
     private(set) var ignored: [Candidate] = []
     private(set) var isLoading = false
+    /// The Library tab's "Show Ignored" filter (FR-4.9). Lives here rather
+    /// than as view-local `@State` so it has one source of truth reachable
+    /// both from `CandidateGridView`'s own switch and from the View menu's
+    /// "Show Ignored" toggle — the model is published via
+    /// `.focusedSceneValue(\.libraryGridModel, self)` below and read back by
+    /// `AppCommands` (see AppCommands.swift for the focusedValue plumbing).
+    var showingIgnored = false
 
     private var store: FeatureStore?
     private var pendingReload = false
@@ -48,27 +55,29 @@ final class GridModel {
 struct CandidateGridView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var model = GridModel()
-    @State private var showingIgnored = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
-            if showingIgnored {
+            if model.showingIgnored {
                 ignoredGrid
             } else {
                 candidateGrid
             }
         }
-        .task(id: "\(showingIgnored)|\(RankingClock.shared.version)") {
+        .task(id: "\(model.showingIgnored)|\(RankingClock.shared.version)") {
             // Reloads on appearance and after every duel choice re-trains the
             // ranker; also on toggling the ignored filter.
-            if showingIgnored {
+            if model.showingIgnored {
                 await model.loadIgnored(container: modelContext.container)
             } else {
                 await model.load(container: modelContext.container)
             }
         }
+        // FR-8.3: lets the View menu's "Show Ignored" toggle control the
+        // same model this view's own switch does.
+        .focusedSceneValue(\.libraryGridModel, model)
     }
 
     @ViewBuilder
@@ -81,6 +90,15 @@ struct CandidateGridView: View {
                 systemImage: "photo.stack",
                 description: Text("Run the scan and analysis above — accepted photos appear here, best first.")
             )
+        } else {
+            // FR-4.11: the very first load (before `result` is populated at
+            // all) showed nothing here — unlike ExportView's "Loading
+            // candidates…" state for the same underlying wait. A placeholder
+            // keeps every lazily-loading tab consistent instead of only this
+            // one going blank.
+            ProgressView("Loading candidates…")
+                .frame(maxWidth: .infinity)
+                .padding(.top, 40)
         }
     }
 
@@ -114,7 +132,7 @@ struct CandidateGridView: View {
             Text("Top Candidates")
                 .font(.headline)
 
-            if let result = model.result, !showingIgnored {
+            if let result = model.result, !model.showingIgnored {
                 Text("\(result.candidates.count) of \(result.acceptedCount) accepted · \(result.suppressedCount) near-duplicates hidden")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -122,14 +140,14 @@ struct CandidateGridView: View {
 
             Spacer()
 
-            Toggle("Show Ignored", isOn: $showingIgnored)
+            Toggle("Show Ignored", isOn: Bindable(model).showingIgnored)
                 .toggleStyle(.switch)
                 .controlSize(.small)
 
-            if model.isLoading && !showingIgnored {
+            if model.isLoading && !model.showingIgnored {
                 ProgressView()
                     .controlSize(.small)
-            } else if !showingIgnored {
+            } else if !model.showingIgnored {
                 Button("Refresh") {
                     Task { await model.load(container: modelContext.container) }
                 }
@@ -187,6 +205,18 @@ struct ThumbnailCell: View {
                 thumbnail = await ThumbnailLoader.load(candidate.localIdentifier)
             }
         }
+        // Tab-focusable with the system focus ring, so keyboard/VoiceOver
+        // users can reach every cell without a mouse, and so the Photo menu
+        // (FR-4.6/FR-8.3) has something to act on: `.focusedValue` publishes
+        // this cell's candidate only while focus is actually inside it — see
+        // AppCommands.swift for how AppCommands reads it back. Shared by the
+        // Library grid and the Export preview, so both get this for free.
+        .focusable()
+        .focusedValue(\.focusedPhoto, FocusedPhoto(
+            localIdentifier: candidate.localIdentifier,
+            isIgnored: isIgnoredMode,
+            modelContext: modelContext
+        ))
         // One accessibility element per cell: an unlabeled score/badge overlay
         // is invisible to VoiceOver otherwise.
         .accessibilityElement(children: .ignore)

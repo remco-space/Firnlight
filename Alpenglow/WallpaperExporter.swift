@@ -78,15 +78,29 @@ nonisolated enum WallpaperAlbumSync {
         var added = 0
         var removed = 0
         var total = 0
+        /// FR-6.6: whether the post-sync read-back of the album actually
+        /// matched the requested diversity order. `true` on the ordinary
+        /// path; `false` surfaces a real (if rare) Photos-side mismatch to
+        /// ExportView instead of only logging it.
+        var orderVerified = true
     }
 
     enum SyncError: LocalizedError {
         case albumCreationFailed
+        /// FR-6.8: the re-add after a remove failed, and the best-effort
+        /// rollback that restores the previous membership *also* failed —
+        /// the album may now be sitting empty. Thrown instead of the rollback
+        /// staying a silent `try?`, so the user finds out (via ExportView's
+        /// `errorMessage`) rather than discovering a blank wallpaper rotation
+        /// later with no explanation.
+        case syncFailedAndRollbackFailed(underlying: Error)
 
         var errorDescription: String? {
             switch self {
             case .albumCreationFailed:
                 "Couldn't create the “\(Thresholds.wallpaperAlbumName)” album in Photos."
+            case .syncFailedAndRollbackFailed(let underlying):
+                "Sync failed and the album may now be empty (\(underlying.localizedDescription)). Syncing again will rebuild it."
             }
         }
     }
@@ -145,8 +159,18 @@ nonisolated enum WallpaperAlbumSync {
             // rotation — empty. Best-effort restore what was just removed.
             log.error("Re-add failed after remove; restoring previous album membership: \(error.localizedDescription, privacy: .public)")
             if current.count > 0 {
-                try? await PHPhotoLibrary.shared().performChanges {
-                    PHAssetCollectionChangeRequest(for: album)?.addAssets(current)
+                do {
+                    try await PHPhotoLibrary.shared().performChanges {
+                        PHAssetCollectionChangeRequest(for: album)?.addAssets(current)
+                    }
+                } catch let rollbackError {
+                    // Both the sync and its rollback failed: the album may be
+                    // stranded empty. Don't swallow this one (FR-6.8) — throw
+                    // a distinct error so ExportView's errorMessage tells the
+                    // user, rather than the previous `try?` hiding a second
+                    // failure behind the first.
+                    log.error("Rollback ALSO failed; album may be empty: \(rollbackError.localizedDescription, privacy: .public)")
+                    throw SyncError.syncFailedAndRollbackFailed(underlying: error)
                 }
             }
             throw error
@@ -165,7 +189,9 @@ nonisolated enum WallpaperAlbumSync {
             log.info("Album order verified: \(resultingIDs.count) photos in diversity order")
         }
 
-        let outcome = Outcome(added: added, removed: removed, total: orderedAssets.count)
+        // FR-6.6: carry the verification result in the outcome so ExportView
+        // can tell the user honestly, not just log it.
+        let outcome = Outcome(added: added, removed: removed, total: orderedAssets.count, orderVerified: orderMatches)
         log.info("Album sync: +\(outcome.added) −\(outcome.removed), total \(outcome.total) (diversity-ordered)")
         return outcome
     }

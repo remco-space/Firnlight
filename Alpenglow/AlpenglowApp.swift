@@ -10,22 +10,38 @@ import AppKit
 /// telemetry; all processing currently runs on-device with no network calls.
 /// (FR-1.5 permits Apple's Private Cloud Compute for higher-level
 /// foundation-model work, retaining no data; the app uses none today.) Every
-/// stage that touches the store runs as a
-/// @ModelActor actor off the main thread; values crossing actor boundaries are
-/// nonisolated Sendable structs.
+/// stage that touches the store runs as a plain actor owning its own
+/// ModelContext, off the main thread (see FeatureStore for why @ModelActor
+/// can't deliver that); values crossing actor boundaries are nonisolated
+/// Sendable structs.
 @main
 struct AlpenglowApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
         Self.deferToExistingInstance()
+        // A WindowGroup-style multi-window app gets automatic window tabbing
+        // (View > Show Tab Bar, tabs merging ⌘N windows) from AppKit. Two
+        // "Alpenglow" tabs of the same single pipeline are a contradiction of
+        // FR-1.6/FR-1.7's single-window design, so opt out; this also removes
+        // the system's Show/New Tab menu items.
+        NSWindow.allowsAutomaticWindowTabbing = false
     }
 
     var body: some Scene {
-        WindowGroup {
+        // `Window`, not `WindowGroup`: this is a single-window utility
+        // (FR-1.6/FR-1.7) — a unique-window scene means no File > New Window
+        // (⌘N), and reopening the app just brings the one window forward.
+        Window("Alpenglow", id: "main") {
             ContentView()
         }
         .modelContainer(for: [PhotoRecord.self, ChoiceRecord.self, VerdictRecord.self])
+        // FR-8.3: the standard macOS menu bar's named commands (Photo
+        // actions, Show Ignored, scan, sync). Quit (⌘Q) needs nothing here —
+        // it's already part of the automatic app menu. See AppCommands.swift
+        // for the focusedValue plumbing that connects these menu items back
+        // to view-local state.
+        .commands { AppCommands() }
     }
 
     /// LaunchServices happily starts a second instance when the app is launched

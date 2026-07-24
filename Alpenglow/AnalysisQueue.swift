@@ -14,7 +14,6 @@ nonisolated struct AnalysisStatistics: Sendable, Equatable {
     var people = 0
     var notNature = 0
     var skipped = 0
-    var horizonPending = 0
 
     var analyzed: Int { total - pending }
 
@@ -27,8 +26,16 @@ nonisolated struct AnalysisStatistics: Sendable, Equatable {
 /// Processes records in batches of `Thresholds.analysisBatchSize`, saving after
 /// each batch, so killing the app mid-analysis loses at most one batch. Pending
 /// work is simply every record with `analysisVersion < currentAnalysisVersion`.
-@ModelActor
+/// Plain actor with its own `ModelContext`, not `@ModelActor`, so its work
+/// truly runs off the main thread — see FeatureStore's doc comment for the
+/// `DefaultSerialModelExecutor` caller-thread pitfall this avoids (FR-8.2).
 actor AnalysisQueue {
+    private let modelContext: ModelContext
+
+    init(modelContainer: ModelContainer) {
+        self.modelContext = ModelContext(modelContainer)
+    }
+
     private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "AnalysisQueue")
 
     private enum ItemResult: Sendable {
@@ -71,12 +78,7 @@ actor AnalysisQueue {
             attemptedNetworkRetries.formUnion(batch.map(\.localIdentifier))
         }
 
-        // Third pass: horizon backfill for accepted photos analyzed before the
-        // horizon prior existed. New analyses measure it inline.
-        if batch.isEmpty {
-            return try await processHorizonBatch()
-        }
-        guard !batch.isEmpty else { return nil }
+        if batch.isEmpty { return nil }
 
         let byIdentifier = Dictionary(uniqueKeysWithValues: batch.map { ($0.localIdentifier, $0) })
 
@@ -111,33 +113,8 @@ actor AnalysisQueue {
         return results.count
     }
 
-    /// Measures horizon tilt for accepted records that predate the horizon
-    /// prior. Returns nil when none remain.
-    private func processHorizonBatch() async throws -> Int? {
-        var descriptor = FetchDescriptor<PhotoRecord>(
-            predicate: #Predicate { $0.isNature && !$0.horizonMeasured }
-        )
-        descriptor.fetchLimit = Thresholds.analysisBatchSize
-        let batch = try modelContext.fetch(descriptor)
-        guard !batch.isEmpty else { return nil }
-
-        let byIdentifier = Dictionary(uniqueKeysWithValues: batch.map { ($0.localIdentifier, $0) })
-
-        let results = try await runBatch(batch.map(\.localIdentifier)) { id in
-            await Self.measureHorizonForAsset(id)
-        }
-
-        for (id, angle) in results {
-            guard let record = byIdentifier[id] else { continue }
-            record.horizonAngleDegrees = angle
-            record.horizonMeasured = true
-        }
-        try modelContext.save()
-        return results.count
-    }
-
-    /// Bounded-concurrency batch runner shared by the analysis and horizon
-    /// passes: seeds `Thresholds.analysisConcurrency` tasks, then refills one
+    /// Bounded-concurrency batch runner for the analysis pass: seeds
+    /// `Thresholds.analysisConcurrency` tasks, then refills one
     /// at a time as each finishes, so at most that many requests are ever in
     /// flight regardless of batch size.
     private func runBatch<T: Sendable>(
@@ -163,17 +140,6 @@ actor AnalysisQueue {
         return results
     }
 
-    /// Returns nil for the angle when the photo is unmeasurable now, so the
-    /// pass still marks it measured and completes.
-    private static func measureHorizonForAsset(_ identifier: String) async -> (String, Float?) {
-        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject,
-              let image = await analysisBitmap(for: asset, allowNetwork: true) else {
-            return (identifier, nil)
-        }
-        let angle = (try? await ImageAnalyzer.measureHorizon(image)) ?? nil
-        return (identifier, angle)
-    }
-
     func statistics() throws -> AnalysisStatistics {
         let version = Thresholds.currentAnalysisVersion
         func count(_ predicate: Predicate<PhotoRecord>) throws -> Int {
@@ -189,7 +155,6 @@ actor AnalysisQueue {
             $0.analysisVersion == version && !$0.isNature && !$0.isUtility && !$0.hasPeople && !$0.isSkipped
         })
         stats.skipped = try count(#Predicate { $0.isSkipped })
-        stats.horizonPending = try count(#Predicate { $0.isNature && !$0.horizonMeasured })
         return stats
     }
 

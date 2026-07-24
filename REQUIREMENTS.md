@@ -39,13 +39,15 @@ The app has three tabs matching the three stages of the journey:
   model than can run locally.
 - **FR-1.6** Launching the app twice just brings the already-running window
   forward instead of opening a second one. *(Why: protects the user's data.)*
-- **FR-1.7** Closing the app's window quits the app entirely, instead of
-  leaving it running with no window (the usual macOS default). *(Why: Alpenglow
-  is a single-window utility — a windowless, still-running state is just a
-  confusing no-op with nothing for the user to do.)* The one exception: if a
-  process such as an album sync is in progress, the quit waits for it to finish
-  (or safely roll back) first, so closing the window mid-sync can never leave
-  application state or the photos album half-written (see FR-6.8).
+- **FR-1.7** Alpenglow is a single-window app, so closing its window quits it —
+  the standard behavior for a single-window utility (as with System Settings),
+  not an override of the platform. Quitting is also always available the usual
+  way, through the app's Quit command (⌘Q, see FR-8.3). *(Why: for a
+  single-window utility a windowless, still-running state is a confusing no-op
+  with nothing for the user to do.)* The one exception: if a process such as an
+  album sync is in progress, the quit waits for it to finish (or safely roll
+  back) first, so closing the window mid-sync can never leave application state
+  or the photos album half-written (see FR-6.8).
 
 ## 2. Finding candidate photos (Library tab)
 
@@ -106,18 +108,25 @@ The app has three tabs matching the three stages of the journey:
   from duels.
 - **FR-4.6** Right-clicking any photo anywhere in the app (grid, export
   preview, duel) offers three actions: "Open in Photos", "Not Wallpaper
-  Material", and "Ignore This Photo".
+  Material", and "Ignore This Photo". These same three actions are also
+  available as named commands in the menu bar, acting on the focused photo (see
+  FR-8.3), so right-click is a convenient accelerator — never the only way to
+  reach them.
 - **FR-4.7** "Not Wallpaper Material" records that the human judges this a bad
   wallpaper on its face — the same absolute bad-quality verdict as "Both Are
   Bad" in a duel. It does **not** remove the photo: it stays in the grid,
-  future duels, and the album-size suggestion, and the learned ranking may
-  still place it high later (unlikely, but not prevented). Using it mid-duel
-  advances to a fresh pair.
+  future duels, and the album-size suggestion. But it also teaches the ranking
+  — the same way losing a duel does — that this photo, and others like it, are
+  less desirable as wallpaper, pushing them down over time (and so out of the
+  album's top-ranked selection). Using it mid-duel advances to a fresh pair.
 - **FR-4.8** "Ignore This Photo" fully removes a photo from the grid, future
   duels, the album-size suggestion, and (on next sync) the album. *(Why: some
   photos are a genuinely good shot but personally unwanted as a wallpaper —
   e.g. emotionally triggering — and should disappear entirely rather than
   merely be marked poor quality.)* Using it mid-duel advances to a fresh pair.
+  These per-photo actions (FR-4.6–4.8) apply only to the exact photo, never to
+  its collapsed near-duplicate siblings (FR-4.2) — ignoring the shown frame
+  simply lets a sibling of the same scene take its place.
 - **FR-4.9** The Library tab has a "Show Ignored" filter to review ignored
   photos and un-ignore any of them, returning them to the normal grid, duels,
   and album sizing.
@@ -135,11 +144,18 @@ The app has three tabs matching the three stages of the journey:
   the iCloud Shared Photo Library (the legacy Shared Albums signal is a
   different feature and would mislabel photos). Kept as a requirement to
   revisit when the OS provides this.
-- **FR-4.13** Every status-indicator icon anywhere in the app carries a
-  tooltip that explains what the icon indicates and, when the icon is
-  clickable, hints at what clicking it will do. *(Why: an icon alone is
-  ambiguous; a hover explanation makes the app self-describing without
-  cluttering the interface with permanent labels.)*
+- **FR-4.13** Every status-indicator icon and icon-only control is
+  self-describing without relying on hover. It always carries an accessibility
+  label so VoiceOver and assistive tech announce it; anything essential the user
+  needs to understand or act on is also conveyed in visible words nearby (as
+  FR-1.2 and FR-3.2 already do for access state and set-aside reasons) or
+  reachable as a named menu command (FR-8.3); and a pointer tooltip is layered
+  on top as a convenience for mouse users. *(Why: an icon alone is ambiguous.
+  Hover text explains it for pointer users but is invisible to keyboard,
+  VoiceOver, and touch — so it can enrich meaning but must never be the only
+  carrier of it. Merely-nice-to-know badges like the favorite heart or score can
+  still lean on the label + tooltip, keeping the interface free of permanent
+  clutter.)*
 
 ## 5. Learning taste (Duel tab)
 
@@ -153,9 +169,9 @@ The app has three tabs matching the three stages of the journey:
 - **FR-5.2** Ranking is learned entirely from the user's choices. Nothing is
   hard-coded: a low-resolution or tilted photo is penalized only as much as
   the user's own decisions imply.
-- **FR-5.3** Every choice is remembered permanently, and the accumulated
-  choices are always enough to rebuild the ranking from scratch — the user's
-  invested judgment is never lost.
+- **FR-5.3** Every choice and verdict is remembered permanently, and the
+  accumulated judgments are always enough to rebuild the ranking from scratch —
+  the user's invested judgment is never lost.
 - **FR-5.4** Ranking starts from the user's existing Photos favorites, so
   recommendations feel personal from the very first duel. *(Why: no cold
   start.)*
@@ -167,8 +183,11 @@ The app has three tabs matching the three stages of the journey:
   the app also learns where the quality cutoff belongs — narrowing over time
   as that cutoff firms up.
 - **FR-5.7** Besides picking a winner, the user can say "Both Are Great",
-  "Both Are Bad", or Skip. Great/Bad record absolute quality (used to size the
-  album, not to rank); Skip just moves on.
+  "Both Are Bad", or Skip. Both record absolute quality that helps size the
+  album. A "Both Are Bad" verdict additionally penalizes the ranking — teaching
+  the app these photos are less desirable, as a duel loss does — while "Both Are
+  Great" affects album size only, since good photos already rise by winning
+  duels. Skip just moves on.
 - **FR-5.8** The Duel tab shows how many choices the user has made, and a
   friendly empty state when there aren't yet two candidates to compare.
 - **FR-5.9** Each duel card has its own visible ignore control, for a photo
@@ -216,9 +235,42 @@ The app has three tabs matching the three stages of the journey:
 - **FR-7.3** Rebuilding or upgrading the app never requires the user to
   re-grant Photos access or re-train their taste from scratch.
 
+## 8. Native feel
+
+- **FR-8.1** Alpenglow follows Apple's Human Interface Guidelines for the
+  platform it ships on (macOS today) — it looks, behaves, and feels like a
+  native app, not a port. This single rule stands in for the whole native-feel
+  checklist Apple already maintains: respecting the system light/dark appearance
+  and accent, adapting cleanly to any window size, using the platform's own
+  controls, menus, gestures, and keyboard shortcuts, staying legible over system
+  materials, remaining fully usable with VoiceOver, the keyboard, larger text
+  sizes, and the reduce-motion / reduce-transparency / increase-contrast
+  settings, and returning the user to where they left off (active tab, scroll
+  position, and in-progress duel) on the next launch. *(Why: the HIG is the
+  living definition of "native" on the OS; deferring to it keeps the app feeling
+  like it belongs without this brief restating — and having to maintain — rules
+  Apple already publishes and updates every release. If Alpenglow ever ships on
+  another platform, this requirement extends to that platform's HIG too.)*
+- **FR-8.2** The app always stays responsive: no action ever freezes the
+  interface. Work that takes time runs out of the way behind live progress, and
+  the rest of the app stays usable while it runs. *(Why: a frozen window with a
+  spinning cursor looks broken and leaves the user with nothing to do — even
+  honest waiting should never take the whole app hostage. Of all of FR-8.1's
+  native-feel promises this is the one concrete enough to test directly, so it is
+  called out explicitly rather than left to the umbrella.)*
+- **FR-8.3** Alpenglow has a standard macOS menu bar that exposes its real
+  commands as named menu items with correct enabled/disabled state and standard
+  keyboard shortcuts — at least Quit (⌘Q), the three photo actions of FR-4.6, the
+  Show Ignored toggle (FR-4.9), scan / re-scan, and album sync. *(Why: the menu
+  bar is where macOS users look for a command first, and it names every action
+  in words with a shortcut. It makes actions discoverable and keyboard-reachable,
+  so nothing essential lives only behind a right-click (FR-4.6) or an unlabeled
+  icon (FR-4.13) — the one structural place these native-feel promises come
+  together.)*
+
 ## Deferred ideas (explicitly parked)
 
 - Auto-leveling the horizon if the app ever sets wallpapers directly rather
   than via the album.
-- Using "both great/bad" verdicts as ranking training signal (currently they
-  only calibrate the album size).
+- Using a "good" verdict as an *upward* ranking signal (today only bad verdicts
+  train the ranking — downward; good verdicts calibrate album size only).
