@@ -20,10 +20,19 @@ struct AlpenglowApp: App {
 
     init() {
         Self.deferToExistingInstance()
+        // A WindowGroup-style multi-window app gets automatic window tabbing
+        // (View > Show Tab Bar, tabs merging ⌘N windows) from AppKit. Two
+        // "Alpenglow" tabs of the same single pipeline are a contradiction of
+        // FR-1.6/FR-1.7's single-window design, so opt out; this also removes
+        // the system's Show/New Tab menu items.
+        NSWindow.allowsAutomaticWindowTabbing = false
     }
 
     var body: some Scene {
-        WindowGroup {
+        // `Window`, not `WindowGroup`: this is a single-window utility
+        // (FR-1.6/FR-1.7) — a unique-window scene means no File > New Window
+        // (⌘N), and reopening the app just brings the one window forward.
+        Window("Alpenglow", id: "main") {
             ContentView()
         }
         .modelContainer(for: [PhotoRecord.self, ChoiceRecord.self, VerdictRecord.self])
