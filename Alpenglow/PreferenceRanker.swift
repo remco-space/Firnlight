@@ -144,6 +144,18 @@ actor PreferenceRanker {
             && indexByID[pair.second.localIdentifier] != nil
     }
 
+    /// Reconstructs a `DuelPair` from two persisted local identifiers — used
+    /// to resume the exact pair the user was looking at on the previous
+    /// launch (FR-8.1). Returns nil if either photo is no longer a live
+    /// candidate (deleted, edited out, ignored, etc.), in which case the
+    /// caller should fall back to `nextPair()` as if this were a fresh start.
+    func pair(first: String, second: String) -> DuelPair? {
+        guard let firstIndex = indexByID[first], let secondIndex = indexByID[second] else {
+            return nil
+        }
+        return DuelPair(first: candidate(for: entries[firstIndex]), second: candidate(for: entries[secondIndex]))
+    }
+
     /// Fetches the current nature, non-excluded candidates into `entries` and
     /// rebuilds `indexByID`. Weights are untouched.
     private func loadEntries() {
