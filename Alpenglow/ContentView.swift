@@ -76,8 +76,11 @@ private struct LibraryTab: View {
         y: CGFloat(UserDefaults.standard.double(forKey: "libraryScrollOffsetY"))
     )
     /// Tracks the live offset so it can be written out once, at a natural
-    /// checkpoint, rather than on every scroll-geometry callback.
-    @State private var currentScrollOffsetY: CGFloat = 0
+    /// checkpoint, rather than on every scroll-geometry callback. Seeded from
+    /// the same persisted value as `scrollPosition`, so a quit before the
+    /// first scroll-geometry callback re-persists the restored offset instead
+    /// of clobbering it with 0.
+    @State private var currentScrollOffsetY = CGFloat(UserDefaults.standard.double(forKey: "libraryScrollOffsetY"))
 
     var body: some View {
         if authorization.isAuthorized {
@@ -103,12 +106,12 @@ private struct LibraryTab: View {
             } action: { _, newValue in
                 currentScrollOffsetY = newValue
             }
-            // Persist at the checkpoint that already exists for FR-1.3 (the
-            // scenePhase watcher below), rather than on every scroll frame:
-            // leaving .active — backgrounding or, for this quit-on-close app
-            // (FR-1.7), quitting — is exactly when "where the user left off"
-            // needs to be durable, and it's a tiny fraction of the writes a
-            // per-frame save would cost.
+            // Persist on leaving .active rather than on every scroll frame:
+            // backgrounding or, for this quit-on-close app (FR-1.7), quitting
+            // is exactly when "where the user left off" needs to be durable,
+            // and it's a tiny fraction of the writes a per-frame save would
+            // cost. (Its own watcher — ContentView's FR-1.3 watcher fires on
+            // the opposite transition, for authorization.)
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase != .active {
                     UserDefaults.standard.set(Double(currentScrollOffsetY), forKey: "libraryScrollOffsetY")
