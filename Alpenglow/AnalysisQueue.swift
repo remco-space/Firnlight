@@ -27,8 +27,16 @@ nonisolated struct AnalysisStatistics: Sendable, Equatable {
 /// Processes records in batches of `Thresholds.analysisBatchSize`, saving after
 /// each batch, so killing the app mid-analysis loses at most one batch. Pending
 /// work is simply every record with `analysisVersion < currentAnalysisVersion`.
-@ModelActor
+/// Plain actor with its own `ModelContext`, not `@ModelActor`, so its work
+/// truly runs off the main thread — see FeatureStore's doc comment for the
+/// `DefaultSerialModelExecutor` caller-thread pitfall this avoids (FR-8.2).
 actor AnalysisQueue {
+    private let modelContext: ModelContext
+
+    init(modelContainer: ModelContainer) {
+        self.modelContext = ModelContext(modelContainer)
+    }
+
     private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "AnalysisQueue")
 
     private enum ItemResult: Sendable {

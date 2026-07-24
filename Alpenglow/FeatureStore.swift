@@ -35,8 +35,27 @@ extension Data {
 }
 
 /// SwiftData queries for the ranking pipeline.
-@ModelActor
+///
+/// A plain actor owning its own `ModelContext` — deliberately NOT
+/// `@ModelActor`. `@ModelActor`'s `DefaultSerialModelExecutor` runs each job
+/// on the thread of whichever caller awaited it (verified empirically on
+/// macOS 27 with a probe): called from main-actor code, as every view model
+/// in this app does, every fetch/rank/dedupe silently became main-thread
+/// work — the FR-8.2 beachball on switching to the Export tab was
+/// `suggestedAlbumSize()`'s O(n²) dedupe walk sampled ON the main thread
+/// despite living in a "background" model actor. A plain actor's default
+/// executor lives on the cooperative pool, so cross-actor calls genuinely
+/// hop off main. The context is created in the init and only ever touched
+/// from actor-isolated methods, preserving SwiftData's serialized-access
+/// requirement. `PreferenceRanker` and `AnalysisQueue` follow the same
+/// pattern for the same reason.
 actor FeatureStore {
+    private let modelContext: ModelContext
+
+    init(modelContainer: ModelContainer) {
+        self.modelContext = ModelContext(modelContainer)
+    }
+
     struct RankedResult: Sendable, Equatable {
         let candidates: [Candidate]
         let acceptedCount: Int

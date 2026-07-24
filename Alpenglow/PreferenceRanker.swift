@@ -16,8 +16,16 @@ import os
 /// weights are rebuilt by seeding from Photos favorites (pseudo-choices:
 /// favorite beats random non-favorite) and then replaying every ChoiceRecord
 /// in timestamp order.
-@ModelActor
+/// Plain actor with its own `ModelContext`, not `@ModelActor`, so its work
+/// truly runs off the main thread — see FeatureStore's doc comment for the
+/// `DefaultSerialModelExecutor` caller-thread pitfall this avoids (FR-8.2).
 actor PreferenceRanker {
+    private let modelContext: ModelContext
+
+    init(modelContainer: ModelContainer) {
+        self.modelContext = ModelContext(modelContainer)
+    }
+
     struct DuelPair: Sendable, Equatable {
         let first: Candidate
         let second: Candidate

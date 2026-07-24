@@ -10,9 +10,10 @@ import AppKit
 /// telemetry; all processing currently runs on-device with no network calls.
 /// (FR-1.5 permits Apple's Private Cloud Compute for higher-level
 /// foundation-model work, retaining no data; the app uses none today.) Every
-/// stage that touches the store runs as a
-/// @ModelActor actor off the main thread; values crossing actor boundaries are
-/// nonisolated Sendable structs.
+/// stage that touches the store runs as a plain actor owning its own
+/// ModelContext, off the main thread (see FeatureStore for why @ModelActor
+/// can't deliver that); values crossing actor boundaries are nonisolated
+/// Sendable structs.
 @main
 struct AlpenglowApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
