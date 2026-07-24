@@ -124,6 +124,9 @@ The app has three tabs matching the three stages of the journey:
   photos are a genuinely good shot but personally unwanted as a wallpaper —
   e.g. emotionally triggering — and should disappear entirely rather than
   merely be marked poor quality.)* Using it mid-duel advances to a fresh pair.
+  These per-photo actions (FR-4.6–4.8) apply only to the exact photo, never to
+  its collapsed near-duplicate siblings (FR-4.2) — ignoring the shown frame
+  simply lets a sibling of the same scene take its place.
 - **FR-4.9** The Library tab has a "Show Ignored" filter to review ignored
   photos and un-ignore any of them, returning them to the normal grid, duels,
   and album sizing.
