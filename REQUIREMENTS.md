@@ -115,9 +115,10 @@ The app has three tabs matching the three stages of the journey:
 - **FR-4.7** "Not Wallpaper Material" records that the human judges this a bad
   wallpaper on its face — the same absolute bad-quality verdict as "Both Are
   Bad" in a duel. It does **not** remove the photo: it stays in the grid,
-  future duels, and the album-size suggestion, and the learned ranking may
-  still place it high later (unlikely, but not prevented). Using it mid-duel
-  advances to a fresh pair.
+  future duels, and the album-size suggestion. But it also teaches the ranking
+  — the same way losing a duel does — that this photo, and others like it, are
+  less desirable as wallpaper, pushing them down over time (and so out of the
+  album's top-ranked selection). Using it mid-duel advances to a fresh pair.
 - **FR-4.8** "Ignore This Photo" fully removes a photo from the grid, future
   duels, the album-size suggestion, and (on next sync) the album. *(Why: some
   photos are a genuinely good shot but personally unwanted as a wallpaper —
@@ -165,9 +166,9 @@ The app has three tabs matching the three stages of the journey:
 - **FR-5.2** Ranking is learned entirely from the user's choices. Nothing is
   hard-coded: a low-resolution or tilted photo is penalized only as much as
   the user's own decisions imply.
-- **FR-5.3** Every choice is remembered permanently, and the accumulated
-  choices are always enough to rebuild the ranking from scratch — the user's
-  invested judgment is never lost.
+- **FR-5.3** Every choice and verdict is remembered permanently, and the
+  accumulated judgments are always enough to rebuild the ranking from scratch —
+  the user's invested judgment is never lost.
 - **FR-5.4** Ranking starts from the user's existing Photos favorites, so
   recommendations feel personal from the very first duel. *(Why: no cold
   start.)*
@@ -179,8 +180,11 @@ The app has three tabs matching the three stages of the journey:
   the app also learns where the quality cutoff belongs — narrowing over time
   as that cutoff firms up.
 - **FR-5.7** Besides picking a winner, the user can say "Both Are Great",
-  "Both Are Bad", or Skip. Great/Bad record absolute quality (used to size the
-  album, not to rank); Skip just moves on.
+  "Both Are Bad", or Skip. Both record absolute quality that helps size the
+  album. A "Both Are Bad" verdict additionally penalizes the ranking — teaching
+  the app these photos are less desirable, as a duel loss does — while "Both Are
+  Great" affects album size only, since good photos already rise by winning
+  duels. Skip just moves on.
 - **FR-5.8** The Duel tab shows how many choices the user has made, and a
   friendly empty state when there aren't yet two candidates to compare.
 - **FR-5.9** Each duel card has its own visible ignore control, for a photo
@@ -265,5 +269,5 @@ The app has three tabs matching the three stages of the journey:
 
 - Auto-leveling the horizon if the app ever sets wallpapers directly rather
   than via the album.
-- Using "both great/bad" verdicts as ranking training signal (currently they
-  only calibrate the album size).
+- Using a "good" verdict as an *upward* ranking signal (today only bad verdicts
+  train the ranking — downward; good verdicts calibrate album size only).
