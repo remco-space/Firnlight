@@ -3,6 +3,7 @@ import SwiftData
 import Photos
 import Observation
 import AppKit
+import os
 
 /// Loads the ranked, deduplicated candidate list off the main actor.
 @MainActor
@@ -281,6 +282,8 @@ struct ThumbnailCell: View {
 /// Context-menu actions shared by every image shown in the app.
 @MainActor
 enum CandidateActions {
+    private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "CandidateActions")
+
     /// Best-effort deep link; the scheme is undocumented but widely used.
     /// Falls back to just opening Photos if navigation isn't supported.
     static func openInPhotos(_ localIdentifier: String) {
@@ -293,11 +296,33 @@ enum CandidateActions {
     /// value. This does NOT exclude — it records the same absolute bad-quality
     /// verdict the duel's "Both Are Bad" writes, so the photo stays in the
     /// ranking and duels but drags the album-size calibration's quality bar.
-    /// (It may still rank high enough to appear, though that's unlikely.)
+    /// It also trains the ranking the same way losing a duel does, pushing
+    /// this photo — and others like it — down over time (FR-4.7).
+    ///
+    /// Training needs the ranker actor (`PreferenceRanker.recordVerdicts`),
+    /// which every other call site of this action doesn't otherwise hold a
+    /// live instance of (unlike the Duel tab, which already owns one for
+    /// choices). Rather than thread a shared ranker through the grid, the
+    /// menu bar, and duel-card context menus, this spins up a short-lived
+    /// one — the same pattern `AnalysisView` uses for a one-off `prepare()`.
+    /// `prepare()` reads the persisted weights file fresh each call, so this
+    /// always trains on top of the latest known weights regardless of which
+    /// view last wrote them; the one gap is a *concurrently open* Duel tab,
+    /// whose own long-lived ranker instance won't notice this write until
+    /// its next full `prepare()` (a relaunch) — an existing limitation of
+    /// having multiple ranker instances share one weights file, not
+    /// something new here.
     static func markNotWallpaperMaterial(_ localIdentifier: String, in modelContext: ModelContext) {
-        modelContext.insert(VerdictRecord(localIdentifier: localIdentifier, isGood: false, timestamp: Date()))
-        try? modelContext.save()
-        RankingClock.shared.bump() // calibration + dependent views reload
+        let container = modelContext.container
+        Task {
+            do {
+                let ranker = PreferenceRanker(modelContainer: container)
+                try await ranker.prepare()
+                try await ranker.recordVerdicts([localIdentifier], isGood: false)
+            } catch {
+                log.error("Failed to record bad verdict for \(localIdentifier, privacy: .public): \(error)")
+            }
+        }
     }
 
     /// "Ignore This Photo": fully drop it from the grid, duels, calibration,
