@@ -90,6 +90,15 @@ struct CandidateGridView: View {
                 systemImage: "photo.stack",
                 description: Text("Run the scan and analysis above — accepted photos appear here, best first.")
             )
+        } else {
+            // FR-4.11: the very first load (before `result` is populated at
+            // all) showed nothing here — unlike ExportView's "Loading
+            // candidates…" state for the same underlying wait. A placeholder
+            // keeps every lazily-loading tab consistent instead of only this
+            // one going blank.
+            ProgressView("Loading candidates…")
+                .frame(maxWidth: .infinity)
+                .padding(.top, 40)
         }
     }
 

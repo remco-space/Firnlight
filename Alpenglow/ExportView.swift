@@ -191,13 +191,30 @@ struct ExportView: View {
                     .disabled(model.isSyncing)
 
                     if let outcome = model.outcome {
-                        Label(
-                            "Album has \(outcome.total) photos (+\(outcome.added), −\(outcome.removed) this sync)",
-                            systemImage: "checkmark.circle"
-                        )
-                        .foregroundStyle(.green)
-                        .font(.callout.monospacedDigit())
-                        .help("The sync finished — the Photos album now matches the preview below.")
+                        if outcome.orderVerified {
+                            Label(
+                                "Album has \(outcome.total) photos (+\(outcome.added), −\(outcome.removed) this sync)",
+                                systemImage: "checkmark.circle"
+                            )
+                            .foregroundStyle(.green)
+                            .font(.callout.monospacedDigit())
+                            .help("The sync finished — the Photos album now matches the preview below.")
+                        } else {
+                            // FR-6.6: the sync itself succeeded, but the
+                            // post-sync read-back found Photos didn't end up
+                            // in the requested diversity order — surface that
+                            // honestly instead of showing the same green
+                            // success label the mismatch would otherwise hide
+                            // behind (see WallpaperAlbumSync.sync's order
+                            // verification).
+                            Label(
+                                "Album synced, but Photos reported a different order — try syncing again.",
+                                systemImage: "exclamationmark.triangle"
+                            )
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+                            .help("The album has \(outcome.total) photos, but their order in Photos doesn't match the preview below. Syncing again usually fixes it.")
+                        }
                     }
                 }
 

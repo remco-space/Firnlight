@@ -142,12 +142,22 @@ private struct LibraryTab: View {
         HStack(spacing: 12) {
             Image(systemName: "lock.trianglebadge.exclamationmark")
                 .foregroundStyle(.orange)
+                .accessibilityHidden(true) // decorative — the text beside it already carries the meaning (FR-4.13)
                 .help("Photos access is limited — Alpenglow only sees the photos you selected, so wallpapers can only come from that selection.")
             Text("Only your selected photos are available to Alpenglow.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 12)
-            Button("Open Photos Settings") { openPrivacySettings() }
+            // FR-1.2 wants a shortcut to *change the selection*, not just the
+            // Privacy pane. PhotoKit's limited-library picker
+            // (`presentLimitedLibraryPickerFromViewController:`) is
+            // `API_UNAVAILABLE(macos)` — iOS/Catalyst only, no AppKit
+            // counterpart exists as of macOS 27 beta 4 — so there's no way to
+            // reopen the picker in-app. This falls back to the Privacy pane,
+            // with a label that's honest about the extra step still needed
+            // there (System Settings → Privacy & Security → Photos → Edit
+            // Selected Photos) rather than implying a one-click reselect.
+            Button("Change Selection in Settings…") { openPrivacySettings() }
         }
         .padding(12)
         .frame(maxWidth: .infinity)
@@ -168,6 +178,7 @@ private struct LibraryTab: View {
             Image(systemName: "lock.rectangle")
                 .font(.system(size: 52))
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true) // decorative — statusMessage below carries the actual state (FR-4.13)
                 .help("Alpenglow can't read your Photos library yet — grant access to start finding wallpapers.")
 
             Text("Photos Access")
@@ -184,7 +195,11 @@ private struct LibraryTab: View {
                     Task { await authorization.request() }
                 }
                 .buttonStyle(.borderedProminent)
-            case .denied, .restricted:
+            case .denied:
+                // `.restricted` (parental controls/MDM) has no button here:
+                // Privacy Settings can't grant it — only the managing admin
+                // can — so offering the same shortcut as `.denied` would be a
+                // dead end. `statusMessage` above already explains why.
                 Button("Open Privacy Settings") {
                     openPrivacySettings()
                 }
