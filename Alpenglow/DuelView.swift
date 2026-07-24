@@ -25,9 +25,11 @@ final class DuelModel {
 
     private var ranker: PreferenceRanker?
 
-    /// Set right before a bump this model itself causes: record() has already
-    /// rescored and saved, so the clock-driven reload would redo the whole
-    /// library's rescore-and-persist for nothing on every single choice.
+    /// Set right before a bump this model itself causes (a verdict), so the
+    /// resulting clock-driven `.task` re-run skips reloading the candidate
+    /// snapshot the model has already advanced past. Duel *choices* no longer
+    /// bump here at all — PreferenceRanker owns the bump, firing it only when
+    /// its debounced cache flush actually persists new scores (see `choose`).
     private var suppressNextReload = false
 
     func start(container: ModelContainer) async {
@@ -76,10 +78,14 @@ final class DuelModel {
 
         Task {
             do {
+                // record() persists the choice durably and updates the ranker's
+                // in-memory scores immediately; nextPair() below draws from those
+                // fresh scores. The store-side preferenceScore cache is flushed on
+                // a debounce inside the ranker, which bumps RankingClock once it
+                // persists — so we neither write the whole library nor fan out a
+                // grid/export reload here on every single choice (FR-8.2).
                 try await ranker.record(winnerID: winner.localIdentifier, loserID: loser.localIdentifier)
                 choiceCount = await ranker.choiceCount
-                suppressNextReload = true
-                RankingClock.shared.bump()
             } catch {
                 lastError = error.localizedDescription
             }
@@ -176,8 +182,10 @@ struct DuelView: View {
             }
         }
         .task(id: RankingClock.shared.version) {
-            // Prepares on first appearance; on later re-rank/exclusion bumps,
-            // reloads the candidate snapshot so new/excluded photos show up.
+            // Prepares on first appearance; on later bumps (a scan/exclusion, or
+            // the ranker's own debounced cache flush landing) reloads the
+            // candidate snapshot so new/excluded photos show up. Coalesced to
+            // flush boundaries now, not fired per choice.
             await model.reload(container: modelContext.container)
         }
     }

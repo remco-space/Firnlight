@@ -15,6 +15,12 @@ struct ExportView: View {
     @State private var isSyncing = false
     @State private var outcome: WallpaperAlbumSync.Outcome?
     @State private var errorMessage: String?
+    /// One reused model actor (and its ModelContext) for both reload tasks.
+    /// Spinning up a fresh FeatureStore per keystroke/re-rank churned contexts
+    /// against the store; `.task(id:)` already cancels a superseded run, so a
+    /// stable store coalesces Export's two loads the way GridModel coalesces the
+    /// grid's — the second half of taming the per-choice fan-out (FR-8.2).
+    @State private var store: FeatureStore?
     @FocusState private var countFieldFocused: Bool
 
     var body: some View {
@@ -43,7 +49,7 @@ struct ExportView: View {
         .task(id: RankingClock.shared.version) {
             // Recompute when duels re-rank; only auto-adopt the very first time
             // so the stepper never fights a manual choice.
-            let store = FeatureStore(modelContainer: modelContext.container)
+            let store = featureStore()
             do {
                 let suggested = try await store.suggestedAlbumSize()
                 suggestion = suggested
@@ -58,7 +64,7 @@ struct ExportView: View {
         .task(id: "\(count)|\(RankingClock.shared.version)") {
             // The preview shows exactly what a sync would put in the album,
             // in the album's actual (diversity) order.
-            let store = FeatureStore(modelContainer: modelContext.container)
+            let store = featureStore()
             do {
                 let result = try await store.albumCandidates(limit: count)
                 preview = result.candidates
@@ -72,6 +78,15 @@ struct ExportView: View {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    /// Lazily creates and reuses the single FeatureStore. Runs on the view's
+    /// main actor (the `.task` bodies call it before their first await).
+    private func featureStore() -> FeatureStore {
+        if let store { return store }
+        let created = FeatureStore(modelContainer: modelContext.container)
+        store = created
+        return created
     }
 
     private var stepperUpperBound: Int {

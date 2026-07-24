@@ -115,6 +115,34 @@ nonisolated enum Thresholds {
     /// Long-edge pixel size for duel images.
     static let duelImagePixelSize = 1024
 
+    // MARK: Preference-score cache flush (Phase 5) — responsiveness (FR-8.2)
+
+    /// A single duel choice nudges every candidate's raw score by a tiny amount
+    /// (one SGD step + weight decay touches every weight). Rewriting the whole
+    /// `PhotoRecord.preferenceScore` cache and saving on *every* choice held the
+    /// SQLite write lock long enough to stall the main context's reads and
+    /// beachball the UI (FR-8.2). Instead the cache is flushed off the hot path
+    /// once a burst of choices settles — whichever of the two bounds below hits
+    /// first. This one caps how many rapid-fire choices coalesce into one write,
+    /// so the grid never lags further than a handful of clicks behind (FR-4.5).
+    static let preferenceCacheFlushBatchSize = 8
+
+    /// The other flush bound: quiet time after the last choice before the cache
+    /// is written and the ranked views (grid re-order, export preview) refresh.
+    /// Long enough to coalesce a fast clicking streak into one write, short
+    /// enough that the grid catches up almost immediately once the user pauses,
+    /// keeping the re-ordering "live" (FR-4.5).
+    static let preferenceCacheFlushIdleInterval: Duration = .seconds(1.5)
+
+    /// Minimum raw-score change that dirties a cached `preferenceScore`. Below
+    /// this the shift is float noise — sub-visible after the sigmoid and
+    /// rank-order-neutral — so skipping the write stops one SGD step from
+    /// dirtying (and rewriting) every row, which is exactly the write
+    /// amplification the debounce exists to avoid. Accumulated drift still
+    /// crosses it within a few choices and gets written, and prepare() rewrites
+    /// the whole cache on launch, so the cache always reconverges regardless.
+    static let preferenceCacheEpsilon: Float = 0.001
+
     // MARK: Horizon prior
 
     /// Tilt (degrees) at which the ranker's levelness feature bottoms out at 0.
