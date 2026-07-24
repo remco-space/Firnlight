@@ -145,11 +145,6 @@ struct AnalysisView: View {
                 Button("Retry \(stats.skipped) iCloud Photos") {
                     model.start(container: modelContext.container)
                 }
-            } else if stats.horizonPending > 0 {
-                Button("Measure \(stats.horizonPending) Horizons") {
-                    model.start(container: modelContext.container)
-                }
-                .buttonStyle(.borderedProminent)
             } else {
                 Label("Analysis complete", systemImage: "checkmark.circle")
                     .foregroundStyle(.green)
@@ -161,8 +156,6 @@ struct AnalysisView: View {
     private func progressCaption(_ stats: AnalysisStatistics) -> String {
         if model.isRunning && stats.pending == 0 && stats.skipped > 0 {
             "\(stats.completed) of \(stats.total) — downloading \(stats.skipped) photos from iCloud…"
-        } else if model.isRunning && stats.pending == 0 && stats.horizonPending > 0 {
-            "measuring horizons — \(stats.horizonPending) remaining…"
         } else {
             "\(stats.completed) of \(stats.total) candidates analyzed"
         }
