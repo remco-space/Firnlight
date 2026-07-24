@@ -10,12 +10,16 @@ import os
 /// low-resolution or tilted photos are penalized only as much as choices imply).
 /// Choice model: P(winner beats loser) = sigmoid(s_winner − s_loser)
 /// One SGD step per recorded choice; `PhotoRecord.preferenceScore` caches the
-/// raw score s after every update so the grid can re-rank live.
+/// raw score s after every update so the grid can re-rank live. A bad
+/// verdict ("Both Are Bad" / "Not Wallpaper Material") trains the same way,
+/// as one SGD step against a fixed neutral reference rather than a real
+/// opponent — see `penalizeBadVerdict` (FR-4.7/FR-5.7). A good verdict never
+/// touches these weights (deferred — see REQUIREMENTS.md).
 ///
 /// Weights persist as JSON in Application Support. If the file is missing,
 /// weights are rebuilt by seeding from Photos favorites (pseudo-choices:
 /// favorite beats random non-favorite) and then replaying every ChoiceRecord
-/// in timestamp order.
+/// and bad VerdictRecord, interleaved in timestamp order (FR-5.3).
 /// Plain actor with its own `ModelContext`, not `@ModelActor`, so its work
 /// truly runs off the main thread — see FeatureStore's doc comment for the
 /// `DefaultSerialModelExecutor` caller-thread pitfall this avoids (FR-8.2).
@@ -43,6 +47,26 @@ actor PreferenceRanker {
             z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
             z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
             return z ^ (z >> 31)
+        }
+    }
+
+    /// A durable judgment being replayed into the ranker during a rebuild —
+    /// either a relative choice or a bad-quality verdict (FR-5.3/FR-5.7).
+    /// See `prepare()` for why these need a single, deterministically
+    /// ordered replay stream rather than two separate passes.
+    private enum TrainingEvent {
+        case choice(winnerID: String, loserID: String)
+        case badVerdict(id: String)
+
+        /// Deterministic secondary sort key for same-timestamp events
+        /// (both event kinds sort by their own persisted identifiers, never
+        /// by anything that could vary between runs), so ties always
+        /// resolve the same way on every rebuild.
+        var orderKey: String {
+            switch self {
+            case .choice(let winnerID, let loserID): return "0|\(winnerID)|\(loserID)"
+            case .badVerdict(let id): return "1|\(id)"
+            }
         }
     }
 
@@ -101,6 +125,10 @@ actor PreferenceRanker {
         judgedPairs = Set(choices.map { Self.pairKey($0.winnerID, $0.loserID) })
         choiceCount = choices.count
 
+        let badVerdicts = try modelContext.fetch(
+            FetchDescriptor<VerdictRecord>(sortBy: [SortDescriptor(\.timestamp)])
+        ).filter { !$0.isGood }
+
         let dimension = entries.first?.vector.count ?? 0
         if let stored = loadWeights(),
            stored.algorithmVersion == Thresholds.rankerAlgorithmVersion,
@@ -116,11 +144,34 @@ actor PreferenceRanker {
                 seededWithFavorites: false
             )
             seedFromFavorites()
-            for choice in choices {
-                sgdStep(winnerID: choice.winnerID, loserID: choice.loserID)
+            // Choices and bad verdicts both train the ranker (FR-5.7), so a
+            // rebuild must replay them interleaved in the order the user
+            // actually produced them, not choices-then-verdicts or vice
+            // versa — SGD is order-dependent (weight decay + gradient path),
+            // so a different order would rebuild a different ranking and
+            // break the FR-5.3 guarantee. `TrainingEvent.orderKey` gives a
+            // deterministic tie-break for same-timestamp events (e.g. both
+            // photos of a single "Both Are Bad" verdict share one Date()),
+            // since SwiftData doesn't promise fetch order beyond the given
+            // SortDescriptors.
+            var events: [(timestamp: Date, event: TrainingEvent)] =
+                choices.map { ($0.timestamp, .choice(winnerID: $0.winnerID, loserID: $0.loserID)) }
+                + badVerdicts.map { ($0.timestamp, .badVerdict(id: $0.localIdentifier)) }
+            events.sort {
+                $0.timestamp != $1.timestamp
+                    ? $0.timestamp < $1.timestamp
+                    : $0.event.orderKey < $1.event.orderKey
+            }
+            for (_, event) in events {
+                switch event {
+                case .choice(let winnerID, let loserID):
+                    sgdStep(winnerID: winnerID, loserID: loserID)
+                case .badVerdict(let id):
+                    penalizeBadVerdict(id: id)
+                }
             }
             saveWeights()
-            Self.log.info("Rebuilt weights: seeded=\(self.weights.seededWithFavorites), replayed \(choices.count) choices")
+            Self.log.info("Rebuilt weights: seeded=\(self.weights.seededWithFavorites), replayed \(choices.count) choices, \(badVerdicts.count) bad verdicts")
         }
 
         recomputeScores()
@@ -280,14 +331,48 @@ actor PreferenceRanker {
         return VerdictCalibration.optimalSplitThreshold(good: good, bad: bad)
     }
 
-    /// Records absolute quality verdicts ("both great" / "both bad") for the
-    /// album-size calibration. Doesn't touch the pairwise weights.
-    func recordVerdicts(_ localIdentifiers: [String], isGood: Bool) throws {
+    /// Records absolute quality verdicts ("both great"/"both bad" from a
+    /// duel, or a single-photo "Not Wallpaper Material") — always durable
+    /// and always feeding the album-size calibration (FR-6.x). A BAD verdict
+    /// additionally trains the pairwise ranking, the same signal strength as
+    /// losing a duel (FR-4.7/FR-5.7): see `penalizeBadVerdict`. A GOOD
+    /// verdict never touches ranking weights — good photos already rise by
+    /// winning duels, and using "good" as an upward signal is explicitly
+    /// deferred (REQUIREMENTS.md Deferred ideas).
+    ///
+    /// `flushSynchronously` controls how the (bad-verdict) score cache write
+    /// is scheduled, same tradeoff as `record()`'s doc comment:
+    /// - `false` (default, used by the Duel tab's long-lived ranker): debounce
+    ///   via `scheduleCacheFlush`, so a burst of rapid "Both Are Bad" verdicts
+    ///   coalesces into one write instead of beachballing (FR-8.2).
+    /// - `true` (used by `CandidateActions.markNotWallpaperMaterial`'s
+    ///   short-lived, one-off ranker instance): flush immediately via
+    ///   `flushCacheNow`. That ranker has no owner once this call returns —
+    ///   `scheduleCacheFlush`'s idle timer captures `self` weakly and would
+    ///   fire into a `nil` self after the actor's already been deallocated,
+    ///   so `PhotoRecord.preferenceScore` would never be rewritten and
+    ///   `RankingClock` would never bump, leaving the grid/Export stale until
+    ///   the next relaunch. A single grid click writing once is not the rapid
+    ///   dueling case FR-8.2 guards against, so flushing it synchronously is
+    ///   safe.
+    func recordVerdicts(_ localIdentifiers: [String], isGood: Bool, flushSynchronously: Bool = false) throws {
         let now = Date()
         for id in localIdentifiers {
             modelContext.insert(VerdictRecord(localIdentifier: id, isGood: isGood, timestamp: now))
         }
         try modelContext.save()
+
+        guard !isGood else { return }
+        for id in localIdentifiers {
+            penalizeBadVerdict(id: id)
+        }
+        saveWeights()
+        recomputeScores()
+        if flushSynchronously {
+            flushCacheNow()
+        } else {
+            scheduleCacheFlush()
+        }
     }
 
     /// Records a choice, takes one SGD step, and updates the in-memory scores.
@@ -317,8 +402,13 @@ actor PreferenceRanker {
 
     private func sgdStep(winnerID: String, loserID: String) {
         guard let w = indexByID[winnerID], let l = indexByID[loserID] else { return }
-        let winner = entries[w], loser = entries[l]
+        sgdStep(winner: entries[w], loser: entries[l])
+    }
 
+    /// One pairwise SGD step, "winner" beating "loser" — the primitive both
+    /// real duel choices and bad-verdict pseudo-duels (`penalizeBadVerdict`)
+    /// go through, so both train the exact same model the exact same way.
+    private func sgdStep(winner: Entry, loser: Entry) {
         let probability = Candidate.sigmoid(rawScore(winner) - rawScore(loser))
         let gradient = (1 - probability) * Thresholds.rankerLearningRate
 
@@ -356,6 +446,42 @@ actor PreferenceRanker {
         }
         weights.seededWithFavorites = true
         Self.log.info("Seeded ranker with \(pairs) favorite pseudo-choices")
+    }
+
+    /// Trains a bad verdict into the ranking the same way a lost duel does
+    /// (FR-4.7/FR-5.7), as one pairwise SGD step against a fixed "neutral"
+    /// reference point rather than a real opponent photo:
+    /// - feature vector = all zeros, aesthetics = 0 — aestheticsScore is
+    ///   already zero-centered (−1…1), so 0 is a genuine neutral midpoint,
+    ///   not an arbitrary choice. These are the two terms the gradient
+    ///   actually moves, and they're what generalizes: pushing
+    ///   `weights.feature` away from this photo's feature direction is what
+    ///   drags visually-similar photos down too ("and others like it",
+    ///   FR-4.7), independent of anything else in the candidate set.
+    /// - levelness/resolution = copied from the bad photo's own values, so
+    ///   those two SGD terms are always exactly zero. A single bad verdict
+    ///   on its own isn't evidence that tilt or resolution *caused* the
+    ///   badness — unlike a real duel, there's no second photo to contrast
+    ///   against — so `weights.horizon`/`weights.resolution` stay untouched
+    ///   by verdict training and only ever move from actual duel choices.
+    ///
+    /// Using a fixed reference instead of a live opponent is also what makes
+    /// this replay-safe (FR-5.3): the pseudo-duel is fully determined by the
+    /// bad photo's own stored feature print, never by which other
+    /// candidates happen to exist at rebuild time.
+    private func penalizeBadVerdict(id: String) {
+        guard let index = indexByID[id] else { return }
+        let entry = entries[index]
+        let neutral = Entry(
+            id: "",
+            vector: Array(repeating: 0, count: entry.vector.count),
+            aesthetics: 0,
+            isFavorite: false,
+            levelness: entry.levelness,
+            tiltDegrees: 0,
+            resolution: entry.resolution
+        )
+        sgdStep(winner: neutral, loser: entry)
     }
 
     private func rawScore(_ entry: Entry) -> Float {

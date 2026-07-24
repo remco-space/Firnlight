@@ -76,8 +76,12 @@ nonisolated enum Thresholds {
     /// Bump when the ranker's algorithm changes (features, normalization,
     /// seeding, learning rate semantics). A mismatch with the stored weights
     /// file triggers an automatic rebuild: re-seed from current favorites,
-    /// replay all choices, re-rank everything.
-    static let rankerAlgorithmVersion = 4 // v4: raw-score cache
+    /// replay all choices (and, from v5, bad verdicts), re-rank everything.
+    /// v5 is required, not optional: a bad verdict recorded before this
+    /// version shipped was never applied to the weights that existed at the
+    /// time, so only a full rebuild folds that backlog in — no incremental
+    /// catch-up is possible (FR-5.3).
+    static let rankerAlgorithmVersion = 5 // v5: bad verdicts train the ranking
 
     /// SGD learning rate for the online Bradley–Terry ranker.
     static let rankerLearningRate: Float = 0.5
