@@ -339,7 +339,23 @@ actor PreferenceRanker {
     /// verdict never touches ranking weights — good photos already rise by
     /// winning duels, and using "good" as an upward signal is explicitly
     /// deferred (REQUIREMENTS.md Deferred ideas).
-    func recordVerdicts(_ localIdentifiers: [String], isGood: Bool) throws {
+    ///
+    /// `flushSynchronously` controls how the (bad-verdict) score cache write
+    /// is scheduled, same tradeoff as `record()`'s doc comment:
+    /// - `false` (default, used by the Duel tab's long-lived ranker): debounce
+    ///   via `scheduleCacheFlush`, so a burst of rapid "Both Are Bad" verdicts
+    ///   coalesces into one write instead of beachballing (FR-8.2).
+    /// - `true` (used by `CandidateActions.markNotWallpaperMaterial`'s
+    ///   short-lived, one-off ranker instance): flush immediately via
+    ///   `flushCacheNow`. That ranker has no owner once this call returns —
+    ///   `scheduleCacheFlush`'s idle timer captures `self` weakly and would
+    ///   fire into a `nil` self after the actor's already been deallocated,
+    ///   so `PhotoRecord.preferenceScore` would never be rewritten and
+    ///   `RankingClock` would never bump, leaving the grid/Export stale until
+    ///   the next relaunch. A single grid click writing once is not the rapid
+    ///   dueling case FR-8.2 guards against, so flushing it synchronously is
+    ///   safe.
+    func recordVerdicts(_ localIdentifiers: [String], isGood: Bool, flushSynchronously: Bool = false) throws {
         let now = Date()
         for id in localIdentifiers {
             modelContext.insert(VerdictRecord(localIdentifier: id, isGood: isGood, timestamp: now))
@@ -352,7 +368,11 @@ actor PreferenceRanker {
         }
         saveWeights()
         recomputeScores()
-        scheduleCacheFlush()
+        if flushSynchronously {
+            flushCacheNow()
+        } else {
+            scheduleCacheFlush()
+        }
     }
 
     /// Records a choice, takes one SGD step, and updates the in-memory scores.

@@ -312,13 +312,21 @@ enum CandidateActions {
     /// its next full `prepare()` (a relaunch) — an existing limitation of
     /// having multiple ranker instances share one weights file, not
     /// something new here.
+    ///
+    /// Passes `flushSynchronously: true`: this ranker is only reachable from
+    /// this `Task` and has no owner once `recordVerdicts` returns, so the
+    /// normal debounced flush (whose idle timer captures `self` weakly)
+    /// would fire 1.5s later into a `nil` self — the actor having already
+    /// deallocated — silently dropping the score-cache write and the
+    /// `RankingClock` bump the grid/Export need to re-rank live. See
+    /// `PreferenceRanker.recordVerdicts`'s doc comment.
     static func markNotWallpaperMaterial(_ localIdentifier: String, in modelContext: ModelContext) {
         let container = modelContext.container
         Task {
             do {
                 let ranker = PreferenceRanker(modelContainer: container)
                 try await ranker.prepare()
-                try await ranker.recordVerdicts([localIdentifier], isGood: false)
+                try await ranker.recordVerdicts([localIdentifier], isGood: false, flushSynchronously: true)
             } catch {
                 log.error("Failed to record bad verdict for \(localIdentifier, privacy: .public): \(error)")
             }
