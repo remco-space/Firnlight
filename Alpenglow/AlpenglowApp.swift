@@ -26,6 +26,12 @@ struct AlpenglowApp: App {
             ContentView()
         }
         .modelContainer(for: [PhotoRecord.self, ChoiceRecord.self, VerdictRecord.self])
+        // FR-8.3: the standard macOS menu bar's named commands (Photo
+        // actions, Show Ignored, scan, sync). Quit (⌘Q) needs nothing here —
+        // it's already part of the automatic app menu. See AppCommands.swift
+        // for the focusedValue plumbing that connects these menu items back
+        // to view-local state.
+        .commands { AppCommands() }
     }
 
     /// LaunchServices happily starts a second instance when the app is launched

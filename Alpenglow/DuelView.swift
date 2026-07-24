@@ -139,14 +139,16 @@ struct DuelView: View {
                             positionLabel: "Left photo",
                             aspectRatio: Self.screenAspectRatio,
                             action: { model.choose(winner: pair.first, loser: pair.second) },
-                            onAdvance: { model.skip() }
+                            onAdvance: { model.skip() },
+                            duelModel: model
                         )
                         DuelCard(
                             candidate: pair.second,
                             positionLabel: "Right photo",
                             aspectRatio: Self.screenAspectRatio,
                             action: { model.choose(winner: pair.second, loser: pair.first) },
-                            onAdvance: { model.skip() }
+                            onAdvance: { model.skip() },
+                            duelModel: model
                         )
                     }
 
@@ -208,6 +210,9 @@ private struct DuelCard: View {
     /// Advance to a fresh pair after this photo is ignored or judged not
     /// wallpaper material — either way the current pair is spent.
     let onAdvance: () -> Void
+    /// Published inside `FocusedPhoto` so the menu-bar photo actions can
+    /// advance the pair too (FR-4.7/FR-4.8) — see AppCommands.swift.
+    let duelModel: DuelModel
 
     @Environment(\.modelContext) private var modelContext
     @State private var image: CGImage?
@@ -268,6 +273,16 @@ private struct DuelCard: View {
             }
         }
         .onHover { isHovering = $0 }
+        // Duel cards are already focusable (they're Buttons); publish the
+        // focused candidate the same way ThumbnailCell does, so the Photo
+        // menu (FR-4.6) reaches duel cards too. Never in "ignored" mode —
+        // an ignored photo can't reach a duel pair.
+        .focusedValue(\.focusedPhoto, FocusedPhoto(
+            localIdentifier: candidate.localIdentifier,
+            isIgnored: false,
+            modelContext: modelContext,
+            duelModel: duelModel
+        ))
         .task(id: candidate.localIdentifier) {
             image = nil
             image = await ThumbnailLoader.load(candidate.localIdentifier, pixelSize: Thresholds.duelImagePixelSize)

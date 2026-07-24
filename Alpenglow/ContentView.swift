@@ -56,6 +56,15 @@ private struct LibraryTab: View {
                 .padding(24)
             }
             .frame(maxWidth: .infinity)
+            // FR-8.3: lets the menu bar's "Scan Library"/"Scan Again" trigger
+            // the same scan this tab's own button does. Published only in
+            // this authorized branch, so the command is disabled for free
+            // whenever Photos access isn't granted — see AppCommands.swift.
+            .focusedSceneValue(\.libraryCommandTarget, LibraryCommandTarget(
+                scanner: scanner,
+                analysisModel: analysisModel,
+                modelContext: modelContext
+            ))
             // Auto-resync once per session: scan, then analyze to completion,
             // exactly as clicking the buttons would. This branch only exists
             // while authorized, so it also fires right after the user grants.
