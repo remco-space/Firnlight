@@ -31,11 +31,13 @@ pipeline) and follow the doc comments.
 
 ## UI & design skills (precedence)
 
-For any UI/UX, HIG, Liquid Glass, or accessibility work, prefer these skills, in
-order: **`ui-review-tahoe`** for reviewing/auditing macOS UI; **`liquid-glass`**
-and **`swiftui-specialist`** for writing native SwiftUI. These are native-focused
-and current. Do not use the third-party `apple-hig-designer-skill-2026` — it is a
-web/CSS generation skill targeting the older 26 era, not a native macOS reviewer.
+For any UI/UX, HIG, Liquid Glass, or accessibility work, prefer these skills:
+**`liquid-glass`** is authoritative for the glass API and its design rules
+(`.glassEffect()`, not `.background(.material)`); **`ui-review-tahoe`** is the
+review checklist for macOS UI and defers to it on glass; **`swiftui-specialist`**
+covers native SwiftUI generally. These are native-focused and current. Do not use
+the third-party `apple-hig-designer-skill-2026` — it is a web/CSS generation skill
+targeting the older 26 era, not a native macOS reviewer.
 
 ## Build & run
 
