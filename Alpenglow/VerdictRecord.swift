@@ -5,14 +5,18 @@ import SwiftData
 /// Bad" buttons. Unlike ChoiceRecord (relative preference), verdicts anchor
 /// where the wallpaper-worthiness bar sits on the score scale — used to
 /// calibrate the suggested album size.
+///
+/// Keyed by `PhotoRecord.judgmentKey` and stored beside the other judgments —
+/// see `ChoiceRecord` for why the column keeps its old name and why the shape
+/// is what it is.
 @Model
 final class VerdictRecord {
-    var localIdentifier: String
-    var isGood: Bool
-    var timestamp: Date
+    @Attribute(originalName: "localIdentifier") var photoKey: String = ""
+    var isGood: Bool = false
+    var timestamp: Date = Date.distantPast
 
-    init(localIdentifier: String, isGood: Bool, timestamp: Date) {
-        self.localIdentifier = localIdentifier
+    init(photoKey: String, isGood: Bool, timestamp: Date) {
+        self.photoKey = photoKey
         self.isGood = isGood
         self.timestamp = timestamp
     }
@@ -22,9 +26,11 @@ final class VerdictRecord {
 /// album-size calibration, so the two stay in lock-step.
 nonisolated enum VerdictCalibration {
     /// Latest verdict per photo wins; expects `verdicts` in timestamp order.
+    /// Keyed by `PhotoRecord.judgmentKey`, so a verdict recorded on another
+    /// device lands on the same photo here (FR-9.1).
     static func latestByPhoto(_ verdicts: [VerdictRecord]) -> [String: Bool] {
         var latest: [String: Bool] = [:]
-        for verdict in verdicts { latest[verdict.localIdentifier] = verdict.isGood }
+        for verdict in verdicts { latest[verdict.photoKey] = verdict.isGood }
         return latest
     }
 

@@ -220,16 +220,18 @@ actor FeatureStore {
         guard !verdicts.isEmpty else { return nil }
 
         // Latest verdict per photo wins, valued at the photo's current raw score.
+        // Verdicts are keyed device-independently (FR-9.1) while PhotoRecord is
+        // keyed locally, so the join runs in memory over the photo table rather
+        // than as a `#Predicate`: `judgmentKey` is computed, and the two models
+        // live in different stores, neither of which a predicate can span.
         let latest = VerdictCalibration.latestByPhoto(verdicts)
-        let ids = Array(latest.keys)
-        let records = try modelContext.fetch(
-            FetchDescriptor<PhotoRecord>(predicate: #Predicate { ids.contains($0.localIdentifier) })
-        )
+        let records = try modelContext.fetch(FetchDescriptor<PhotoRecord>())
         var good: [Float] = []
         var bad: [Float] = []
         for record in records {
-            guard let score = record.preferenceScore else { continue }
-            if latest[record.localIdentifier] == true {
+            guard let score = record.preferenceScore,
+                  let isGood = latest[record.judgmentKey] else { continue }
+            if isGood {
                 good.append(score)
             } else {
                 bad.append(score)

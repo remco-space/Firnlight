@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 import Observation
-import AppKit
+import CoreGraphics
 
 /// Bumps whenever a duel choice re-trains the ranker, so ranked views know to reload.
 @MainActor
@@ -171,6 +171,14 @@ struct DuelView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var model = DuelModel()
 
+    /// The gap between the two duel cards. A named constant rather than a
+    /// literal — and deliberately not in `Thresholds`, which holds tuned
+    /// algorithm constants, not layout metrics — because `pairIsSideBySide`
+    /// has to subtract exactly the gap the stack will insert. If the two ever
+    /// drifted apart, a card could overflow the screen, which is precisely
+    /// what FR-5.1 forbids.
+    private static let cardSpacing: CGFloat = 16
+
     var body: some View {
         Group {
             if let pair = model.pair {
@@ -178,40 +186,9 @@ struct DuelView: View {
                     Text("Which makes the better wallpaper?")
                         .font(.title3.bold())
 
-                    HStack(spacing: 16) {
-                        DuelCard(
-                            candidate: pair.first,
-                            positionLabel: "Left photo",
-                            aspectRatio: Self.screenAspectRatio,
-                            action: { model.choose(winner: pair.first, loser: pair.second) },
-                            duelModel: model
-                        )
-                        DuelCard(
-                            candidate: pair.second,
-                            positionLabel: "Right photo",
-                            aspectRatio: Self.screenAspectRatio,
-                            action: { model.choose(winner: pair.second, loser: pair.first) },
-                            duelModel: model
-                        )
-                    }
+                    duelPair(pair)
 
-                    HStack(spacing: 12) {
-                        // No winner for the pairwise ranker, but an absolute
-                        // verdict that calibrates the album-size suggestion.
-                        Button("Both Are Great") { model.judgeBoth(isGood: true) }
-                            .disabled(model.isRecording)
-                        Button("Both Are Bad") { model.judgeBoth(isGood: false) }
-                            .disabled(model.isRecording)
-                        Button("Skip") { model.skip() }
-                            .disabled(model.isRecording)
-                        Text("\(model.choiceCount) choices made")
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        if model.isRecording {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                    }
+                    controls
                 }
                 .padding(24)
             } else if model.isPreparing {
@@ -235,20 +212,115 @@ struct DuelView: View {
         }
     }
 
-    /// Aspect ratio of the main display — duel images are cropped to it so
-    /// choices are made on what the wallpaper would actually show.
-    private static var screenAspectRatio: CGFloat {
-        guard let screen = NSScreen.main, screen.frame.height > 0 else { return 16.0 / 10.0 }
-        return screen.frame.width / screen.frame.height
+    /// FR-5.1: both photos fully visible at once, however small the screen.
+    /// Two `desktopAspectRatio` crops side by side form a very wide block
+    /// (~32:10); the same two stacked form a very tall one (~16:20). Neither
+    /// arrangement suits both a Mac window and an iPhone held upright, so the
+    /// pair is laid out whichever way leaves the cards *larger* in the space
+    /// actually available — side by side on the Mac, an iPad, and a phone on
+    /// its side; stacked on a phone in portrait.
+    ///
+    /// Both cards are fully visible either way, and that is a property of the
+    /// layout rather than of the arrangement chosen: each card keeps its
+    /// `.fit` aspect ratio inside a `GeometryReader` that is handed only the
+    /// space the surrounding `VStack` has left over after the question and the
+    /// verdict row. So the cards shrink to fit rather than overflowing, and
+    /// there is no scroll view for them to hide in.
+    private func duelPair(_ pair: PreferenceRanker.DuelPair) -> some View {
+        GeometryReader { proxy in
+            let sideBySide = Self.pairIsSideBySide(in: proxy.size)
+            let layout = sideBySide
+                ? AnyLayout(HStackLayout(spacing: Self.cardSpacing))
+                : AnyLayout(VStackLayout(spacing: Self.cardSpacing))
+            layout {
+                // The position labels follow the arrangement, so VoiceOver
+                // never announces "Left photo" for a card that is on top.
+                DuelCard(
+                    candidate: pair.first,
+                    positionLabel: sideBySide ? "Left photo" : "Top photo",
+                    action: { model.choose(winner: pair.first, loser: pair.second) },
+                    duelModel: model
+                )
+                DuelCard(
+                    candidate: pair.second,
+                    positionLabel: sideBySide ? "Right photo" : "Bottom photo",
+                    action: { model.choose(winner: pair.second, loser: pair.first) },
+                    duelModel: model
+                )
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// Which arrangement leaves the two fixed-shape cards bigger in `size`.
+    /// A card's width is capped both by the width its share of the
+    /// arrangement gets and by the height that share allows once the fixed
+    /// aspect ratio is applied; whichever arrangement yields the larger cap
+    /// wastes less of the space. Comparing the caps — rather than switching on
+    /// size class — is what makes this right on every screen: a phone on its
+    /// side is compact-width but wants the same side-by-side layout the Mac
+    /// does.
+    private static func pairIsSideBySide(in size: CGSize) -> Bool {
+        let ratio = Thresholds.desktopAspectRatio
+        let sideBySide = min((size.width - cardSpacing) / 2, size.height * ratio)
+        let stacked = min(size.width, (size.height - cardSpacing) / 2 * ratio)
+        return sideBySide >= stacked
+    }
+
+    /// FR-5.1's "however small the screen" covers the verdict row too: on an
+    /// iPhone the three buttons and the running count do not fit on one line,
+    /// and a clipped "Both Are Bad" is exactly the unreachable command FR-8.4
+    /// rules out. `ViewThatFits` keeps the single row wherever it fits and
+    /// moves the count to its own line where it doesn't.
+    private var controls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                verdictButtons
+                choiceProgress
+            }
+            VStack(spacing: 8) {
+                HStack(spacing: 12) { verdictButtons }
+                HStack(spacing: 8) { choiceProgress }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var verdictButtons: some View {
+        // No winner for the pairwise ranker, but an absolute verdict that
+        // calibrates the album-size suggestion.
+        Button("Both Are Great") { model.judgeBoth(isGood: true) }
+            .disabled(model.isRecording)
+        Button("Both Are Bad") { model.judgeBoth(isGood: false) }
+            .disabled(model.isRecording)
+        Button("Skip") { model.skip() }
+            .disabled(model.isRecording)
+    }
+
+    @ViewBuilder
+    private var choiceProgress: some View {
+        Text("\(model.choiceCount) choices made")
+            .font(.callout.monospacedDigit())
+            .foregroundStyle(.secondary)
+        if model.isRecording {
+            ProgressView()
+                .controlSize(.small)
+        }
     }
 }
 
-/// One side of the duel: the photo center-cropped to the display's shape, clickable.
+/// One side of the duel: the photo center-cropped to the fixed desktop shape
+/// (`Thresholds.desktopAspectRatio`) the wallpaper will fill, and pickable.
+/// The crop is the same rectangle on every device, so the same photo wins or
+/// loses on the same pixels whether the user judged it on the Mac or on a
+/// phone (FR-5.1) — and it matches what the analysis measured.
 private struct DuelCard: View {
     let candidate: Candidate
-    /// VoiceOver label for the pick button, e.g. "Left photo" / "Right photo".
+    /// VoiceOver label for the pick button, naming where this card actually
+    /// sits: "Left"/"Right photo" side by side, "Top"/"Bottom photo" stacked.
+    /// Passed in rather than derived here because only `DuelView.duelPair`
+    /// knows which arrangement the available space chose (FR-5.1).
     let positionLabel: String
-    let aspectRatio: CGFloat
     let action: () -> Void
     /// Advances to a fresh pair after this photo is ignored or judged not
     /// wallpaper material (either way the current pair is spent), and is
@@ -257,6 +329,7 @@ private struct DuelCard: View {
     let duelModel: DuelModel
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.openURL) private var openURL
     @State private var image: CGImage?
     @State private var isHovering = false
 
@@ -264,7 +337,7 @@ private struct DuelCard: View {
         Button(action: action) {
             Rectangle()
                 .fill(.quaternary)
-                .aspectRatio(aspectRatio, contentMode: .fit)
+                .aspectRatio(Thresholds.desktopAspectRatio, contentMode: .fit)
                 .overlay {
                     if let image {
                         Image(decorative: image, scale: 1)
@@ -288,7 +361,7 @@ private struct DuelCard: View {
                         .font(.caption)
                         .foregroundStyle(.pink)
                         .padding(4)
-                        .background(.ultraThinMaterial, in: Circle())
+                        .background(.regularMaterial, in: Circle())
                         .padding(6)
                         .help("You marked this photo as a favorite in Photos, which boosts its ranking.")
                 }
@@ -299,21 +372,8 @@ private struct DuelCard: View {
         // Ignore lives in its own button overlaid on (in front of) the pick
         // button, so its taps aren't swallowed as a duel choice.
         .overlay(alignment: .topTrailing) { ignoreButton }
-        .contextMenu {
-            Button("Open in Photos") {
-                CandidateActions.openInPhotos(candidate.localIdentifier)
-            }
-            Divider()
-            Button("Not Wallpaper Material") {
-                // Records a bad verdict; the photo stays in the duel pool, but
-                // this pair is spent — advance (FR-4.7).
-                CandidateActions.markNotWallpaperMaterial(candidate.localIdentifier, in: modelContext)
-                duelModel.skip()
-            }
-            Button("Ignore This Photo", role: .destructive) {
-                ignore()
-            }
-        }
+        .overlay(alignment: .bottomTrailing) { actionsMenu }
+        .contextMenu { photoActions }
         .onHover { isHovering = $0 }
         // Duel cards are already focusable (they're Buttons); publish the
         // focused candidate the same way ThumbnailCell does, so the Photo
@@ -331,18 +391,70 @@ private struct DuelCard: View {
         }
     }
 
+    /// FR-5.9's visible ignore control, distinct from "Both Are Bad".
     private var ignoreButton: some View {
         Button(action: ignore) {
             Image(systemName: "eye.slash")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(6)
-                .background(.ultraThinMaterial, in: Circle())
+                .background(.regularMaterial, in: Circle())
         }
         .buttonStyle(.plain)
         .padding(6)
         .accessibilityLabel("Ignore \(positionLabel)")
-        .help("Click to ignore this photo — it leaves the grid, duels, and the wallpaper album (reversible via “Show Ignored” in the Library tab).")
+        .help("Ignores this photo — it leaves the grid, duels, and the wallpaper album (reversible via “Show Ignored” in the Library tab).")
+    }
+
+    /// FR-4.6's three actions, shared by the right-click menu and — on iPhone
+    /// and iPad — by the visible menu button below, so both paths offer
+    /// exactly the same named commands.
+    @ViewBuilder
+    private var photoActions: some View {
+        Button("Open in Photos") {
+            CandidateActions.openInPhotos(candidate.localIdentifier, using: openURL)
+        }
+        Divider()
+        Button("Not Wallpaper Material") {
+            // Records a bad verdict; the photo stays in the duel pool, but
+            // this pair is spent — advance (FR-4.7).
+            CandidateActions.markNotWallpaperMaterial(candidate.localIdentifier, in: modelContext)
+            duelModel.skip()
+        }
+        Button("Ignore This Photo", role: .destructive) {
+            ignore()
+        }
+    }
+
+    /// FR-8.4 *(iPhone and iPad)*: the three actions need a home that isn't a
+    /// gesture. On the Mac they already have two named ones — the right-click
+    /// menu and the menu bar (FR-8.3) — so this button would be redundant
+    /// chrome there and is compiled out. On touch the context menu's only
+    /// trigger is a long press the user has to guess at, which FR-4.6 rules
+    /// out as a sole path, so this is that path: a visible control whose menu
+    /// names every action in words. It also answers FR-4.13 for the icon-only
+    /// ignore button above, whose meaning is otherwise carried by a tooltip
+    /// that touch never shows.
+    ///
+    /// Placed bottom-trailing because the other three corners are taken: the
+    /// favorite heart (FR-4.4), the ignore control (FR-5.9), and the pick
+    /// target itself. Overlaid on the pick button, like `ignoreButton`, so
+    /// opening the menu isn't also recorded as a duel choice.
+    @ViewBuilder
+    private var actionsMenu: some View {
+        #if !os(macOS)
+        Menu {
+            photoActions
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(6)
+                .background(.regularMaterial, in: Circle())
+        }
+        .padding(6)
+        .accessibilityLabel("Actions for \(positionLabel)")
+        #endif
     }
 
     private func ignore() {

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    The mountain range: the app icon's middle layer (see ../icon.json, group
+    "Ridge"). Icon Composer's square canvas is 1024x1024 and the system applies
+    the rounded-square mask itself, so this deliberately runs past the bottom
+    corners rather than sitting inside a safe area — the range is the ground,
+    and letting the mask cut it is what keeps it from looking like it floats.
+
+    Two summits, not one: a lone triangle reads as a generic "photo" glyph,
+    while a main peak with a lower shoulder reads as a range. The main summit
+    sits left of centre (x=400) so moon.svg has open sky at the upper left with
+    only its right edge behind this ridge, and so the lit west faces in
+    sunlit.svg all face the same way. prism.svg's arc bends over this summit,
+    so all four assets are pinned to the (400,235) vertex.
+
+    Vertices: left base (0,1024), main summit (400,235), saddle (560,490),
+    shoulder summit (700,345), right base (1024,1024). sunlit.svg's triangles
+    are cut against these exact coordinates, so the two files have to move
+    together.
+
+    White fill throughout: every layer's real colour comes from its "fill" in
+    icon.json, which is also what lets the system re-colour the icon for its
+    dark, clear and tinted appearances.
+  -->
+  <path d="M 0,1024 L 400,235 L 560,490 L 700,345 L 1024,1024 Z" fill="#FFFFFF"/>
+</svg>

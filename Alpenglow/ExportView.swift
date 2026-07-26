@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Photos
 
 /// Export tab's state and sync logic. Hoisted into an `@Observable` model
 /// (matching `GridModel`/`DuelModel`/`AnalysisModel` elsewhere) rather than
@@ -21,6 +22,17 @@ final class ExportModel {
     private(set) var isSyncing = false
     private(set) var outcome: WallpaperAlbumSync.Outcome?
     private(set) var errorMessage: String?
+    /// FR-6.11: a sync found no album this device can see. Held as its own
+    /// state rather than folded into `errorMessage`, because it isn't an
+    /// error — it's a wait, with one thing the user may legitimately want to
+    /// do about it (create the album, if this is the first device).
+    private(set) var albumMissing = false
+    /// FR-6.8: a previous sync died partway and the album is still mid-rebuild.
+    /// Offered rather than repaired automatically — the devices share one
+    /// album, so an unattended restore could undo a deliberate sync made on
+    /// another one (FR-6.10). See `WallpaperAlbumSync.restoreInterruptedSync`.
+    private(set) var hasInterruptedSync = false
+    private(set) var isRestoring = false
     /// One reused model actor (and its ModelContext) for both reload tasks.
     /// Spinning up a fresh FeatureStore per keystroke/re-rank churned contexts
     /// against the store; `.task(id:)` already cancels a superseded run, so a
@@ -28,12 +40,57 @@ final class ExportModel {
     /// grid's — the second half of taming the per-choice fan-out (FR-8.2).
     private var store: FeatureStore?
 
+    /// FR-1.8 *(iPhone and iPad)*: under limited access PhotoKit cannot create
+    /// or fetch user albums at all, so there is no album to maintain and no
+    /// way to find out there isn't — `performChanges` reports success and the
+    /// following fetch returns nothing. Blocking the sync up front is what
+    /// keeps the app from appearing to work.
+    ///
+    /// Read straight from PhotoKit rather than through
+    /// `PhotoLibraryAuthorization`: that observable is `ContentView`-owned
+    /// `@State` and isn't in the environment, and `authorizationStatus(for:)`
+    /// is a cached synchronous read, so threading it down here would be
+    /// plumbing for its own sake. `.limited` is `API_AVAILABLE(ios(14))` and
+    /// has no macOS counterpart, hence the platform split rather than a
+    /// status comparison that would always be false on the Mac.
+    ///
+    /// Stored and refreshed rather than computed on demand: `@Observable`
+    /// tracks stored properties, so a computed one reading PhotoKit would
+    /// never invalidate the view. Upgrading to full access is a trip to
+    /// Settings and back, and `isAuthorized` reads true both before and after
+    /// (limited counts as authorized), so nothing else in the app re-renders
+    /// this tab on that transition — without the refresh the notice would sit
+    /// there claiming the album is impossible after the user had just fixed it
+    /// (FR-1.3).
+    private(set) var isLimitedAccess = false
+
+    func refreshAccess() {
+        #if os(iOS)
+        isLimitedAccess = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited
+        #endif
+        hasInterruptedSync = WallpaperAlbumSync.hasInterruptedSync
+    }
+
+    /// FR-6.8, on the user's say-so: put the album back the way the
+    /// interrupted sync found it.
+    func restoreInterruptedSync() {
+        isRestoring = true
+        errorMessage = nil
+        Task {
+            await WallpaperAlbumSync.restoreInterruptedSync()
+            hasInterruptedSync = WallpaperAlbumSync.hasInterruptedSync
+            isRestoring = false
+        }
+    }
+
     /// Whether "Sync Album" (button or menu command) has anything to do
     /// right now. Also stands in for "not authorized" in the menu command's
     /// disabled state: with no Photos access the candidate pool is always
     /// empty, so `totalAccepted` never rises above 0 and this reads false
-    /// without needing its own authorization plumbing.
-    var canSync: Bool { !isSyncing && (totalAccepted ?? 0) > 0 }
+    /// without needing its own authorization plumbing. Limited access is the
+    /// exception that proxy misses — the selected photos still scan, so the
+    /// pool is non-empty while the album remains impossible (FR-1.8).
+    var canSync: Bool { !isSyncing && !isLimitedAccess && (totalAccepted ?? 0) > 0 }
 
     var stepperUpperBound: Int { max(1, totalAccepted ?? count) }
 
@@ -82,15 +139,38 @@ final class ExportModel {
     func sync(container: ModelContainer) {
         isSyncing = true
         errorMessage = nil
+        albumMissing = false
         let target = count
 
         Task {
             do {
                 outcome = try await WallpaperAlbumSync.sync(container: container, count: target)
+            } catch WallpaperAlbumSync.SyncError.albumNotVisible {
+                // FR-6.11: not an error to report, a state to wait in.
+                albumMissing = true
             } catch {
                 errorMessage = error.localizedDescription
             }
+            // A completed sync rebuilds membership outright, so any earlier
+            // interrupted sync is moot — and a failed one may have left a
+            // fresh record. Either way this is now the truth.
+            hasInterruptedSync = WallpaperAlbumSync.hasInterruptedSync
             isSyncing = false
+        }
+    }
+
+    /// FR-6.11's escape hatch for the first device, where the album has never
+    /// existed anywhere. Deliberately user-driven — see
+    /// `WallpaperAlbumSync.createAlbum`.
+    func createAlbum() {
+        errorMessage = nil
+        Task {
+            do {
+                try await WallpaperAlbumSync.createAlbum()
+                albumMissing = false
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -106,6 +186,8 @@ final class ExportModel {
 /// album, previewing exactly which photos will be in it.
 struct ExportView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @State private var model = ExportModel()
     @FocusState private var countFieldFocused: Bool
 
@@ -135,6 +217,14 @@ struct ExportView: View {
         // FR-8.3: lets the menu bar's "Sync Album" trigger the same sync
         // this view's button does.
         .focusedSceneValue(\.exportCommandTarget, ExportCommandTarget(model: model, modelContext: modelContext))
+        // FR-1.8 / FR-1.3: pick up an access upgrade made in Settings while the
+        // app was in the background, on the tab that acts on it. `.task` covers
+        // the tab appearing; `.onChange` covers returning to a tab already on
+        // screen, which is exactly the Settings round-trip.
+        .task { model.refreshAccess() }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active { model.refreshAccess() }
+        }
         .task(id: RankingClock.shared.version) {
             await model.refreshSuggestion(container: modelContext.container)
         }
@@ -143,14 +233,36 @@ struct ExportView: View {
         }
     }
 
+    /// FR-6.7, the hand-off, and the one place the two platforms genuinely
+    /// part ways. On the Mac the album is the last step the app can take for
+    /// the user, so this points at the System Settings pane that turns it into
+    /// a rotating desktop. On iPhone and iPad there is no such pane and no
+    /// supported way for any app to set wallpaper (see REQUIREMENTS.md's
+    /// Parked list), so the honest thing — and what FR-6.7 asks for — is to
+    /// say that the Mac is where wallpaper happens, rather than leave the user
+    /// hunting for a button that cannot exist.
+    private var handOffText: String {
+        // "the", not "a": there is exactly one such album, and the article has
+        // to read correctly whatever `wallpaperAlbumName` is — "a “Alpenglow”"
+        // is wrong today (seen on the iPad), and "an" would be wrong the moment
+        // the name started with a consonant sound.
+        let album = "Keeps the “\(Thresholds.wallpaperAlbumName)” album in Photos in sync with your top-ranked wallpapers, previewed below."
+        #if os(macOS)
+        return album + " In System Settings → Wallpaper, choose “Add Photo Album” and pick it for automatic rotation."
+        #else
+        return album + " Alpenglow doesn't set wallpaper here — iPhone and iPad don't let apps do that. The album syncs to your Mac through iCloud Photos, and you point System Settings → Wallpaper at it there."
+        #endif
+    }
+
     private var controls: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Wallpaper Album")
                     .font(.headline)
 
-                Text("Keeps a “\(Thresholds.wallpaperAlbumName)” album in Photos in sync with your top-ranked wallpapers, previewed below. In System Settings → Wallpaper, choose “Add Photo Album” and pick it for automatic rotation.")
+                Text(handOffText)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 // Typed entry for an exact count, plus stepper arrows for quick
                 // nudges. No hardcoded ceiling: if every photo is awesome, the
@@ -181,6 +293,18 @@ struct ExportView: View {
                                 .controlSize(.small)
                         }
                     }
+                }
+
+                if model.isLimitedAccess {
+                    limitedAccessNotice
+                }
+
+                if model.albumMissing {
+                    albumMissingNotice
+                }
+
+                if model.hasInterruptedSync {
+                    interruptedSyncNotice
                 }
 
                 HStack(spacing: 12) {
@@ -227,5 +351,79 @@ struct ExportView: View {
             }
             .padding(8)
         }
+    }
+
+    /// FR-1.8 *(iPhone and iPad)*: with limited access there is no album to
+    /// maintain, so say that plainly at the point the user would try to sync,
+    /// and offer the only route to full access there is.
+    private var limitedAccessNotice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(
+                "Alpenglow can't maintain the album with limited photo access.",
+                systemImage: "exclamationmark.triangle"
+            )
+            .foregroundStyle(.orange)
+            Text("Photos only lets apps create and update albums with access to your whole library. Allow access to all photos to use the wallpaper album.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let url = PhotoLibraryAuthorization.settingsURL {
+                Button("Allow Access to All Photos…") { openURL(url) }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// FR-6.8: a previous sync died between removing the album's contents and
+    /// putting the new ones back, so the album may be sitting empty or half
+    /// rebuilt. Offered rather than done on launch: these devices share one
+    /// album, and restoring unattended could silently undo a sync the user
+    /// deliberately made somewhere else (FR-6.10). Syncing again fixes it too —
+    /// a sync rebuilds membership outright — so this is the option for when
+    /// what was in the album matters more than what would be.
+    private var interruptedSyncNotice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(
+                "The last sync didn't finish, so the album may be incomplete.",
+                systemImage: "arrow.uturn.backward.circle"
+            )
+            .foregroundStyle(.orange)
+            Text("Restore puts the album back exactly as it was before that sync. Syncing again instead rebuilds it from your current ranking.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(model.isRestoring ? "Restoring…" : "Restore Previous Album") {
+                model.restoreInterruptedSync()
+            }
+            .disabled(model.isRestoring)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// FR-6.11: this device can't see the album. Say so and wait — the usual
+    /// cause is a second device whose iCloud Photos sync hasn't brought the
+    /// album down yet, and creating one here would leave the user with two.
+    /// The button covers the only other cause: a first device, where the album
+    /// has never existed anywhere.
+    private var albumMissingNotice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(
+                "Waiting for the “\(Thresholds.wallpaperAlbumName)” album to appear on this device.",
+                systemImage: "icloud.and.arrow.down"
+            )
+            .foregroundStyle(.orange)
+            Text("If you've already used Alpenglow on another device, the album will arrive once iCloud Photos finishes syncing — syncing now would create a second one. If this is your first device, create it here.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Create Album") { model.createAlbum() }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 }

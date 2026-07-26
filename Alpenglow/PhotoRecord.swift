@@ -9,6 +9,29 @@ import SwiftData
 @Model
 final class PhotoRecord {
     @Attribute(.unique) var localIdentifier: String
+
+    /// The same photo's identifier on *every* one of the user's devices, as
+    /// `PHCloudIdentifier.archivalStringValue`; nil until the scan resolves it.
+    ///
+    /// `localIdentifier` is explicitly device-scoped — PhotoKit's own header
+    /// says it "persistently identifies the object on a given device" — so it
+    /// cannot key anything the user's judgments must survive being carried
+    /// between devices (FR-9.1). Resolved in batches during the scan because
+    /// the mapping call is documented as "very expensive"; see
+    /// `LibraryScanner.resolveCloudIdentifiers`.
+    var cloudIdentifier: String?
+
+    /// What every judgment about this photo is filed under (FR-9.1, FR-9.2).
+    ///
+    /// The cloud identifier once known, the local one until then. The fallback
+    /// is what makes the scheme total: a photo whose resolution failed is
+    /// still judgeable, and its judgments are simply meaningless on other
+    /// devices rather than lost — which is exactly how FR-9.2 already treats a
+    /// photo that hasn't arrived. It also lets judgments be recorded before
+    /// the first scan resolves anything; `LibraryScanner.rekeyJudgments` moves
+    /// them onto the cloud key when it becomes available.
+    var judgmentKey: String { cloudIdentifier ?? localIdentifier }
+
     var pixelWidth: Int
     var pixelHeight: Int
     var creationDate: Date?
@@ -28,8 +51,27 @@ final class PhotoRecord {
     var preferenceScore: Float?
     var analyzedAt: Date?
 
-    /// True when analysis couldn't run (e.g. iCloud-only original with no local bitmap).
+    /// True when the photo's pixels weren't available locally — an iCloud-only
+    /// original with nothing on disk to analyze. Strictly a *deferral*: the
+    /// retry pass downloads and analyzes these once the network allows it.
+    ///
+    /// Deliberately narrow. It used to also cover "Vision threw", which made
+    /// the app tell the user that photos were waiting on iCloud when they were
+    /// not — a diagnosis that is simply false, offered a retry that could never
+    /// succeed, and triggered the "waiting for a network" message on a device
+    /// with no iCloud account at all. Analysis failures now set
+    /// `analysisFailed` instead (FR-3.2, FR-3.4).
     var isSkipped: Bool = false
+
+    /// True when the pixels *were* available but the Vision request failed.
+    ///
+    /// Not retryable in the way `isSkipped` is: no amount of network will fix
+    /// it, so these records are finished rather than deferred — they stop the
+    /// pipeline claiming outstanding iCloud work, and stop the retry button
+    /// promising something it cannot deliver (FR-3.5). Kept as its own flag
+    /// rather than folded into a rejection reason because it is not a judgment
+    /// about the photo: the app never got far enough to have one.
+    var analysisFailed: Bool = false
 
     /// Mirrors PHAsset.isFavorite; refreshed on every scan.
     var isFavorite: Bool = false

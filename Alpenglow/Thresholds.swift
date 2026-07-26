@@ -1,8 +1,32 @@
+import CoreGraphics
 import Foundation
 
 /// Every tunable magic number in the app lives here.
 /// `nonisolated`: plain constants, readable from any actor (the analysis pipeline runs off-main).
 nonisolated enum Thresholds {
+    // MARK: The desktop shape (FR-5.1)
+
+    /// Aspect ratio (width / height) of the wallpaper crop the app judges every
+    /// photo through: the analysis bitmap is cut to it, the duel cards show it,
+    /// and the grid tiles are drawn at it — so what the ranker learns, what the
+    /// user compared, and what the grid displays are all the same rectangle.
+    ///
+    /// Deliberately one fixed shape rather than the running display's. Until
+    /// 2026-07-25 this was read live from the main display (`NSScreen.main` in
+    /// the duel, `CGDisplayBounds` in analysis), which FR-5.1 no longer allows:
+    /// a choice made on an iPhone has to mean exactly what the same choice made
+    /// on the Mac means, and both devices score the same photo into one shared
+    /// ranking — a per-display crop would have them disagreeing about it. It
+    /// also made the Mac disagree with *itself* when the user moved the window
+    /// between a 16:9 external display and the built-in one.
+    ///
+    /// 16:10 because that is the shape of the built-in display on every Mac
+    /// Apple currently ships, which is where the wallpaper actually lands; it
+    /// was already this app's fallback whenever the display bounds couldn't be
+    /// read, and it sits between the 16:9 of most external displays and the
+    /// squarer 3:2-ish panels, so neither is badly misjudged.
+    static let desktopAspectRatio: CGFloat = 16.0 / 10.0
+
     // MARK: Scan (Phase 2)
 
     /// Minimum pixel width for a wallpaper candidate. 3264 admits iPhone 5s-era
@@ -21,16 +45,50 @@ nonisolated enum Thresholds {
     /// Assets examined between progress updates and cooperative yields during a scan.
     static let scanProgressStride = 256
 
+    /// Photos per `cloudIdentifierMappings(forLocalIdentifiers:)` call when
+    /// resolving device-independent identifiers (FR-9.1).
+    ///
+    /// PhotoKit's header is blunt about the cost — "This method can be very
+    /// expensive so they should be used sparingly for batch lookup of all
+    /// needed identifiers" — so the call is made per chunk, never per photo.
+    /// It is also synchronous and blocking, which is why it runs off the main
+    /// actor. 500 balances the two failure modes: chunks too small pay the
+    /// per-call overhead repeatedly, while one unbounded call over a library
+    /// this size would block for an unpredictable stretch with no chance to
+    /// save partway. Chunking also lets each batch be persisted as it lands,
+    /// matching how the scan and analysis already checkpoint.
+    static let cloudIdentifierBatchSize = 500
+
     // MARK: Vision analysis (Phase 3)
 
     /// Bump when analysis logic changes; records with an older version are re-analyzed.
-    static let currentAnalysisVersion = 2 // v2 analyzes the display-aspect center crop
+    /// v3 is required: v2 cut its analysis bitmap to whatever the main display
+    /// happened to be, so records analyzed on a 16:9 display measured a
+    /// different rectangle than the fixed `desktopAspectRatio` crop the ranker
+    /// now assumes — and than the same photo would measure on another device.
+    static let currentAnalysisVersion = 3 // v3 analyzes the fixed desktopAspectRatio center crop
 
     /// Records analyzed and saved per batch; a killed app loses at most one batch.
     static let analysisBatchSize = 32
 
     /// Concurrent Vision pipelines within a batch.
     static let analysisConcurrency = max(1, min(4, ProcessInfo.processInfo.activeProcessorCount / 2))
+
+    /// How long a paused analysis run waits before re-testing the condition
+    /// that paused it — device heat, Low Power Mode, or a network the user's
+    /// settings don't allow downloads over (FR-3.6, FR-3.7).
+    ///
+    /// Polling rather than observing `thermalStateDidChangeNotification` /
+    /// `NSProcessInfoPowerStateDidChange` / `NWPathMonitor.pathUpdateHandler`:
+    /// the loop already has a natural checkpoint between batches, so a poll is
+    /// a `guard` there instead of three observers, their registrations, and the
+    /// actor hops to deliver them. 20s because none of these conditions clear
+    /// quickly — a hot device needs tens of seconds of reduced load to cool,
+    /// and Low Power Mode and network policy are user actions — so a shorter
+    /// interval would only burn wakeups restating the same answer, while a
+    /// longer one would leave the user staring at "waiting" well after the
+    /// cause cleared.
+    static let analysisPauseRecheckInterval: Duration = .seconds(20)
 
     /// Long-edge size of the analysis bitmap requested from PHImageManager. Never analyze full-res.
     static let analysisPixelSize = 1024

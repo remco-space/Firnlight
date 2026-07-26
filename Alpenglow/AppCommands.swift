@@ -29,6 +29,21 @@ import SwiftData
 /// `environment.md`); by publishing the model instead and letting the
 /// command call real methods on it, comparison is by identity and reads
 /// stay stable.
+///
+/// FR-8.3 is marked *(macOS)*, so only `AppCommands` itself — the menu bar —
+/// is compiled out on iPhone and iPad. The focused-value keys below stay
+/// cross-platform on purpose: they are how a view says "this is the photo the
+/// user is on", which is true on any platform, and keeping them unconditional
+/// means the publishing views need no `#if` of their own.
+///
+/// FR-8.4 is the iPhone and iPad counterpart, and it is answered in the views
+/// rather than here, because touch has no menu bar to hang commands off. Every
+/// command FR-8.3 lists already has a visible, named, touch-reachable control
+/// on those platforms: scan / re-scan is `ScanView`'s button, album sync is
+/// `ExportView`'s, and Show Ignored is the switch in the grid header. The
+/// three photo actions and Un-ignore were the exception — reachable only by a
+/// long press — so `ThumbnailCell` and `DuelCard` grow a visible actions menu
+/// there, offering the same commands by the same names this menu bar does.
 
 // MARK: - Focused photo (FR-4.6)
 
@@ -125,12 +140,14 @@ extension FocusedValues {
     }
 }
 
-// MARK: - The menu bar
+// MARK: - The menu bar (macOS)
 
-/// Named commands for FR-8.3, attached to the `WindowGroup` via
+#if os(macOS)
+/// Named commands for FR-8.3, attached to the `Window` scene via
 /// `.commands { AppCommands() }`. Quit (⌘Q) needs no entry here — it's part
 /// of the automatic app menu and nothing below replaces it.
 struct AppCommands: Commands {
+    @Environment(\.openURL) private var openURL
     @FocusedValue(\.focusedPhoto) private var focusedPhoto
     @FocusedValue(\.libraryCommandTarget) private var libraryCommandTarget
     @FocusedValue(\.libraryGridModel) private var gridModel
@@ -140,7 +157,7 @@ struct AppCommands: Commands {
         CommandMenu("Photo") {
             Button("Open in Photos") {
                 guard let focusedPhoto else { return }
-                CandidateActions.openInPhotos(focusedPhoto.localIdentifier)
+                CandidateActions.openInPhotos(focusedPhoto.localIdentifier, using: openURL)
             }
             .keyboardShortcut("o", modifiers: [.command])
             .disabled(focusedPhoto == nil)
@@ -213,3 +230,4 @@ struct AppCommands: Commands {
         libraryCommandTarget.map { $0.scanner.phase == .idle } ?? true ? "Scan Library" : "Scan Again"
     }
 }
+#endif

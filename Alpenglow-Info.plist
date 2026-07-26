@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Partial Info.plist. GENERATE_INFOPLIST_FILE stays YES, so Xcode merges its
+  generated keys (usage descriptions, scene manifest, launch screen, …) on top
+  of this base; only keys Xcode has no INFOPLIST_KEY_ build setting for belong
+  here.
+
+  It lives outside the Alpenglow/ folder on purpose: that folder is a
+  PBXFileSystemSynchronizedRootGroup, so anything inside it is picked up
+  automatically — an Info.plist there risks also being copied into the bundle
+  as a resource.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  FR-3.6 (iPhone and iPad): the identifier BGTaskScheduler will accept for
+	  the continued-processing task that keeps a long analysis run going once
+	  the app leaves the foreground. Must cover the identifiers
+	  ContinuedAnalysisTask submits, or the scheduler refuses them with
+	  BGTaskSchedulerErrorCodeNotPermitted. The wildcard suffix is what
+	  BGContinuedProcessingTask requires: the prefix is the bundle ID, and each
+	  submitted run appends its own unique component.
+
+	  Ignored on macOS, where BackgroundTasks doesn't exist.
+	-->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).analysis.*</string>
+	</array>
+</dict>
+</plist>

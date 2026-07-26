@@ -2,6 +2,9 @@ import Foundation
 import Photos
 import SwiftData
 import os
+#if os(iOS)
+import UIKit
+#endif
 
 /// Keeps the "Alpenglow" album in Photos mirroring the current top-ranked,
 /// deduplicated wallpaper candidates.
@@ -36,6 +39,20 @@ import os
 /// async) sets it from wherever it resumes, and nobody needs SwiftUI
 /// observation — just the one "now idle" callback. A begin-count (not a Bool)
 /// keeps it correct even if two syncs ever overlap.
+///
+/// `sync` marks the critical section on every platform, but only macOS reads
+/// the gate: FR-1.7 is macOS-only, and there is no iOS counterpart to hold off
+/// a quit — the user never closes a window there. On iPhone and iPad the
+/// equivalent threat is the system suspending a backgrounded app, so `sync`
+/// takes a `BackgroundAssertion` over the same span instead (see below).
+///
+/// Neither mechanism survives a *hard* death — force-quit, crash, power loss —
+/// on either platform, because both only defer a cooperative shutdown. That
+/// gap is covered separately and durably: `sync` records the album's previous
+/// membership to `UserDefaults` before it removes anything, and
+/// `restoreInterruptedSync` puts it back on the next launch. The gate and the
+/// assertion make the common case invisible; the record is what actually keeps
+/// FR-6.8's promise.
 nonisolated final class AlbumSyncGate: Sendable {
     static let shared = AlbumSyncGate()
 
@@ -73,6 +90,42 @@ nonisolated final class AlbumSyncGate: Sendable {
     }
 }
 
+#if os(iOS)
+/// Keeps iOS from suspending the app mid-sync (FR-6.8).
+///
+/// `WallpaperAlbumSync.sync` rebuilds the album in two Photos transactions, and
+/// on iPhone and iPad backgrounding mid-sync is the ordinary case, not an edge
+/// one — a suspension between the two would strand the album empty until the
+/// next launch. `AlbumSyncGate`'s macOS answer (defer the quit) has no
+/// counterpart here, so `sync` holds one of these across the same span.
+///
+/// The expiration handler is not optional bookkeeping: iOS terminates an app
+/// that lets a background task assertion expire without ending it. Ending sets
+/// the identifier back to `.invalid` so the `defer` in `sync` can't end it a
+/// second time.
+///
+/// `@MainActor` because `UIApplication.shared` is, and because the expiration
+/// handler is delivered there (`NS_SWIFT_UI_ACTOR`); that also makes the class
+/// implicitly `Sendable`, so `sync` — which is `nonisolated async` — can hold
+/// one across its suspension points.
+@MainActor
+final class BackgroundAssertion {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+
+    init(name: String) {
+        identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            self?.end()
+        }
+    }
+
+    func end() {
+        guard identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(identifier)
+        identifier = .invalid
+    }
+}
+#endif
+
 nonisolated enum WallpaperAlbumSync {
     struct Outcome: Sendable, Equatable {
         var added = 0
@@ -87,6 +140,15 @@ nonisolated enum WallpaperAlbumSync {
 
     enum SyncError: LocalizedError {
         case albumCreationFailed
+        /// FR-6.11: the album isn't visible on this device — no stored
+        /// identifier resolves and no album of that title exists. Syncing
+        /// can't proceed, and silently creating one would be wrong: the
+        /// user's devices share a single album (FR-6.10), so on a second
+        /// device that just hasn't finished syncing yet, creating would leave
+        /// them with two "Alpenglow" albums the moment the real one arrives.
+        /// ExportView turns this into a wait-or-create choice rather than an
+        /// error the user can only stare at.
+        case albumNotVisible
         /// FR-6.8: the re-add after a remove failed, and the best-effort
         /// rollback that restores the previous membership *also* failed —
         /// the album may now be sitting empty. Thrown instead of the rollback
@@ -99,6 +161,8 @@ nonisolated enum WallpaperAlbumSync {
             switch self {
             case .albumCreationFailed:
                 "Couldn't create the “\(Thresholds.wallpaperAlbumName)” album in Photos."
+            case .albumNotVisible:
+                "The “\(Thresholds.wallpaperAlbumName)” album isn't on this device yet."
             case .syncFailedAndRollbackFailed(let underlying):
                 "Sync failed and the album may now be empty (\(underlying.localizedDescription)). Syncing again will rebuild it."
             }
@@ -110,6 +174,14 @@ nonisolated enum WallpaperAlbumSync {
     /// Makes album membership exactly the current top `count` candidates, in
     /// diversity order (consecutive photos as different as possible), so
     /// "rotate in order" wallpaper settings avoid samey streaks.
+    ///
+    /// FR-6.10: this runs only when the user asks for it. Its two callers are
+    /// the Export tab's "Sync Album" button and the menu bar command of the
+    /// same name (FR-8.3) — both explicit acts. Nothing schedules it, and
+    /// nothing may: the user's devices share one album, so an unattended sync
+    /// on one would silently undo a deliberate one on another. FR-2.7's launch
+    /// re-sync deliberately stops at scanning and analysis and never reaches
+    /// here.
     static func sync(container: ModelContainer, count: Int) async throws -> Outcome {
         let ordered = try await FeatureStore(modelContainer: container)
             .albumCandidates(limit: count)
@@ -117,12 +189,18 @@ nonisolated enum WallpaperAlbumSync {
         let orderedIDs = ordered.map(\.localIdentifier)
         let targetIDs = Set(orderedIDs)
 
-        let album = try await fetchOrCreateAlbum(named: Thresholds.wallpaperAlbumName)
+        guard let album = findAlbum(named: Thresholds.wallpaperAlbumName) else {
+            throw SyncError.albumNotVisible
+        }
 
         // Diff for reporting; the album itself is rebuilt to impose the order.
+        // `currentOrder` keeps the sequence, not just the membership, because
+        // it is also what gets recorded for the FR-6.8 restore below — putting
+        // the album back means putting it back in the order it was in.
         let current = PHAsset.fetchAssets(in: album, options: nil)
-        var currentIDs: Set<String> = []
-        current.enumerateObjects { asset, _, _ in currentIDs.insert(asset.localIdentifier) }
+        var currentOrder: [String] = []
+        current.enumerateObjects { asset, _, _ in currentOrder.append(asset.localIdentifier) }
+        let currentIDs = Set(currentOrder)
         let added = targetIDs.subtracting(currentIDs).count
         let removed = currentIDs.subtracting(targetIDs).count
 
@@ -139,7 +217,29 @@ nonisolated enum WallpaperAlbumSync {
         // `defer` also covers the trailing verification, but those are only
         // fast reads — a small price for covering every throw path.
         AlbumSyncGate.shared.begin()
-        defer { AlbumSyncGate.shared.end() }
+        #if os(iOS)
+        // The iOS half of the same protection: there is no quit to defer, but
+        // there is a suspension to hold off. See BackgroundAssertion.
+        let assertion = await BackgroundAssertion(name: "Album sync")
+        #endif
+        defer {
+            AlbumSyncGate.shared.end()
+            #if os(iOS)
+            Task { @MainActor in assertion.end() }
+            #endif
+        }
+
+        // FR-6.8, the durable half: record what the album held before touching
+        // it. The gate and the assertion only defer a *cooperative* shutdown —
+        // a crash, force-quit or power loss in the window below still skips
+        // the rollback, and `current` lives only in memory, so without this
+        // there would be nothing left to restore from on any platform. Written
+        // before the remove and cleared only once the re-add is verified, so
+        // its mere presence on the next launch means "the last sync did not
+        // finish" (see restoreInterruptedSync).
+        if !currentOrder.isEmpty {
+            UserDefaults.standard.set(currentOrder, forKey: interruptedMembershipDefaultsKey)
+        }
 
         // Two transactions: remove-and-re-add within a single change request
         // lets Photos keep surviving assets at their old positions, which
@@ -168,10 +268,14 @@ nonisolated enum WallpaperAlbumSync {
                     // stranded empty. Don't swallow this one (FR-6.8) — throw
                     // a distinct error so ExportView's errorMessage tells the
                     // user, rather than the previous `try?` hiding a second
-                    // failure behind the first.
+                    // failure behind the first. The recorded membership stays
+                    // put deliberately, so the next launch retries the restore.
                     log.error("Rollback ALSO failed; album may be empty: \(rollbackError.localizedDescription, privacy: .public)")
                     throw SyncError.syncFailedAndRollbackFailed(underlying: error)
                 }
+                // The rollback put the previous membership back, so there is
+                // nothing left for the next launch to restore.
+                UserDefaults.standard.removeObject(forKey: interruptedMembershipDefaultsKey)
             }
             throw error
         }
@@ -189,6 +293,10 @@ nonisolated enum WallpaperAlbumSync {
             log.info("Album order verified: \(resultingIDs.count) photos in diversity order")
         }
 
+        // The album is rebuilt and read back, so the pre-sync membership is no
+        // longer worth restoring to (FR-6.8).
+        UserDefaults.standard.removeObject(forKey: interruptedMembershipDefaultsKey)
+
         // FR-6.6: carry the verification result in the outcome so ExportView
         // can tell the user honestly, not just log it.
         let outcome = Outcome(added: added, removed: removed, total: orderedAssets.count, orderVerified: orderMatches)
@@ -197,21 +305,35 @@ nonisolated enum WallpaperAlbumSync {
     }
 
     private static let storedIdentifierDefaultsKey = "WallpaperAlbumSync.albumLocalIdentifier"
+    private static let interruptedMembershipDefaultsKey = "WallpaperAlbumSync.interruptedMembership"
 
-    private static func fetchOrCreateAlbum(named name: String) async throws -> PHAssetCollection {
+    /// Locates the album this device already knows about, or nil if it can't
+    /// see one (FR-6.11).
+    ///
+    /// Deliberately never creates. The stored identifier is tried first; a
+    /// title match is the fallback for a first sync or a stored identifier
+    /// that no longer resolves, and adopting its identifier is what lets the
+    /// album survive being renamed in Photos (FR-6.9). Finding nothing is a
+    /// real state, not a failure to paper over — see `SyncError.albumNotVisible`.
+    private static func findAlbum(named name: String) -> PHAssetCollection? {
         if let storedID = UserDefaults.standard.string(forKey: storedIdentifierDefaultsKey),
            let byIdentifier = fetchAlbum(identifier: storedID) {
             return byIdentifier
         }
-
-        // Stored identifier missing or stale (first run, or the album was
-        // deleted): fall back to a title match, adopting its identifier so
-        // subsequent syncs survive a rename.
         if let byTitle = fetchAlbum(named: name) {
             UserDefaults.standard.set(byTitle.localIdentifier, forKey: storedIdentifierDefaultsKey)
             return byTitle
         }
+        return nil
+    }
 
+    /// Creates the wallpaper album, for the one case FR-6.11 leaves open: a
+    /// device where it genuinely has never existed. Only ever called from the
+    /// Export tab's explicit "Create Album" action — the app never decides on
+    /// its own that an album is missing rather than merely unsynced, because
+    /// PhotoKit exposes no way to tell those apart.
+    static func createAlbum() async throws {
+        let name = Thresholds.wallpaperAlbumName
         try await PHPhotoLibrary.shared().performChanges {
             _ = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: name)
         }
@@ -220,7 +342,71 @@ nonisolated enum WallpaperAlbumSync {
         }
         UserDefaults.standard.set(created.localIdentifier, forKey: storedIdentifierDefaultsKey)
         log.info("Created album “\(name, privacy: .public)”")
-        return created
+    }
+
+    /// Puts the album back the way the last sync found it, if that sync never
+    /// finished (FR-6.8).
+    ///
+    /// Called once per launch. A recorded membership that outlived its sync
+    /// means the process died somewhere between the remove and the verified
+    /// re-add — the one window where the user's live wallpaper rotation can be
+    /// left pointing at an empty album, and the one `AlbumSyncGate` and
+    /// `BackgroundAssertion` cannot cover because neither survives a hard kill.
+    ///
+    /// **Only ever called from an explicit user action**, never at launch, and
+    /// that is a resolution of a genuine conflict between two requirements
+    /// rather than an oversight. FR-6.8 wants the album restored; FR-6.10 says
+    /// the album changes only when the user asks, precisely because *"the
+    /// user's devices share one album, and unattended changes would let them
+    /// undo each other's"*. An automatic restore is exactly that failure: the
+    /// Mac dies mid-sync, the user syncs deliberately from the iPad, and the
+    /// Mac's next launch silently rewrites the shared album back to its stale
+    /// pre-sync membership. Offering the restore and letting the user trigger
+    /// it satisfies both — the album is recoverable, and nothing writes to it
+    /// unattended. The in-run rollback inside `sync` stays automatic, because
+    /// that happens *within* a sync the user asked for.
+    ///
+    /// Remove-then-add rather than a bare add: the process may equally have
+    /// died *during* the re-add, leaving a partial new membership, and a bare
+    /// add would union the two into something that was never the album's
+    /// contents. The record is cleared only on success, so an interrupted
+    /// restore stays on offer.
+    static func restoreInterruptedSync() async {
+        let defaults = UserDefaults.standard
+        guard let identifiers = defaults.stringArray(forKey: interruptedMembershipDefaultsKey),
+              !identifiers.isEmpty else { return }
+
+        guard let album = findAlbum(named: Thresholds.wallpaperAlbumName) else {
+            // No album to restore into. Keep the record: on a second device
+            // the album may simply not have synced down yet (FR-6.11), and
+            // discarding it here would throw away the only copy of what the
+            // album held.
+            log.error("Interrupted sync recorded, but the album isn't visible on this device yet; will retry")
+            return
+        }
+
+        let previous = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+        let stranded = PHAsset.fetchAssets(in: album, options: nil)
+        do {
+            AlbumSyncGate.shared.begin()
+            defer { AlbumSyncGate.shared.end() }
+            try await PHPhotoLibrary.shared().performChanges {
+                let request = PHAssetCollectionChangeRequest(for: album)
+                if stranded.count > 0 { request?.removeAssets(stranded) }
+                request?.addAssets(previous)
+            }
+            defaults.removeObject(forKey: interruptedMembershipDefaultsKey)
+            log.info("Restored \(previous.count) photos after an interrupted sync")
+        } catch {
+            log.error("Restoring after an interrupted sync failed; still on offer: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Whether a previous sync died partway and left the album mid-rebuild, so
+    /// the Export tab can offer to put it back (FR-6.8). A plain read of the
+    /// record `sync` writes before it touches anything.
+    static var hasInterruptedSync: Bool {
+        UserDefaults.standard.stringArray(forKey: interruptedMembershipDefaultsKey)?.isEmpty == false
     }
 
     private static func fetchAlbum(identifier: String) -> PHAssetCollection? {

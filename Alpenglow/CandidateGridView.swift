@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 import Photos
 import Observation
-import AppKit
+import CoreGraphics
 import os
 
 /// Loads the ranked, deduplicated candidate list off the main actor.
@@ -130,7 +130,11 @@ struct CandidateGridView: View {
     @ViewBuilder
     private var header: some View {
         HStack {
-            Text("Top Candidates")
+            // The heading names what is actually below it. With the filter on
+            // that is the ignored photos the user came here to review (FR-4.9),
+            // and calling them "Top Candidates" would misdescribe the screen —
+            // they are precisely the photos held *out* of the ranking.
+            Text(model.showingIgnored ? "Ignored Photos" : "Top Candidates")
                 .font(.headline)
 
             if let result = model.result, !model.showingIgnored {
@@ -144,6 +148,16 @@ struct CandidateGridView: View {
             Toggle("Show Ignored", isOn: Bindable(model).showingIgnored)
                 .toggleStyle(.switch)
                 .controlSize(.small)
+                // Without this the switch drifts to the far edge of an iPad
+                // window: a `Toggle` takes all the width it is offered and
+                // pushes its label and its control to opposite ends, which on
+                // the Mac's narrower window is invisible but on iPad left the
+                // switch ~300pt from the words "Show Ignored" and directly
+                // beside "Refresh" — reading as Refresh's control. `fixedSize`
+                // holds the toggle to its ideal width so label and switch stay
+                // together, which is what FR-4.13 asks of any control and what
+                // FR-8.4 needs for this one to be nameable by touch.
+                .fixedSize()
 
             if model.isLoading && !model.showingIgnored {
                 ProgressView()
@@ -165,14 +179,46 @@ struct ThumbnailCell: View {
     /// ignored marker instead of a score and offers "Un-ignore".
     var isIgnoredMode = false
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.openURL) private var openURL
     @State private var thumbnail: CGImage?
 
     var body: some View {
+        tile
+            // The actions menu sits *outside* `tile`, and so outside its
+            // `.accessibilityElement(children: .ignore)`, which would
+            // otherwise swallow the only touch path to the photo actions
+            // (FR-8.4) and leave VoiceOver unable to reach them.
+            .overlay(alignment: .topTrailing) { actionsMenu }
+            .contextMenu { menu }
+            .task {
+                if thumbnail == nil {
+                    thumbnail = await ThumbnailLoader.load(candidate.localIdentifier)
+                }
+            }
+            // Tab-focusable with the system focus ring, so keyboard/VoiceOver
+            // users can reach every cell without a mouse, and so the Photo menu
+            // (FR-4.6/FR-8.3) has something to act on: `.focusedValue` publishes
+            // this cell's candidate only while focus is actually inside it — see
+            // AppCommands.swift for how AppCommands reads it back. Shared by the
+            // Library grid and the Export preview, so both get this for free.
+            .focusable()
+            .focusedValue(\.focusedPhoto, FocusedPhoto(
+                localIdentifier: candidate.localIdentifier,
+                isIgnored: isIgnoredMode,
+                modelContext: modelContext
+            ))
+    }
+
+    /// The photo itself, its badges, and nothing interactive — one labelled
+    /// accessibility element.
+    private var tile: some View {
         // The image lives in an overlay so a filled (e.g. panoramic) thumbnail
         // can't propose an oversized layout and spill into neighboring cells.
+        // The tile is the same desktop rectangle the duel judges and the
+        // analysis measures, so the grid shows the crop the ranking is about.
         Rectangle()
             .fill(.quaternary)
-            .aspectRatio(16.0 / 10.0, contentMode: .fit)
+            .aspectRatio(Thresholds.desktopAspectRatio, contentMode: .fit)
             .overlay {
                 if let thumbnail {
                     Image(decorative: thumbnail, scale: 1)
@@ -185,8 +231,12 @@ struct ThumbnailCell: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
             // clipShape clips drawing but NOT hit-testing: a panorama's
-            // scaledToFill overflow would otherwise be clickable far beyond
-            // the visible tile. contentShape bounds interaction to the tile.
+            // scaledToFill overflow would otherwise be clickable — or, on
+            // iPhone and iPad, tappable — far beyond the visible tile.
+            // contentShape bounds interaction to the tile, for clicks and
+            // taps alike (FR-4.10), and it is applied here rather than on the
+            // finished cell so it can't override the actions menu's own hit
+            // region.
             .contentShape(RoundedRectangle(cornerRadius: 8))
         .overlay(alignment: .topLeading) {
             if candidate.isFavorite {
@@ -194,36 +244,56 @@ struct ThumbnailCell: View {
                     .font(.caption)
                     .foregroundStyle(.pink)
                     .padding(4)
-                    .background(.ultraThinMaterial, in: Circle())
+                    .background(.regularMaterial, in: Circle())
                     .padding(5)
                     .help("You marked this photo as a favorite in Photos, which boosts its ranking.")
             }
         }
         .overlay(alignment: .bottomTrailing) { badge }
-        .contextMenu { menu }
-        .task {
-            if thumbnail == nil {
-                thumbnail = await ThumbnailLoader.load(candidate.localIdentifier)
-            }
-        }
-        // Tab-focusable with the system focus ring, so keyboard/VoiceOver
-        // users can reach every cell without a mouse, and so the Photo menu
-        // (FR-4.6/FR-8.3) has something to act on: `.focusedValue` publishes
-        // this cell's candidate only while focus is actually inside it — see
-        // AppCommands.swift for how AppCommands reads it back. Shared by the
-        // Library grid and the Export preview, so both get this for free.
-        .focusable()
-        .focusedValue(\.focusedPhoto, FocusedPhoto(
-            localIdentifier: candidate.localIdentifier,
-            isIgnored: isIgnoredMode,
-            modelContext: modelContext
-        ))
         // One accessibility element per cell: an unlabeled score/badge overlay
         // is invisible to VoiceOver otherwise.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
     }
 
+    /// FR-8.4 *(iPhone and iPad)*: the actions of FR-4.6 reachable by touch
+    /// and by name. On the Mac they already have the right-click menu and the
+    /// menu bar (FR-8.3), so this button is compiled out there rather than
+    /// adding a third redundant affordance to every thumbnail. On touch the
+    /// context menu opens only on a long press — a gesture FR-4.6 forbids as
+    /// the sole path — so this visible control is that path. In the "Show
+    /// Ignored" filter it carries "Un-ignore", which otherwise has no
+    /// touch-reachable home at all (FR-4.9).
+    @ViewBuilder
+    private var actionsMenu: some View {
+        #if !os(macOS)
+        Menu {
+            menu
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(6)
+                .background(.regularMaterial, in: Circle())
+        }
+        .padding(5)
+        .accessibilityLabel("Photo actions")
+        #endif
+    }
+
+    /// FR-8.5: badges and controls that sit *on* a photo are backed by
+    /// `.regularMaterial`, never `.glassEffect()`. Two rules meet here. Glass
+    /// belongs to the app's own bars and controls and never to the photos, so
+    /// the thumbnail stays plain — the material is the content-layer backing
+    /// the platform provides for exactly this, not a glass surface. And the
+    /// backing has to stay legible over the user's brightest *and* darkest
+    /// photos in both appearances: materials take their label colour from the
+    /// appearance rather than from the photo behind them, so the thinner
+    /// `.ultraThinMaterial` this used to be left dark text over a dark
+    /// mountain and light text over a bright sky. `.regularMaterial` is the
+    /// thinnest one that stays readable over any photo, and it is used for
+    /// every over-photo badge in the app — here and on the duel cards — so
+    /// they all look the same.
     @ViewBuilder
     private var badge: some View {
         if isIgnoredMode {
@@ -231,9 +301,9 @@ struct ThumbnailCell: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .padding(4)
-                .background(.ultraThinMaterial, in: Circle())
+                .background(.regularMaterial, in: Circle())
                 .padding(5)
-                .help("You ignored this photo — it stays out of the grid, duels, and the wallpaper album. Right-click to un-ignore it.")
+                .help("You ignored this photo — it stays out of the grid, duels, and the wallpaper album. Its “Un-ignore” action puts it back.")
         } else {
             // Learned preference (sigmoid of the raw score) once the ranker is
             // live, aesthetics prior before.
@@ -244,7 +314,7 @@ struct ThumbnailCell: View {
                 .font(.caption2.monospacedDigit())
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
-                .background(.ultraThinMaterial, in: Capsule())
+                .background(.regularMaterial, in: Capsule())
                 .padding(5)
                 .help("Predicted wallpaper appeal, 0–1 — higher scores rank earlier. Learned from your duel choices.")
         }
@@ -253,7 +323,7 @@ struct ThumbnailCell: View {
     @ViewBuilder
     private var menu: some View {
         Button("Open in Photos") {
-            CandidateActions.openInPhotos(candidate.localIdentifier)
+            CandidateActions.openInPhotos(candidate.localIdentifier, using: openURL)
         }
         Divider()
         if isIgnoredMode {
@@ -286,10 +356,16 @@ enum CandidateActions {
 
     /// Best-effort deep link; the scheme is undocumented but widely used.
     /// Falls back to just opening Photos if navigation isn't supported.
-    static func openInPhotos(_ localIdentifier: String) {
+    ///
+    /// Handed the caller's `OpenURLAction` rather than reaching for
+    /// `NSWorkspace`/`UIApplication`: `openURL` is the one API that opens a URL
+    /// on every platform, so the action needs no idea which one it is on. Every
+    /// call site is a SwiftUI view or `Commands`, all of which already have the
+    /// environment.
+    static func openInPhotos(_ localIdentifier: String, using openURL: OpenURLAction) {
         let uuid = localIdentifier.components(separatedBy: "/").first ?? localIdentifier
         guard let url = URL(string: "photos://asset?uuid=\(uuid)") else { return }
-        NSWorkspace.shared.open(url)
+        openURL(url)
     }
 
     /// "Not Wallpaper Material": the human judges this a bad wallpaper on face
@@ -346,11 +422,17 @@ enum CandidateActions {
         setIgnored(localIdentifier, false, in: modelContext)
     }
 
+    /// Writes both halves of an ignore: the durable `IgnoreRecord` that FR-9.1
+    /// carries to the user's other devices, and the `PhotoRecord.isExcluded`
+    /// cache the grid, duel and album fetches actually filter on (they use
+    /// `#Predicate`s, which cannot join across the two stores). See
+    /// `IgnoreRecord` for why the judgment lives apart from the photo.
     private static func setIgnored(_ localIdentifier: String, _ ignored: Bool, in modelContext: ModelContext) {
         let descriptor = FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.localIdentifier == localIdentifier }
         )
         guard let record = try? modelContext.fetch(descriptor).first else { return }
+        modelContext.insert(IgnoreRecord(photoKey: record.judgmentKey, isIgnored: ignored, timestamp: Date()))
         record.isExcluded = ignored
         try? modelContext.save()
         RankingClock.shared.bump() // grid + export preview + suggestion reload
