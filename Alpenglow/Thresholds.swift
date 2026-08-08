@@ -263,6 +263,66 @@ nonisolated enum Thresholds {
     /// many previously placed photos, so consecutive wallpapers look different.
     static let albumDiversityWindow = 5
 
+    // MARK: The album-size scale (FR-6.3)
+
+    /// The smallest album the size slider offers — FR-6.3's "a handful of
+    /// photos". Ten is roughly a fortnight of daily desktops, below which the
+    /// album stops being a rotation at all; and the difference between three
+    /// and four is not worth track that has to reach the other end of a
+    /// library measured in thousands. The number field is held to the same
+    /// floor, so the two halves of the control cannot disagree about what the
+    /// smallest album is.
+    static let minimumWallpaperCount = 10
+
+    /// Leading digits of the round counts the slider marks: 10, 20, 50, 100,
+    /// 200, 500 … A 1-2-5 ladder is the standard round-number series for a
+    /// logarithmic axis, because its steps are near-evenly spaced in log space
+    /// (×2, ×2.5, ×2) — the marks land at even intervals along the track while
+    /// every label stays a number a person would say out loud. A 1-3 ladder
+    /// spaces more evenly still and reads worse; plain decades leave a gap of
+    /// a whole ×10 between marks, which is what `albumSizeMarkLimit` falls
+    /// back to only when the ladder gets crowded.
+    static let albumSizeMarkMantissas = [1, 2, 5]
+
+    /// How many round marks the slider may carry before it thins them to plain
+    /// decades. FR-6.3 asks for "a few labeled marks"; past six, their labels
+    /// start to touch in a narrow window, and a mark whose label is unreadable
+    /// is worse than no mark.
+    static let albumSizeMarkLimit = 6
+
+    /// How close to the suggestion's mark, as a fraction of the slider's full
+    /// travel, the thumb has to come before it is pulled onto it exactly.
+    /// See `AlbumSizeScale.detented` for why a detent is needed at all.
+    ///
+    /// One percent of the track is a few points under the thumb — the usual
+    /// reach of a magnetic snap, and small enough that it is felt as the mark
+    /// catching rather than as the slider refusing to move. On a logarithmic
+    /// scale that same one percent is a wider dead zone in *counts* than it
+    /// looks (a full-length track spans about a factor of 800, so a percent of
+    /// it is several percent of the count), which is a cost the number field
+    /// covers: anything the detent swallows can still be typed.
+    static let albumSizeDetent = 0.01
+
+    /// Minimum gap, as a fraction of the slider's full travel, between the
+    /// suggestion's mark and a round one. Any closer and the two labels
+    /// overlap; the round mark is the one dropped, since the suggestion is the
+    /// mark FR-6.4 exists to put there.
+    ///
+    /// A fraction of the track is the wrong unit for the job and the only one
+    /// available: labels are a fixed width in points while the track stretches
+    /// with the window, so no single number is right at every size. This one
+    /// is therefore set to fail safe — marks are lost before labels are
+    /// allowed to collide.
+    ///
+    /// 2026-08-08: 0.06 measured wrong on the Mac at the card's 560pt width —
+    /// "Suggested" ran into a "1,000" a tenth of the travel away. The word is
+    /// about 50pt, a four-digit count about 20pt, so clearing both half-widths
+    /// plus a gap needs ~0.09 of a 560pt track and ~0.15 of the ~330pt one an
+    /// iPhone gives it. 0.15 clears both; the cost is a round mark or two
+    /// suppressed near the suggestion on a wide window, which is the direction
+    /// to err in.
+    static let albumSizeMarkSpacing = 0.15
+
     /// A photo is "nature" if any label in this allowlist meets the confidence threshold.
     /// Every entry is verified to exist in ClassifyImageRequest().supportedIdentifiers
     /// (1303 identifiers on this SDK; all lowercase, multi-word joined by underscores —
