@@ -561,18 +561,47 @@ struct ThumbnailCell: View {
 enum CandidateActions {
     private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "CandidateActions")
 
-    /// Best-effort deep link; the scheme is undocumented but widely used.
-    /// Falls back to just opening Photos if navigation isn't supported.
+    /// FR-4.6's "Open in Photos". Best-effort deep link; the scheme is
+    /// undocumented but widely used.
     ///
     /// Handed the caller's `OpenURLAction` rather than reaching for
     /// `NSWorkspace`/`UIApplication`: `openURL` is the one API that opens a URL
     /// on every platform, so the action needs no idea which one it is on. Every
     /// call site is a SwiftUI view or `Commands`, all of which already have the
     /// environment.
+    ///
+    /// The fallback is the whole point of the completion handler, and it is
+    /// what was missing: `photos://asset?uuid=` opens the photo on the Mac,
+    /// but iOS registers no handler for the scheme at all, so the call was
+    /// refused and — with the result thrown away — the command did nothing
+    /// whatsoever. That is what device vetting found on the iPad, and an
+    /// action named in a menu and a context menu (FR-8.3, FR-8.4) may not
+    /// silently do nothing.
+    ///
+    /// Measured 2026-08-08 on iOS 27, which is the only way to know since none
+    /// of this is documented: `photos://asset?uuid=…` and even a bare
+    /// `photos://` both fail to open (`LSApplicationWorkspaceErrorDomain` 115,
+    /// no handler), while `photos-redirect://` opens Photos. There is no
+    /// public way to reach a *particular* asset on iOS, so the app itself is
+    /// the honest second choice. Both outcomes are logged, because the only
+    /// other way to tell them apart is to watch the screen.
     static func openInPhotos(_ localIdentifier: String, using openURL: OpenURLAction) {
         let uuid = localIdentifier.components(separatedBy: "/").first ?? localIdentifier
-        guard let url = URL(string: "photos://asset?uuid=\(uuid)") else { return }
-        openURL(url)
+        guard let asset = URL(string: "photos://asset?uuid=\(uuid)") else { return }
+        openURL(asset) { openedAsset in
+            if openedAsset {
+                log.debug("Opened the photo in Photos")
+                return
+            }
+            guard let app = URL(string: "photos-redirect://") else { return }
+            openURL(app) { openedApp in
+                if openedApp {
+                    log.notice("No handler for photos://asset — opened the Photos app instead")
+                } else {
+                    log.error("Nothing on this device would open Photos")
+                }
+            }
+        }
     }
 
     /// Why every verdict-writing action below spins up its own short-lived

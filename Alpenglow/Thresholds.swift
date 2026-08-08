@@ -290,38 +290,66 @@ nonisolated enum Thresholds {
     /// is worse than no mark.
     static let albumSizeMarkLimit = 6
 
-    /// How close to the suggestion's mark, as a fraction of the slider's full
-    /// travel, the thumb has to come before it is pulled onto it exactly.
-    /// See `AlbumSizeScale.detented` for why a detent is needed at all.
+    /// Distance from the end of a slider's track to the centre of its thumb
+    /// when the thumb is parked there — the inset the app has to reproduce
+    /// both to line its own mark labels up with the ticks the system draws
+    /// (iPhone and iPad) and to know where any label will land when deciding
+    /// which ones fit (FR-8.11, both platforms).
     ///
-    /// One percent of the track is a few points under the thumb — the usual
-    /// reach of a magnetic snap, and small enough that it is felt as the mark
-    /// catching rather than as the slider refusing to move. On a logarithmic
-    /// scale that same one percent is a wider dead zone in *counts* than it
-    /// looks (a full-length track spans about a factor of 800, so a percent of
-    /// it is several percent of the count), which is a cost the number field
-    /// covers: anything the detent swallows can still be typed.
-    static let albumSizeDetent = 0.01
+    /// There is no API that reports it, so it is measured. iOS 27 simulator: a
+    /// 340pt track put its 0.0 and 1.0 ticks 17.5pt in from each end, which is
+    /// half the width of the thumb; verified by putting a label row under a
+    /// ticked slider and checking every label sat under its dot. macOS 27: the
+    /// same measurement off the Export card's own slider gives about 6pt, its
+    /// thumb being much the smaller. If a future thumb changes size these move
+    /// with it, and the symptom is labels drifting off their marks toward the
+    /// ends.
+    static let sliderTrackInset: CGFloat = {
+        #if os(macOS)
+        6
+        #else
+        17.5
+        #endif
+    }()
 
-    /// Minimum gap, as a fraction of the slider's full travel, between the
-    /// suggestion's mark and a round one. Any closer and the two labels
-    /// overlap; the round mark is the one dropped, since the suggestion is the
-    /// mark FR-6.4 exists to put there.
+    /// Diameter of the dots drawn under the size slider's track on iPhone and
+    /// iPad, where the app draws its own scale (see `ExportView.markScale`).
     ///
-    /// A fraction of the track is the wrong unit for the job and the only one
-    /// available: labels are a fixed width in points while the track stretches
-    /// with the window, so no single number is right at every size. This one
-    /// is therefore set to fail safe — marks are lost before labels are
-    /// allowed to collide.
+    /// Matched by eye to the ticks the system used to draw there, so the scale
+    /// reads the same as before the ticks had to go: small enough to be a mark
+    /// rather than a control, large enough to survive a Retina downscale.
+    static let albumSizeMarkDotSize: CGFloat = 3
+
+    /// Clear space demanded between two mark labels on the size slider before
+    /// they count as fitting side by side (FR-8.11).
     ///
-    /// 2026-08-08: 0.06 measured wrong on the Mac at the card's 560pt width —
-    /// "Suggested" ran into a "1,000" a tenth of the travel away. The word is
-    /// about 50pt, a four-digit count about 20pt, so clearing both half-widths
-    /// plus a gap needs ~0.09 of a 560pt track and ~0.15 of the ~330pt one an
-    /// iPhone gives it. 0.15 clears both; the cost is a round mark or two
-    /// suppressed near the suggestion on a wide window, which is the direction
-    /// to err in.
-    static let albumSizeMarkSpacing = 0.15
+    /// Six points is about the width of a space at these sizes: enough that
+    /// two labels read as two, and small enough that it costs no mark that
+    /// would genuinely have fitted. It is deliberately a length and not a
+    /// fraction of the track — the mistake that let "Suggested" print over
+    /// "1,000" on the iPad was measuring a collision in units that stretch
+    /// while the text does not.
+    static let albumSizeLabelGap: CGFloat = 6
+
+    /// How close to the suggestion's mark the thumb has to come, **in points
+    /// on screen**, before the mark catches it (FR-6.3's one exception; see
+    /// `AlbumSizeScale.detented`).
+    ///
+    /// A distance, not a share of the track, because what has to come within
+    /// reach is a fingertip or a pointer and neither grows with the window: a
+    /// share that catches nicely on a wide Mac is a couple of points on a
+    /// narrow iPhone, which no finger can hit.
+    ///
+    /// 12pt is a little under half Apple's 44pt minimum touch target — close
+    /// enough that a finger aiming at the mark lands inside it, and far enough
+    /// from the neighbouring round marks (which the scale never places nearer
+    /// than the width of their own labels) that nothing else is swallowed.
+    /// Erring large is the cheaper mistake: the exact count either side is a
+    /// keystroke away in the number field, while a catch too small to feel
+    /// leaves FR-6.4's "adopting it is moving the thumb onto the mark"
+    /// impossible to actually do.
+    static let albumSizeDetentReach: CGFloat = 12
+
 
     /// A photo is "nature" if any label in this allowlist meets the confidence threshold.
     /// Every entry is verified to exist in ClassifyImageRequest().supportedIdentifiers

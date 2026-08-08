@@ -1,6 +1,11 @@
 import SwiftUI
 import SwiftData
 import Photos
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// Export tab's state and sync logic. Hoisted into an `@Observable` model
 /// (matching `GridModel`/`DuelModel`/`AnalysisModel` elsewhere) rather than
@@ -158,9 +163,9 @@ final class ExportModel {
     ///
     /// Derived rather than stored, because FR-6.12 makes the ratio the thing
     /// the app remembers: the count is simply the suggestion scaled by it, and
-    /// so moves whenever the suggestion does. Writing to it — from the slider,
-    /// the stepper or the number field — records a new ratio; that is the only
-    /// way one is ever written.
+    /// so moves whenever the suggestion does. Writing to it — from the slider
+    /// or the number field, the only two ways FR-6.3 gives the user — records
+    /// a new ratio; that is the only way one is ever written.
     var count: Int {
         get { clampedToPool(Int((Double(suggestionBase) * strictness).rounded())) }
         set { strictness = Double(clampedToPool(newValue)) / Double(suggestionBase) }
@@ -214,11 +219,31 @@ final class ExportModel {
 
     /// The slider's own value: FR-6.3's count, in the log space that makes the
     /// scale proportional. See `AlbumSizeScale`.
+    /// How wide the slider is drawn, as the view last measured it. Held here
+    /// only so the detent below can be expressed as a distance on screen
+    /// rather than a share of the track — see `AlbumSizeScale.detented`.
+    var trackWidth: CGFloat = 0
+
     var sizePosition: Double {
         get { sizeScale.position(of: count) }
         set {
-            count = sizeScale.count(at: sizeScale.detented(newValue, toward: markedSuggestion))
+            count = sizeScale.count(at: sizeScale.detented(
+                newValue,
+                toward: markedSuggestion,
+                reach: detentReach
+            ))
         }
+    }
+
+    /// `Thresholds.albumSizeDetentReach` converted from points into the
+    /// scale's units. Zero until the track has been measured, which switches
+    /// the catch off rather than guessing at it — there is nothing to adopt
+    /// before the control has been drawn.
+    private var detentReach: Double {
+        let usable = trackWidth - Thresholds.sliderTrackInset * 2
+        guard usable > 0 else { return 0 }
+        let span = sizeScale.bounds.upperBound - sizeScale.bounds.lowerBound
+        return span * Double(Thresholds.albumSizeDetentReach / usable)
     }
 
     /// FR-6.4: recompute whenever the ranking moves. Nothing here adopts
@@ -362,20 +387,25 @@ struct AlbumSizeScale {
 
     func count(at position: Double) -> Int { Int(exp(position).rounded()) }
 
-    /// Pulls a position that has come close to a mark onto it exactly.
+    /// Pulls a position that has come close to a mark onto it exactly —
+    /// FR-6.3's "one deliberate exception", and now the only thing anywhere
+    /// that stops a freely moving thumb.
     ///
     /// FR-6.4 makes moving the thumb onto the suggestion's mark the whole act
-    /// of adopting it, which on a track where the thumb can stop anywhere —
-    /// macOS, see `AlbumSizeTicks` — a hand cannot actually do: it lands on
-    /// 1,487 next to a suggestion of 1,510 and the app dutifully remembers a
-    /// standard of 0.985, forever almost-following a number the user meant to
-    /// follow. A detent makes the mark reachable, which is what iOS's own
-    /// snapping already does there, so this changes nothing on that side.
-    func detented(_ position: Double, toward mark: Int?) -> Double {
-        guard let mark else { return position }
+    /// of adopting it, which on a track where the thumb can stop anywhere a
+    /// hand cannot actually do: it lands on 1,487 next to a suggestion of
+    /// 1,510 and the app dutifully remembers a standard of 0.985, forever
+    /// almost-following a number the user meant to follow.
+    ///
+    /// `reach` is how far the catch extends, in the scale's own units. The
+    /// caller works it out from a *distance on screen* rather than a share of
+    /// the track, because what has to come within reach is a fingertip or a
+    /// pointer, and neither grows when the window does — the same mistake, in
+    /// the same units, that FR-8.11 was written about.
+    func detented(_ position: Double, toward mark: Int?, reach: Double) -> Double {
+        guard let mark, reach > 0 else { return position }
         let target = self.position(of: mark)
-        let span = bounds.upperBound - bounds.lowerBound
-        guard abs(position - target) < Thresholds.albumSizeDetent * span else { return position }
+        guard abs(position - target) < reach else { return position }
         return target
     }
 
@@ -401,6 +431,85 @@ struct AlbumSizeScale {
             decade *= 10
         }
         return counts.sorted()
+    }
+}
+
+/// One mark: where it sits on the slider's scale, and what it says.
+///
+/// A type of its own because the two platforms need the same list for
+/// different things — macOS hands it to the system as tick labels, iPhone and
+/// iPad draw the labels themselves (see `AlbumSizeTicks`) — and the two must
+/// never be allowed to drift into disagreeing about where the marks are.
+struct AlbumSizeMark: Identifiable {
+    let position: Double
+    /// nil once the label has yielded to a neighbour (FR-8.11). The mark stays
+    /// — it is a place the thumb can stop — but says nothing.
+    var label: String?
+    /// Whether the mark's label may be the one dropped. The suggestion's may
+    /// not: FR-6.4 exists to put it on the scale, and an unlabeled dot is not
+    /// a suggestion. The ends yield to it and to nothing else.
+    let rank: Rank
+
+    enum Rank: Int, Comparable {
+        case suggestion = 0
+        case end = 1
+        case round = 2
+
+        static func < (a: Rank, b: Rank) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    var id: Double { position }
+}
+
+extension AlbumSizeScale {
+    /// FR-6.3's marks and FR-6.4's, every one of them, labels intact.
+    ///
+    /// Nothing is dropped here, because nothing can be: whether two labels
+    /// collide depends on how wide they are drawn and how long the track is,
+    /// neither of which is known until the view is laid out. `ExportView`
+    /// culls them — see its `resolvedMarks`.
+    func markCandidates(suggestion: Int?) -> [AlbumSizeMark] {
+        // An end of the scale is labeled with its count — or as the
+        // suggestion, when the suggestion has landed exactly on it. FR-6.4
+        // asks for the suggestion to be marked, not for a second mark in the
+        // same place.
+        func end(_ count: Int) -> AlbumSizeMark {
+            let isSuggestion = count == suggestion
+            return AlbumSizeMark(
+                position: position(of: count),
+                label: isSuggestion ? "Suggested" : count.formatted(),
+                rank: isSuggestion ? .suggestion : .end
+            )
+        }
+
+        // The ends, and the suggestion with them: these are the marks that must
+        // be *on* the track whatever happens to their labels. The ends because
+        // a slider that snaps its thumb to ticks can otherwise not reach its
+        // own extremes, and the suggestion because FR-6.4's "adopting it is
+        // moving the thumb onto the mark" is only true if there is a mark to
+        // move onto.
+        var marks = [end(smallest), end(largest)]
+        if let suggestion, suggestion > smallest, suggestion < largest {
+            marks.append(
+                AlbumSizeMark(
+                    position: position(of: suggestion),
+                    label: "Suggested",
+                    rank: .suggestion
+                )
+            )
+        }
+
+        for count in self.marks {
+            marks.append(
+                AlbumSizeMark(
+                    position: position(of: count),
+                    label: count.formatted(),
+                    rank: .round
+                )
+            )
+        }
+
+        return marks.sorted { $0.position < $1.position }
     }
 }
 
@@ -435,67 +544,48 @@ struct AlbumSizeScale {
 /// FR-6.4's "adopting it is moving the thumb onto the mark" would be
 /// unachievable on the one platform where the thumb can stop anywhere.
 ///
+/// **iPhone and iPad draw no tick labels at all** — measured 2026-08-08 on
+/// the iOS 27 simulator, after the iPad reported the scale unreadable. Three
+/// sliders with identically labeled ticks, differing only in their own label
+/// (`EmptyView`, a `Text`, a `Text` plus `.labelsHidden()`), all drew bare
+/// dots and not one word. It is the platform, not the label-less
+/// initializer, and there is no modifier that turns it on.
+///
+/// That is why `ExportView.markScale` exists: FR-6.3 does not exempt the
+/// iPad, and the scale has to be readable there too.
+///
+/// **This type is the Mac's alone.** iPhone and iPad are handed no ticks at
+/// all now — ticks were what confined the thumb to the marks, which FR-6.3
+/// forbids — so there the dots as well as the words are drawn by `markScale`,
+/// and nothing here is called. The Mac keeps them because AppKit both draws
+/// and labels its ticks, and never confined the thumb to them.
+///
 /// A hand-rolled conformance rather than `SliderTickContentForEach` because
-/// the protocol asks only for a collection of ticks, and the marks here are
-/// computed as one list — several sources, sorted together, with crowded ones
-/// dropped — which is a list to hand over, not a collection to iterate.
+/// the protocol asks only for a collection of ticks, and the marks are
+/// computed elsewhere as one list — several sources, sorted together, with
+/// crowded ones dropped — which is a list to hand over, not a collection to
+/// iterate.
+#if os(macOS)
 struct AlbumSizeTicks: SliderTickContent {
     /// Stated rather than inferred: the protocol leaves `Value` free, and
     /// nothing about `[SliderTick<Double>]` pins it down for the compiler.
     typealias Value = Double
 
-    let scale: AlbumSizeScale
-    let suggestion: Int?
-    /// `Thresholds.albumSizeMarkSpacing`, scaled to the reader's text size by
-    /// the view that supplies it.
-    let spacing: Double
-
-    private struct Mark {
-        let position: Double
-        let label: String
-    }
+    let marks: [AlbumSizeMark]
 
     var body: [SliderTick<Double>] {
-        // The ends first, and the suggestion with them: these three are the
-        // marks that must be on the track. The ends because a slider that
-        // snaps its thumb to ticks can otherwise not reach its own extremes,
-        // and the suggestion because FR-6.4's "adopting it is moving the thumb
-        // onto the mark" is only true if there is a mark to move onto.
-        var marks = [end(scale.smallest), end(scale.largest)]
-        if let suggestion, suggestion > scale.smallest, suggestion < scale.largest {
-            marks.append(Mark(position: scale.position(of: suggestion), label: "Suggested"))
-        }
-
-        // Round marks give way when they would collide with one of those,
-        // rather than the other way round: an unreadable pair of overlapping
-        // labels loses the app both marks, and of the two the round one is the
-        // one the user can do without.
-        let span = scale.bounds.upperBound - scale.bounds.lowerBound
-        for count in scale.marks {
-            let position = scale.position(of: count)
-            let crowded = marks.contains {
-                abs($0.position - position) < spacing * span
-            }
-            if !crowded {
-                marks.append(Mark(position: position, label: count.formatted()))
+        // A mark whose label yielded to a neighbour (FR-8.11) keeps its tick
+        // and loses its words.
+        marks.map { mark in
+            if let label = mark.label {
+                SliderTick(label, mark.position)
+            } else {
+                SliderTick(mark.position)
             }
         }
-
-        return marks
-            .sorted { $0.position < $1.position }
-            .map { SliderTick($0.label, $0.position) }
-    }
-
-    /// An end of the scale, labeled with its count — or as the suggestion,
-    /// when the suggestion has landed exactly on it. FR-6.4 asks for the
-    /// suggestion to be marked, not for a second mark in the same place.
-    private func end(_ count: Int) -> Mark {
-        Mark(
-            position: scale.position(of: count),
-            label: count == suggestion ? "Suggested" : count.formatted()
-        )
     }
 }
+#endif
 
 /// Export tab: syncs the top-ranked candidates into the Photos wallpaper
 /// album, previewing exactly which photos will be in it.
@@ -511,13 +601,17 @@ struct ExportView: View {
     /// See `commitCount`.
     @State private var draftIsEdited = false
     @FocusState private var countFieldFocused: Bool
-    /// Both of these grow with the user's text size. The field has to hold the
-    /// widest count the library can produce, and the slider's marks have to
-    /// clear labels that grow with it — a gap fixed in fractions of the track
-    /// stops being enough the moment the words get bigger, and the marks
-    /// overlap instead of standing aside (see `Thresholds.albumSizeMarkSpacing`).
+    /// Grows with the user's text size: the field has to hold the widest count
+    /// the library can produce.
     @ScaledMetric private var countFieldWidth: CGFloat = 64
-    @ScaledMetric private var markSpacing: Double = Thresholds.albumSizeMarkSpacing
+    /// How wide the slider actually is, which is the only basis on which
+    /// FR-8.11 can be honoured — see `resolvedMarks`. Read without a
+    /// `GeometryReader` so that measuring the row does not also lay it out.
+    @State private var sliderWidth: CGFloat = 0
+    /// Room for the hand-drawn mark labels on iPhone and iPad. Reserved at a
+    /// fixed height so the row cannot change size as the labels change (FR-8.7),
+    /// and scaled so it still fits them at larger text sizes.
+    @ScaledMetric private var markLabelHeight: CGFloat = 14
 
     var body: some View {
         ScrollView {
@@ -734,11 +828,16 @@ struct ExportView: View {
                     .onChange(of: countFieldFocused) { _, focused in
                         if !focused { commitCount() }
                     }
-                Stepper("photos", value: steppedCount, in: model.smallestSize...model.largestSize)
-                    // The chevrons are the whole control; "photos" is a unit,
-                    // not a name for what they do (FR-4.13).
-                    .accessibilityLabel("Album size")
-                    .help("Adjust the album size one photo at a time")
+                // The unit, not a control: it says what the number counts.
+                // What used to sit here was a stepper, from the days when
+                // FR-6.3 asked for a number field and a stepper. FR-6.3 now
+                // asks for one slider plus the typeable count, and FR-8.10
+                // forbids a second control doing the same job in the same
+                // place — the slider reaches the whole range from a handful of
+                // photos to the entire library, the stepper only ever moved by
+                // one, so the stepper is the one that goes.
+                Text("photos")
+                    .foregroundStyle(.secondary)
             }
 
             sizeSlider
@@ -782,34 +881,182 @@ struct ExportView: View {
     /// `ExportModel.isAdjustingSize` for the two things that suppresses.
     private var sizeSlider: some View {
         let scale = model.sizeScale
-        return Slider(
-            value: Bindable(model).sizePosition,
-            in: scale.bounds,
-            label: { EmptyView() },
-            ticks: { AlbumSizeTicks(scale: scale, suggestion: model.markedSuggestion, spacing: markSpacing) },
-            onEditingChanged: { model.isAdjustingSize = $0 }
-        )
-        .accessibilityLabel("Album size")
-        .accessibilityValue("\(model.count.formatted()) photos")
-        // VoiceOver's own increments walk the log scale, which moves the count
-        // by a large ratio a press at a time — right for the scale, useless for
-        // landing on a particular number, so the way to do that is named here.
-        .accessibilityHint("Adjusts in proportion. Type an exact count in the field above.")
+        let marks = resolvedMarks(on: scale)
+        return VStack(spacing: 2) {
+            Group {
+                #if os(macOS)
+                // The Mac keeps the system's ticks: there they are drawn *and*
+                // labeled by AppKit, and they never confined the thumb.
+                Slider(
+                    value: Bindable(model).sizePosition,
+                    in: scale.bounds,
+                    label: { EmptyView() },
+                    ticks: { AlbumSizeTicks(marks: marks) },
+                    onEditingChanged: { model.isAdjustingSize = $0 }
+                )
+                #else
+                // iPhone and iPad get a plain slider, deliberately. Handing
+                // this one `ticks:` is what confined its thumb to the marks —
+                // measured, and now forbidden by FR-6.3, which wants every
+                // count reachable by dragging on every platform. Since the
+                // system draws no tick *labels* there either, nothing is lost
+                // by dropping the ticks: `markScale` below draws both the dots
+                // and the words, and `AlbumSizeScale.detented` supplies the
+                // one catch FR-6.3 still asks for.
+                Slider(
+                    value: Bindable(model).sizePosition,
+                    in: scale.bounds,
+                    label: { EmptyView() },
+                    onEditingChanged: { model.isAdjustingSize = $0 }
+                )
+                #endif
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
+                sliderWidth = $0
+                model.trackWidth = $0
+            }
+            .accessibilityLabel("Album size")
+            .accessibilityValue("\(model.count.formatted()) photos")
+            // VoiceOver's own increments walk the log scale, which moves the
+            // count by a large ratio a press at a time — right for the scale,
+            // useless for landing on a particular number, so the way to do
+            // that is named here.
+            .accessibilityHint("Adjusts in proportion. Type an exact count in the field above.")
+
+            #if !os(macOS)
+            markScale(marks, on: scale)
+            #endif
+        }
         // A library smaller than the smallest album offers no choice to make.
         .disabled(model.largestSize <= model.smallestSize)
     }
 
-    /// The stepper writes through to the draft as well as the count, so the
-    /// number beside it is never a stale edit waiting to be committed.
-    private var steppedCount: Binding<Int> {
-        Binding(
-            get: { model.count },
-            set: { newCount in
-                model.count = newCount
-                draftCount = model.count
-            }
-        )
+    /// FR-8.11, for this slider: the marks, with every label that would have
+    /// been drawn over another taken away.
+    ///
+    /// The rule this replaces kept labels apart by a fraction of the track,
+    /// which cannot be made to work and did not: a label's width is a fixed
+    /// number of points, while the track stretches with the window and the
+    /// words grow with the reader's text size, so any fraction is too small
+    /// somewhere. It failed on the iPad at a suggestion of 740, where
+    /// "Suggested" printed across the 1,000 mark.
+    ///
+    /// What decides it now is the thing that actually collides: the drawn
+    /// width of each label, at the reader's text size, against the real width
+    /// of the track. Marks are placed in order of rank — the suggestion first,
+    /// because FR-6.4 exists to show it; then the ends; then the round counts
+    /// left to right — and a label is kept only if its box, plus a gap, clears
+    /// every label already kept. What yields is only ever the *label*: the mark
+    /// stays on the track, so nothing the thumb could stop at disappears.
+    ///
+    /// Because the test is made in points, it holds for every state the app
+    /// can reach rather than the ones that happened to be tried: a narrow
+    /// iPhone, accessibility text sizes, a translation where "Suggested" is
+    /// half again as long, and any suggestion value, including one landing a
+    /// hair from a round count or from the end of the scale.
+    private func resolvedMarks(on scale: AlbumSizeScale) -> [AlbumSizeMark] {
+        let candidates = scale.markCandidates(suggestion: model.markedSuggestion)
+        guard sliderWidth > 0 else { return candidates }
+
+        let span = scale.bounds.upperBound - scale.bounds.lowerBound
+        let inset = Thresholds.sliderTrackInset
+        let usable = max(sliderWidth - inset * 2, 1)
+
+        func centre(_ mark: AlbumSizeMark) -> CGFloat {
+            let fraction = span > 0 ? (mark.position - scale.bounds.lowerBound) / span : 0
+            return inset + usable * CGFloat(fraction)
+        }
+
+        var kept: [(range: ClosedRange<CGFloat>, position: Double)] = []
+        var labelled: Set<Double> = []
+
+        for mark in candidates.sorted(by: { ($0.rank, $0.position) < ($1.rank, $1.position) }) {
+            guard let label = mark.label else { continue }
+            let half = labelWidth(label) / 2 + Thresholds.albumSizeLabelGap / 2
+            let box = (centre(mark) - half)...(centre(mark) + half)
+            if kept.contains(where: { $0.range.overlaps(box) }) { continue }
+            kept.append((box, mark.position))
+            labelled.insert(mark.position)
+        }
+
+        return candidates.map { mark in
+            var mark = mark
+            if !labelled.contains(mark.position) { mark.label = nil }
+            return mark
+        }
     }
+
+    /// How wide a mark's label is drawn, at the reader's current text size.
+    ///
+    /// Measured through the platform's own font metrics rather than estimated
+    /// from the character count, because the answer has to be right for text
+    /// the app has never seen — a translated "Suggested", a grouping separator
+    /// that is a space in one locale and a dot in another.
+    ///
+    /// macOS is measured a size up from what this app draws, because there the
+    /// labels are drawn by the *system* as part of the slider's ticks, in a
+    /// font this code never picks and cannot ask for. Over-measuring costs at
+    /// worst one round mark that would have fitted; under-measuring costs the
+    /// overlap FR-8.11 forbids.
+    private func labelWidth(_ label: String) -> CGFloat {
+        #if os(macOS)
+        let font = NSFont.preferredFont(forTextStyle: .caption1)
+        #else
+        let font = UIFont.preferredFont(forTextStyle: .caption2)
+        #endif
+        return (label as NSString).size(withAttributes: [.font: font]).width
+    }
+
+    #if !os(macOS)
+    /// FR-6.3's scale on iPhone and iPad: the marks and their labels, both
+    /// drawn here because the platform now draws neither.
+    ///
+    /// It never drew the labels (see `AlbumSizeTicks`), and it no longer draws
+    /// the dots either — the slider is given no ticks at all, since ticks were
+    /// what confined the thumb to them, which FR-6.3 forbids. So the dots move
+    /// here to keep the scale visible, one per mark, including the marks whose
+    /// label yielded to a neighbour (FR-8.11): a mark with no room for its
+    /// word is still a place on the scale worth showing.
+    ///
+    /// Placed against the system's own track geometry: a slider insets its
+    /// track by half a thumb at each end (`Thresholds.sliderTrackInset`), so a
+    /// mark at fraction *f* sits at `inset + f × (width − 2 × inset)`. The end
+    /// labels are centred on their marks like the rest, which lets them
+    /// overhang slightly; the card's padding is wider than the overhang, so
+    /// nothing is clipped and nothing shifts.
+    ///
+    /// Hidden from VoiceOver, which reads the slider itself rather than the
+    /// scale beside it: the value and range are already announced, and the
+    /// caption below names the suggested count in words. Exposed, these would
+    /// be four bare numbers sitting between the slider and the next control.
+    private func markScale(_ marks: [AlbumSizeMark], on scale: AlbumSizeScale) -> some View {
+        let span = scale.bounds.upperBound - scale.bounds.lowerBound
+        return GeometryReader { proxy in
+            let usable = max(proxy.size.width - Thresholds.sliderTrackInset * 2, 1)
+            ForEach(marks) { mark in
+                let fraction = span > 0 ? (mark.position - scale.bounds.lowerBound) / span : 0
+                let x = Thresholds.sliderTrackInset + usable * fraction
+                Circle()
+                    .fill(.tertiary)
+                    .frame(width: Thresholds.albumSizeMarkDotSize, height: Thresholds.albumSizeMarkDotSize)
+                    .position(x: x, y: Thresholds.albumSizeMarkDotSize / 2)
+                if let label = mark.label {
+                    Text(label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                        .position(
+                            x: x,
+                            y: Thresholds.albumSizeMarkDotSize
+                                + (proxy.size.height - Thresholds.albumSizeMarkDotSize) / 2
+                        )
+                }
+            }
+        }
+        .frame(height: markLabelHeight + Thresholds.albumSizeMarkDotSize)
+        .accessibilityHidden(true)
+    }
+    #endif
 
     /// Folds a typed count into the choice — but only if one was actually
     /// typed.
