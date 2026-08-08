@@ -404,6 +404,16 @@ struct AlbumSizeScale {
     /// the same units, that FR-8.11 was written about.
     func detented(_ position: Double, toward mark: Int?, reach: Double) -> Double {
         guard let mark, reach > 0 else { return position }
+        // The ends are never caught. A suggestion can land within reach of one
+        // — the calibrated size has no upper bound, so "every photo clears the
+        // bar" puts it on the pool size itself — and a catch there would drag
+        // the thumb back off the end of the scale, leaving the largest album
+        // impossible to choose by dragging. FR-6.3 allows the suggestion one
+        // exception to "every count is reachable by dragging"; it does not
+        // allow that exception to eat a second count, least of all a named end
+        // of the range. The slider hands over the exact bound at its extremes,
+        // so nothing else is given up by letting them through.
+        guard position > bounds.lowerBound, position < bounds.upperBound else { return position }
         let target = self.position(of: mark)
         guard abs(position - target) < reach else { return position }
         return target
@@ -438,8 +448,9 @@ struct AlbumSizeScale {
 ///
 /// A type of its own because the two platforms need the same list for
 /// different things — macOS hands it to the system as tick labels, iPhone and
-/// iPad draw the labels themselves (see `AlbumSizeTicks`) — and the two must
-/// never be allowed to drift into disagreeing about where the marks are.
+/// iPad draw both the dots and the labels themselves (see
+/// `ExportView.markScale`) — and the two must never be allowed to drift into
+/// disagreeing about where the marks are.
 struct AlbumSizeMark: Identifiable {
     let position: Double
     /// nil once the label has yielded to a neighbour (FR-8.11). The mark stays
@@ -509,7 +520,23 @@ extension AlbumSizeScale {
             )
         }
 
-        return marks.sorted { $0.position < $1.position }
+        // One mark per place on the track, the highest-ranking one.
+        //
+        // The suggestion is *usually* a round count, not rarely: both ways of
+        // arriving at one round to a multiple of ten (see
+        // `FeatureStore.suggestedAlbumSize`), and 10, 20, 50, 100, 200, 500 …
+        // are exactly the ladder. Left alone, the twins sit at the identical
+        // position and print "Suggested" across "50" — the ordinary state for
+        // a library nobody has judged yet, and the plainest possible breach of
+        // FR-8.11. It would also hand `ForEach` two marks with one id, since
+        // `AlbumSizeMark` is identified by its position.
+        //
+        // The same twinning happens at the ends when a library is smaller than
+        // the smallest album and both ends land on the same count.
+        return Dictionary(grouping: marks, by: \.position)
+            .values
+            .compactMap { $0.min(by: { $0.rank < $1.rank }) }
+            .sorted { $0.position < $1.position }
     }
 }
 
@@ -820,7 +847,11 @@ struct ExportView: View {
                             Text(verbatim: "—").foregroundStyle(.secondary)
                         }
                     }
-                    .accessibilityLabel("Album size")
+                    // Distinct from the slider's, which carries the same
+                    // name: two siblings answering to one label leaves Voice
+                    // Control's "tap Album size" ambiguous and the rotor
+                    // listing two identical entries (FR-8.1).
+                    .accessibilityLabel("Exact album size")
                     .onChange(of: draftCount) { _, _ in
                         if countFieldFocused { draftIsEdited = true }
                     }
@@ -917,10 +948,20 @@ struct ExportView: View {
             }
             .accessibilityLabel("Album size")
             .accessibilityValue("\(model.count.formatted()) photos")
-            // VoiceOver's own increments walk the log scale, which moves the
-            // count by a large ratio a press at a time — right for the scale,
-            // useless for landing on a particular number, so the way to do
-            // that is named here.
+            // A slider's default assistive step is a tenth of its range, which
+            // on this scale is close to a doubling of the count per press —
+            // about eleven counts reachable in the whole library. Left over
+            // from the ticks, whose stops used to be what an increment landed
+            // on; now that they are gone the step is stated here instead, one
+            // tenth *of the count* rather than of the track, which is the same
+            // proportional nudge FR-6.3 asks the thumb for.
+            .accessibilityAdjustableAction { direction in
+                let step = direction == .increment
+                    ? Thresholds.albumSizeAssistiveStep
+                    : 1 / Thresholds.albumSizeAssistiveStep
+                model.count = Int((Double(model.count) * step).rounded())
+                draftCount = model.count
+            }
             .accessibilityHint("Adjusts in proportion. Type an exact count in the field above.")
 
             #if !os(macOS)
@@ -956,32 +997,57 @@ struct ExportView: View {
     /// hair from a round count or from the end of the scale.
     private func resolvedMarks(on scale: AlbumSizeScale) -> [AlbumSizeMark] {
         let candidates = scale.markCandidates(suggestion: model.markedSuggestion)
-        guard sliderWidth > 0 else { return candidates }
+
+        // Before the first layout there is no track to measure against, so
+        // every label is taken away rather than left on. Keeping them meant
+        // the first frame of every visit to this tab drew the whole set
+        // unculled and piled on top of each other — a reachable state, and so
+        // one FR-8.11 covers. Silence for one frame is the honest version of
+        // "not known yet", and the labels fade in a frame later.
+        guard sliderWidth > 0 else {
+            return candidates.map { var mark = $0; mark.label = nil; return mark }
+        }
 
         let span = scale.bounds.upperBound - scale.bounds.lowerBound
         let inset = Thresholds.sliderTrackInset
         let usable = max(sliderWidth - inset * 2, 1)
 
-        func centre(_ mark: AlbumSizeMark) -> CGFloat {
+        func box(for mark: AlbumSizeMark, label: String) -> ClosedRange<CGFloat> {
             let fraction = span > 0 ? (mark.position - scale.bounds.lowerBound) / span : 0
-            return inset + usable * CGFloat(fraction)
-        }
-
-        var kept: [(range: ClosedRange<CGFloat>, position: Double)] = []
-        var labelled: Set<Double> = []
-
-        for mark in candidates.sorted(by: { ($0.rank, $0.position) < ($1.rank, $1.position) }) {
-            guard let label = mark.label else { continue }
+            let centre = inset + usable * CGFloat(fraction)
             let half = labelWidth(label) / 2 + Thresholds.albumSizeLabelGap / 2
-            let box = (centre(mark) - half)...(centre(mark) + half)
-            if kept.contains(where: { $0.range.overlaps(box) }) { continue }
-            kept.append((box, mark.position))
-            labelled.insert(mark.position)
+            #if os(macOS)
+            // AppKit keeps an end tick's label inside the track rather than
+            // centring it on the tick — measured off the Mac's own card, where
+            // "7,834" sits about 16pt left of the tick it belongs to. Modelling
+            // it as centred would understate how far it reaches inward and let
+            // a round mark just inside the end collide with it.
+            if mark.position <= scale.bounds.lowerBound {
+                return 0...(2 * half)
+            }
+            if mark.position >= scale.bounds.upperBound {
+                return (sliderWidth - 2 * half)...sliderWidth
+            }
+            #endif
+            return (centre - half)...(centre + half)
         }
 
-        return candidates.map { mark in
-            var mark = mark
-            if !labelled.contains(mark.position) { mark.label = nil }
+        var kept: [ClosedRange<CGFloat>] = []
+        var labelled: Set<Int> = []
+
+        for index in candidates.indices.sorted(by: {
+            (candidates[$0].rank, candidates[$0].position) < (candidates[$1].rank, candidates[$1].position)
+        }) {
+            guard let label = candidates[index].label else { continue }
+            let extent = box(for: candidates[index], label: label)
+            if kept.contains(where: { $0.overlaps(extent) }) { continue }
+            kept.append(extent)
+            labelled.insert(index)
+        }
+
+        return candidates.indices.map { index in
+            var mark = candidates[index]
+            if !labelled.contains(index) { mark.label = nil }
             return mark
         }
     }
@@ -998,13 +1064,32 @@ struct ExportView: View {
     /// font this code never picks and cannot ask for. Over-measuring costs at
     /// worst one round mark that would have fitted; under-measuring costs the
     /// overlap FR-8.11 forbids.
+    /// Memoised, because this runs inside `body` and `body` runs on every
+    /// frame of a drag — the slider writes the count, the count is read back
+    /// for the accessibility value — while the answer cannot change during
+    /// one: a drag freezes the scale and the suggestion, and the track does
+    /// not resize under the thumb. Laying out half a dozen strings through
+    /// CoreText at 120 Hz to be told the same numbers each time is the shape
+    /// of work FR-8.2 exists to keep away from the interface. The font is part
+    /// of the key, so the cache follows the reader changing their text size.
+    private static var labelWidths: [LabelWidthKey: CGFloat] = [:]
+
+    private struct LabelWidthKey: Hashable {
+        let label: String
+        let fontSize: CGFloat
+    }
+
     private func labelWidth(_ label: String) -> CGFloat {
         #if os(macOS)
         let font = NSFont.preferredFont(forTextStyle: .caption1)
         #else
         let font = UIFont.preferredFont(forTextStyle: .caption2)
         #endif
-        return (label as NSString).size(withAttributes: [.font: font]).width
+        let key = LabelWidthKey(label: label, fontSize: font.pointSize)
+        if let cached = Self.labelWidths[key] { return cached }
+        let width = (label as NSString).size(withAttributes: [.font: font]).width
+        Self.labelWidths[key] = width
+        return width
     }
 
     #if !os(macOS)

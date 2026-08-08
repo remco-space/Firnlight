@@ -312,6 +312,16 @@ nonisolated enum Thresholds {
         #endif
     }()
 
+    /// How much one VoiceOver or Full Keyboard Access step changes the album
+    /// size, as a multiple of the current count.
+    ///
+    /// A tenth, matching the proportional nudge FR-6.3 asks of the thumb: the
+    /// same press moves 20 to 22 and 2,000 to 2,200. A slider left to its own
+    /// devices steps by a tenth of its *range*, which on a logarithmic scale
+    /// is nearly a doubling — eleven or so counts reachable across a whole
+    /// library, which is no way to pick a number.
+    static let albumSizeAssistiveStep = 1.1
+
     /// Diameter of the dots drawn under the size slider's track on iPhone and
     /// iPad, where the app draws its own scale (see `ExportView.markScale`).
     ///
