@@ -12,11 +12,15 @@ Two provenance styles are in use, deliberately:
   exports, or a skill whose exact wording this project depends on).
 - **Live symlink into a submodule** (`swift-ios-skills-*` rows below): the
   target lives in the `.claude/skills-src/swift-ios-skills` git submodule,
-  which `.claude/hooks/skills-submodule-update.sh` fast-forwards to upstream
-  on every `SessionStart` (wired via the committed `.claude/settings.json`).
-  These stay current with no manual refresh step; if upstream ever ships a
-  bad revision, `git -C .claude/skills-src/swift-ios-skills log` shows what
-  changed and `git checkout <sha>` in that submodule pins it back.
+  which `.claude/hooks/skills-submodule-update.sh` advances to upstream's
+  latest **tagged release** (not the branch tip) on every `SessionStart`
+  (wired via the committed `.claude/settings.json`). SKILL.md content loads
+  straight into the assistant's context as instructions, so the hook bounds
+  exposure to named releases the upstream maintainer stood behind rather than
+  arbitrary commits. These stay current with no manual refresh step; if a
+  release ever regresses, `git -C .claude/skills-src/swift-ios-skills log
+  --oneline` shows what changed and `git checkout <tag>` in that submodule
+  pins it back.
 
 ## Provenance
 

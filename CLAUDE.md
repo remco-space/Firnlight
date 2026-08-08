@@ -53,10 +53,13 @@ submodule ([dpearson2699/swift-ios-skills](https://github.com/dpearson2699/swift
 `photokit`, `vision-framework`, `swiftdata`, `swiftui-patterns`,
 `swiftui-uikit-interop`, `background-processing`, `ios-accessibility`,
 `ios-localization`, `swift-concurrency`, `app-store-review`. A `SessionStart`
-hook (`.claude/hooks/skills-submodule-update.sh`) fast-forwards that submodule
-to upstream every session, so these stay current with no manual step — see
-`.claude/skills/README.md` for the full provenance table and how to pin a
-revision if upstream ever regresses.
+hook (`.claude/hooks/skills-submodule-update.sh`) advances that submodule to
+upstream's latest **tagged release** every session — not the branch tip,
+since SKILL.md content loads straight into context as instructions and a
+release tag is a bounded, named point rather than an arbitrary unreviewed
+commit. These stay current with no manual step — see `.claude/skills/README.md`
+for the full provenance table and how to pin a revision if a release ever
+regresses.
 
 That upstream repo has ~86 skills, one per Apple framework/topic; only the
 ones this app actually touches were added, deliberately, not the whole set.
