@@ -193,6 +193,7 @@ struct DuelView: View {
                 .padding(24)
             } else if model.isPreparing {
                 ProgressView("Preparing ranker…")
+                    .shownWhileWaiting()
             } else if let error = model.lastError {
                 ContentUnavailableView("Ranker Error", systemImage: "exclamationmark.triangle", description: Text(error))
             } else {
@@ -274,15 +275,42 @@ struct DuelView: View {
     /// moves the count to its own line where it doesn't.
     private var controls: some View {
         ViewThatFits(in: .horizontal) {
+            // FR-8.7: the count is mirrored by an invisible copy of itself on
+            // the far side of the buttons, so the row grows by the same amount
+            // at both ends and the three buttons stay exactly where they are.
+            //
+            // Something had to give here, because two things are true at once:
+            // the buttons are centered under the cards, and the count beside
+            // them gets wider at 9 → 10 and 99 → 100. Centering means half of
+            // any width the count gains comes out of the buttons' position —
+            // and on this screen, of all screens, the pointer is already on its
+            // way to click one of them again.
+            //
+            // Reserving a fixed width for the count instead would need a
+            // ceiling on how many duels the user may run, which there isn't;
+            // left-anchoring the whole row would hold the buttons still but
+            // stop them being centered, which is a redesign of a screen whose
+            // symmetry is the point. A balanced mirror keeps both properties
+            // and costs only the width it reserves — which is why it is
+            // applied to the single-line arrangement alone. Where the row wraps
+            // (an iPhone upright), the count already sits on its own line below
+            // the buttons and can grow without touching them.
             HStack(spacing: 12) {
+                choiceProgressRow
+                    .hidden()
+                    .accessibilityHidden(true)
                 verdictButtons
-                choiceProgress
+                choiceProgressRow
             }
             VStack(spacing: 8) {
                 HStack(spacing: 12) { verdictButtons }
-                HStack(spacing: 8) { choiceProgress }
+                choiceProgressRow
             }
         }
+    }
+
+    private var choiceProgressRow: some View {
+        HStack(spacing: 8) { choiceProgress }
     }
 
     @ViewBuilder
@@ -302,10 +330,19 @@ struct DuelView: View {
         Text("\(model.choiceCount) choices made")
             .font(.callout.monospacedDigit())
             .foregroundStyle(.secondary)
-        if model.isRecording {
-            ProgressView()
-                .controlSize(.small)
-        }
+        // FR-8.7, and this is the screen where it matters most: the row is
+        // centered, so anything that changes its width drags the three verdict
+        // buttons sideways — under a pointer that is, on this screen, about to
+        // click again. The spinner is therefore always in the layout and only
+        // ever fades in, and because recording a choice is a single durable
+        // write it beats the delay every time in practice: the honest report
+        // for work this fast is no report at all. It stays here rather than
+        // being deleted for the case that isn't fast — a first write against a
+        // cold store, or a device under load — where silence would look like
+        // the click had been ignored.
+        ProgressView()
+            .controlSize(.small)
+            .shownWhileWaiting(model.isRecording)
     }
 }
 
@@ -344,7 +381,13 @@ private struct DuelCard: View {
                             .resizable()
                             .scaledToFill()
                     } else {
+                        // Only for a card genuinely held up (an original still
+                        // coming down from iCloud). A cached image arrives
+                        // faster than the delay, and a spinner blinking on
+                        // every advance through the pair queue is exactly the
+                        // wait FR-8.7 says not to report.
                         ProgressView()
+                            .shownWhileWaiting()
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -382,6 +425,7 @@ private struct DuelCard: View {
         .focusedValue(\.focusedPhoto, FocusedPhoto(
             localIdentifier: candidate.localIdentifier,
             isIgnored: false,
+            isNotWallpaperMaterial: candidate.isNotWallpaperMaterial,
             modelContext: modelContext,
             duelModel: duelModel
         ))
@@ -403,23 +447,28 @@ private struct DuelCard: View {
         .buttonStyle(.plain)
         .padding(6)
         .accessibilityLabel("Ignore \(positionLabel)")
-        .help("Ignores this photo — it leaves the grid, duels, and the wallpaper album (reversible via “Show Ignored” in the Library tab).")
+        .help("Ignores this photo — it leaves the grid, duels, and the wallpaper album without teaching the app anything (reversible from the Library tab's Ignored view).")
     }
 
     /// FR-4.6's three actions, shared by the right-click menu and — on iPhone
     /// and iPad — by the visible menu button below, so both paths offer
-    /// exactly the same named commands.
+    /// exactly the same named commands. The verdict entry is a toggle, worded
+    /// as its reverse once the photo already carries it (FR-4.6); only the
+    /// marking direction spends the pair (FR-4.7) — clearing a verdict
+    /// mid-duel doesn't remove the photo from the pool.
     @ViewBuilder
     private var photoActions: some View {
         Button("Open in Photos") {
             CandidateActions.openInPhotos(candidate.localIdentifier, using: openURL)
         }
         Divider()
-        Button("Not Wallpaper Material") {
-            // Records a bad verdict; the photo stays in the duel pool, but
-            // this pair is spent — advance (FR-4.7).
-            CandidateActions.markNotWallpaperMaterial(candidate.localIdentifier, in: modelContext)
-            duelModel.skip()
+        Button(candidate.isNotWallpaperMaterial ? "Clear Verdict" : "Not Wallpaper Material") {
+            let wasMarked = candidate.isNotWallpaperMaterial
+            CandidateActions.setNotWallpaperMaterial(candidate.localIdentifier, !wasMarked, in: modelContext)
+            if !wasMarked {
+                // This pair is spent — advance (FR-4.7).
+                duelModel.skip()
+            }
         }
         Button("Ignore This Photo", role: .destructive) {
             ignore()

@@ -59,7 +59,6 @@ final class AnalysisModel {
         // to it and wait for it below rather than starting on top of it.
         let previousRun = runTask
         isRunning = true
-        lastError = nil
         let queue = ensureQueue(container)
 
         #if os(iOS)
@@ -75,6 +74,15 @@ final class AnalysisModel {
             // Never two rescores at once: both write the weights file and the
             // whole preference-score cache.
             await previousRun?.value
+            // This run's own error, published to `lastError` only once the run
+            // is over. Clearing `lastError` up front instead — which is what
+            // this used to do — meant a failed run retried blanked the message
+            // at the bottom of the card, let the candidate grid slide up into
+            // the gap, and then printed the same message again seconds later.
+            // FR-8.7 asks that redoing something move nothing at all, so the
+            // old message stands until this run has its own answer to put
+            // there.
+            var runError: String?
             do {
                 await queue.beginSession()
                 while !Task.isCancelled {
@@ -121,10 +129,11 @@ final class AnalysisModel {
             } catch is CancellationError {
                 // Stopped by the user; resumable by design.
             } catch {
-                lastError = error.localizedDescription
+                runError = error.localizedDescription
             }
+            lastError = runError
             #if os(iOS)
-            continued.end(success: lastError == nil)
+            continued.end(success: runError == nil)
             #endif
             waitingReason = nil
             stats = try? await queue.statistics()
@@ -189,8 +198,14 @@ struct AnalysisView: View {
                         content(stats)
                     }
                 } else {
+                    // The statistics are a handful of SwiftData counts, which
+                    // normally land well inside the delay — so on the usual
+                    // launch this card fills in without ever having shown a
+                    // spinner (FR-8.7). Only a genuinely slow first fetch
+                    // against a cold store surfaces one.
                     ProgressView()
                         .frame(maxWidth: .infinity)
+                        .shownWhileWaiting()
                 }
 
                 if let error = model.lastError {
@@ -219,6 +234,14 @@ struct AnalysisView: View {
         Text(progressCaption(stats))
             .font(.callout.monospacedDigit())
             .foregroundStyle(.secondary)
+            // Two lines, always, whether or not they are used (FR-8.7). This
+            // caption swaps between a short and a long form mid-run — the
+            // iCloud download wording is roughly twice the length — and on a
+            // narrow enough card the longer one wraps, which would push the
+            // breakdown and the Stop button down as the run's own state
+            // changed. Reserving the second line up front costs one blank line
+            // and keeps everything below it still.
+            .lineLimit(2, reservesSpace: true)
 
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
             statRow("checkmark.seal", .green, "Wallpaper candidates", stats.accepted,
@@ -239,54 +262,105 @@ struct AnalysisView: View {
             // judgment about the photo. Hiding it at zero keeps the normal
             // breakdown exactly as FR-3.2 describes, while a non-zero count
             // still can't masquerade as an iCloud deferral (FR-3.4).
-            if stats.failed > 0 {
-                statRow("exclamationmark.triangle", .secondary, "Couldn't be analyzed", stats.failed,
-                        help: "These photos were available, but the on-device analysis failed on them. Retrying downloads won't help; they're re-tried automatically when the analysis is next updated.")
-            }
+            //
+            // Faded at zero rather than left out, so the row keeps its place
+            // in the Grid: a failure landing mid-run used to insert a line and
+            // shove the Stop button below it down the card, which is exactly
+            // the shift FR-8.7 forbids the app's own work from causing. Hidden
+            // from VoiceOver at zero too, so it is as absent to a screen reader
+            // as it looks.
+            statRow("exclamationmark.triangle", .secondary, "Couldn't be analyzed", stats.failed,
+                    help: "These photos were available, but the on-device analysis failed on them. Retrying downloads won't help; they're re-tried automatically when the analysis is next updated.",
+                    visible: stats.failed > 0)
         }
         .font(.callout.monospacedDigit())
 
-        // FR-3.6 / FR-3.7: when the run is deliberately holding off, say what
-        // it is waiting for. Placed above the controls so it sits next to the
-        // Stop button that acts on it.
-        if let waiting = model.waitingReason {
-            Label(waiting.message, systemImage: "pause.circle")
-                .font(.callout)
-                .foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        // FR-8.7 allows this row to change *which* action it offers as the run
+        // starts and settles — "stopping a run is rightly only on offer while
+        // one is going" — on the condition that the change happens in place and
+        // takes no neighbour with it. Widths may differ, then, because nothing
+        // sits to the right of this row; heights may not, because the waiting
+        // slot and the whole candidate grid sit below it, and the last branch
+        // is a bare `Label` a button's worth of padding shorter than the other
+        // three. The hidden button underneath holds the row at a button's
+        // height in every branch, so the moment a run ends nothing below it
+        // moves.
+        ZStack(alignment: .leading) {
+            Button("") {}
+                .buttonStyle(.borderedProminent)
+                .hidden()
 
-        HStack {
-            if model.isRunning {
-                Button("Stop") { model.stop() }
-                // A waiting run is paused, not working: a spinner there would
-                // claim progress that isn't happening (FR-3.4's honesty rule).
-                if model.waitingReason == nil {
+            HStack {
+                if model.isRunning {
+                    Button("Stop") { model.stop() }
+                    // A waiting run is paused, not working: a spinner there
+                    // would claim progress that isn't happening (FR-3.4's
+                    // honesty rule). Faded rather than removed on each pause,
+                    // so the row keeps its size across the pause/resume cycle
+                    // (FR-8.7).
                     ProgressView()
                         .controlSize(.small)
+                        .shownWhileWaiting(model.waitingReason == nil)
+                } else if stats.pending > 0 {
+                    Button(stats.analyzed == 0 ? "Analyze \(stats.pending) Photos" : "Resume (\(stats.pending) remaining)") {
+                        model.start(container: modelContext.container)
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else if stats.skipped > 0 {
+                    Button("Retry \(stats.skipped) iCloud Photos") {
+                        model.start(container: modelContext.container)
+                    }
+                } else {
+                    Label("Analysis complete", systemImage: "checkmark.circle")
+                        .foregroundStyle(.green)
+                        .help("Every scanned candidate has been analyzed; results are tallied above.")
                 }
-            } else if stats.pending > 0 {
-                Button(stats.analyzed == 0 ? "Analyze \(stats.pending) Photos" : "Resume (\(stats.pending) remaining)") {
-                    model.start(container: modelContext.container)
-                }
-                .buttonStyle(.borderedProminent)
-            } else if stats.skipped > 0 {
-                Button("Retry \(stats.skipped) iCloud Photos") {
-                    model.start(container: modelContext.container)
-                }
-            } else {
-                Label("Analysis complete", systemImage: "checkmark.circle")
-                    .foregroundStyle(.green)
-                    .help("Every scanned candidate has been analyzed; results are tallied above.")
             }
         }
+
+        // FR-3.6 / FR-3.7: when the run is deliberately holding off, say what
+        // it is waiting for — right beside the Stop button that acts on it.
+        //
+        // Below that button rather than above it (FR-8.7). The reason a run is
+        // holding off comes and goes on its own schedule — the device cools,
+        // Low Power Mode ends, the network changes — and each toggle used to
+        // insert or remove a line *above* the controls, so Stop hopped up and
+        // down the card for as long as the pause lasted. Everything above this
+        // point is now fixed in place while a run is going, and the label
+        // grows downward.
+        //
+        // Downward is not far enough on its own, though: the candidate grid
+        // sits under this card, so inserting and removing the line still moved
+        // its controls every time a run paused or resumed. FR-8.7 counts this
+        // as a status the app shows of its own accord while it works, so the
+        // slot is reserved instead — stacked behind hidden copies of every
+        // message a wait can carry, it is already as tall as the longest of
+        // them before any wait starts, at whatever width and text size the
+        // device is using. `shownWhileWaiting` fades the live one in on the
+        // usual delay.
+        ZStack(alignment: .topLeading) {
+            ForEach(AnalysisWait.allCases, id: \.self) { reason in
+                waitingLabel(reason.message)
+                    .hidden()
+            }
+            waitingLabel(model.waitingReason?.message ?? "")
+                .shownWhileWaiting(model.waitingReason != nil)
+        }
+    }
+
+    private func waitingLabel(_ message: String) -> some View {
+        Label(message, systemImage: "pause.circle")
+            .font(.callout)
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func progressCaption(_ stats: AnalysisStatistics) -> String {
         // "downloading" only when downloads are actually under way: while the
         // run is waiting (device warm, or a network that doesn't allow the
-        // transfer) nothing is coming down, and the waiting label above says
-        // what for. Claiming otherwise is exactly the false progress FR-3.4
+        // transfer) nothing is coming down, and the waiting label under the
+        // controls says what for. Claiming otherwise is exactly the false progress FR-3.4
         // rules out.
         if model.isRunning && model.waitingReason == nil && stats.pending == 0 && stats.skipped > 0 {
             "\(stats.completed) of \(stats.total) — downloading \(stats.skipped) photos from iCloud…"
@@ -295,13 +369,22 @@ struct AnalysisView: View {
         }
     }
 
-    private func statRow(_ symbol: String, _ color: Color, _ label: String, _ value: Int, help: LocalizedStringKey) -> some View {
+    /// `visible` fades a row out instead of dropping it, for the one row that
+    /// is conditional. It is applied to the cells rather than to the `GridRow`
+    /// because a modified `GridRow` is no longer a row to `Grid` — it collapses
+    /// into a single cell and takes the column alignment with it.
+    private func statRow(_ symbol: String, _ color: Color, _ label: String, _ value: Int,
+                         help: LocalizedStringKey, visible: Bool = true) -> some View {
         GridRow {
             Label(label, systemImage: symbol)
                 .foregroundStyle(color == .secondary ? Color.secondary : color)
                 .help(help)
+                .opacity(visible ? 1 : 0)
+                .accessibilityHidden(!visible)
             Text("\(value)")
                 .gridColumnAlignment(.trailing)
+                .opacity(visible ? 1 : 0)
+                .accessibilityHidden(!visible)
         }
     }
 }

@@ -73,12 +73,19 @@ struct AlpenglowApp: App {
         }
         .modelContainer(modelContainer)
         // FR-8.3: the standard macOS menu bar's named commands (Photo
-        // actions, Show Ignored, scan, sync). Quit (⌘Q) needs nothing here —
+        // actions, the Library view switch, scan, sync). Quit (⌘Q) needs
+        // nothing here —
         // it's already part of the automatic app menu. See AppCommands.swift
         // for the focusedValue plumbing that connects these menu items back
         // to view-local state. FR-8.3 is macOS-only and so is this; the touch
         // equivalent is FR-8.4.
-        .commands { AppCommands() }
+        .commands {
+            AppCommands()
+            // FR-8.8: replaces the stock "About Alpenglow" item so the
+            // standard panel opens with the app's one-sentence description
+            // in it. See About.swift.
+            AboutCommand()
+        }
         #else
         // iPhone and iPad: `WindowGroup` is the only scene the system offers
         // for an app's main interface, and the single-window question FR-1.6

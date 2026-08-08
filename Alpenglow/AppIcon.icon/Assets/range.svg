@@ -8,13 +8,14 @@
 
     Two summits, not one: a lone triangle reads as a generic "photo" glyph,
     while a main peak with a lower shoulder reads as a range. The main summit
-    sits left of centre (x=400) so moon.svg has open sky at the upper left with
-    only its right edge behind this ridge, and so the lit west faces in
-    sunlit.svg all face the same way. prism.svg's arc bends over this summit,
-    so all four assets are pinned to the (400,235) vertex.
+    sits left of centre (x=400) so sun.svg has open sky at the upper left,
+    and so the glass west faces in glass.svg all face the same way — toward
+    the sun. light.svg's beam enters the main face and its spectrum exits on
+    the ridge line at x=400, so all four assets are pinned to the (400,235)
+    vertex.
 
     Vertices: left base (0,1024), main summit (400,235), saddle (560,490),
-    shoulder summit (700,345), right base (1024,1024). sunlit.svg's triangles
+    shoulder summit (700,345), right base (1024,1024). glass.svg's triangles
     are cut against these exact coordinates, so the two files have to move
     together.
 

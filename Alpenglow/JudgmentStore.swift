@@ -162,7 +162,7 @@ nonisolated enum JudgmentStore {
             let existingChoices = Set(try destinationContext.fetch(FetchDescriptor<ChoiceRecord>())
                 .map { "\($0.winnerKey)|\($0.loserKey)|\($0.timestamp.timeIntervalSinceReferenceDate)" })
             let existingVerdicts = Set(try destinationContext.fetch(FetchDescriptor<VerdictRecord>())
-                .map { "\($0.photoKey)|\($0.isGood)|\($0.timestamp.timeIntervalSinceReferenceDate)" })
+                .map { "\($0.photoKey)|\($0.isGood)|\($0.isCleared)|\($0.timestamp.timeIntervalSinceReferenceDate)" })
             let existingIgnores = Set(try destinationContext.fetch(FetchDescriptor<IgnoreRecord>())
                 .map(\.photoKey))
 
@@ -176,11 +176,12 @@ nonisolated enum JudgmentStore {
                 ))
             }
             for verdict in verdicts {
-                let identity = "\(verdict.photoKey)|\(verdict.isGood)|\(verdict.timestamp.timeIntervalSinceReferenceDate)"
+                let identity = "\(verdict.photoKey)|\(verdict.isGood)|\(verdict.isCleared)|\(verdict.timestamp.timeIntervalSinceReferenceDate)"
                 guard !existingVerdicts.contains(identity) else { continue }
                 destinationContext.insert(VerdictRecord(
                     photoKey: verdict.photoKey,
                     isGood: verdict.isGood,
+                    isCleared: verdict.isCleared,
                     timestamp: verdict.timestamp
                 ))
             }

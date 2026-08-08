@@ -76,10 +76,12 @@ final class PhotoRecord {
     /// Mirrors PHAsset.isFavorite; refreshed on every scan.
     var isFavorite: Bool = false
 
-    /// User chose to fully ignore this photo (context menu "Ignore This
-    /// Photo") — e.g. a fine photo that's emotionally triggering. Ignored
-    /// photos leave the grid, duels, calibration, and album on next sync, and
-    /// can be reviewed/un-ignored via the Library tab's "Show Ignored" filter.
+    /// User chose to fully ignore this photo ("Ignore This Photo", from the
+    /// thumbnail's own toggle, the context menu, or the menu bar) — e.g. a
+    /// fine photo that's emotionally triggering. Ignored photos leave the
+    /// grid, duels, calibration, and album on next sync, and can be reviewed
+    /// and un-ignored via the Library tab's Ignored view (FR-4.9), where the
+    /// same toggle reverses the decision (FR-4.6).
     /// The stored attribute keeps its original name `isExcluded` so the meaning
     /// change needs no SwiftData migration. (This is distinct from "Not
     /// Wallpaper Material", which records a bad-quality VerdictRecord instead of

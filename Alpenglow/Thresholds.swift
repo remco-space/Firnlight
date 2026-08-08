@@ -27,6 +27,27 @@ nonisolated enum Thresholds {
     /// squarer 3:2-ish panels, so neither is badly misjudged.
     static let desktopAspectRatio: CGFloat = 16.0 / 10.0
 
+    // MARK: The interface holding still (FR-8.7)
+
+    /// How long work has to run before the interface admits to waiting on it.
+    /// Anything that finishes sooner finishes silently — see the
+    /// `shownWhileWaiting` modifier, which every spinner in the app goes
+    /// through.
+    ///
+    /// Almost all of this app's waits are either far under this (a SwiftData
+    /// count, a cached thumbnail, recording one duel choice) or far over it (a
+    /// library scan, a Vision run, an iCloud download), so the exact value only
+    /// has to separate the two populations, not sit at a perceptual boundary.
+    /// 0.4 s is Apple's own long-standing spacing for this — it is what
+    /// `NSProgressIndicator`'s `usesThreadedAnimation` era shipped as the
+    /// delay before a spinner appears, and roughly what UIKit's refresh
+    /// controls settle at — and it is comfortably longer than a warm fetch
+    /// while still short enough that a real wait never feels unacknowledged.
+    ///
+    /// Erring low is the cheaper mistake here: showing a spinner slightly too
+    /// eagerly costs a flicker, whereas a long silent wait reads as a hang.
+    static let noticeableWaitDelay: Duration = .milliseconds(400)
+
     // MARK: Scan (Phase 2)
 
     /// Minimum pixel width for a wallpaper candidate. 3264 admits iPhone 5s-era

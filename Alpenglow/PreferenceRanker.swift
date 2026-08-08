@@ -89,6 +89,15 @@ actor PreferenceRanker {
         /// low-resolution photos are penalized only as much as choices imply.
         let resolution: Float
         var score: Float = 0 // raw, pre-sigmoid
+        /// FR-4.6's "Not Wallpaper Material" toggle's current state, for the
+        /// duel cards' overlay — whether this photo's *latest* verdict
+        /// (FR-4.9) is bad. Populated once in `loadEntries()` from
+        /// `VerdictCalibration.latestByPhoto`, not looked up per duel. There
+        /// is no equivalent `isIgnored` field: `loadEntries()`'s own fetch
+        /// predicate (`isNature && !isExcluded`) already keeps ignored
+        /// photos out of `entries` entirely, so every `Entry` here is
+        /// trivially not ignored — a duel could never serve one.
+        var isNotWallpaperMaterial: Bool = false
     }
 
     // An algorithmVersion mismatch (or undecodable file) triggers an automatic
@@ -133,9 +142,14 @@ actor PreferenceRanker {
         loadEntries()
 
         let choices = try loadJudgedPairsAndCount()
-        let badVerdicts = try modelContext.fetch(
+        // `trainingBadVerdicts` — not a plain `!$0.isGood` filter — so a bad
+        // verdict that has since been cleared (FR-4.6/FR-4.7) drops out of
+        // both the replay and `applicableJudgmentCount` together; see its
+        // doc comment for why leaving the verdict out of the replay is the
+        // only way to un-apply the SGD step it once took.
+        let badVerdicts = VerdictCalibration.trainingBadVerdicts(try modelContext.fetch(
             FetchDescriptor<VerdictRecord>(sortBy: [SortDescriptor(\.timestamp)])
-        ).filter { !$0.isGood }
+        ))
         let applicable = applicableJudgmentCount(choices: choices, badVerdicts: badVerdicts)
 
         let dimension = entries.first?.vector.count ?? 0
@@ -202,9 +216,10 @@ actor PreferenceRanker {
         // `judgedPairs` decides which pairs the duel refuses to re-ask
         // (FR-5.5) while `choiceCount` is what the Duel tab displays (FR-5.8).
         let choices = try loadJudgedPairsAndCount()
-        let badVerdicts = try modelContext.fetch(
+        // Same `trainingBadVerdicts` replay-set as `prepare()` — see there.
+        let badVerdicts = VerdictCalibration.trainingBadVerdicts(try modelContext.fetch(
             FetchDescriptor<VerdictRecord>(sortBy: [SortDescriptor(\.timestamp)])
-        ).filter { !$0.isGood }
+        ))
 
         // If the set of judgments that *apply here* changed, the weights no
         // longer contain what the user has decided, and only a replay can fold
@@ -272,6 +287,16 @@ actor PreferenceRanker {
         let records = (try? modelContext.fetch(descriptor)) ?? []
         let minWidth = Float(Thresholds.minimumCandidatePixelWidth)
         let resolutionRange = log2(Thresholds.resolutionFullScoreWidth / minWidth)
+        // Fetched once here, not per entry, for the same reason
+        // `FeatureStore.latestBadVerdictKeys()` is fetched once per query
+        // rather than per candidate (FR-8.2).
+        let badVerdictKeys: Set<String> = {
+            let verdicts = (try? modelContext.fetch(
+                FetchDescriptor<VerdictRecord>(sortBy: [SortDescriptor(\.timestamp)])
+            )) ?? []
+            let latest = VerdictCalibration.latestByPhoto(verdicts)
+            return Set(latest.compactMap { key, isGood in isGood ? nil : key })
+        }()
         entries = records.compactMap { record in
             guard let data = record.featurePrint else { return nil }
             let tilt = abs(record.horizonAngleDegrees ?? 0)
@@ -284,7 +309,8 @@ actor PreferenceRanker {
                 isFavorite: record.isFavorite,
                 levelness: 1 - min(tilt, Thresholds.horizonMaxTiltDegrees) / Thresholds.horizonMaxTiltDegrees,
                 tiltDegrees: tilt,
-                resolution: resolution
+                resolution: resolution,
+                isNotWallpaperMaterial: badVerdictKeys.contains(record.judgmentKey)
             )
         }
         indexByID = Dictionary(uniqueKeysWithValues: entries.enumerated().map { ($0.element.id, $0.offset) })
@@ -448,6 +474,61 @@ actor PreferenceRanker {
         } else {
             scheduleCacheFlush()
         }
+    }
+
+    /// FR-4.6's toggle un-doing a bad verdict, and FR-4.7's "return to normal
+    /// standing" more generally: appends a clearing `VerdictRecord`
+    /// (`isCleared: true`) per photo rather than deleting the bad one it
+    /// retires — append-only, device-portable, last-write-wins, the same
+    /// reasoning `IgnoreRecord`'s doc comment gives for why a toggle has to
+    /// resolve this way (two devices toggling apart must land on whichever
+    /// the user did last, and only an added row can express that against a
+    /// racing sync).
+    ///
+    /// Unlike `recordVerdicts`, this cannot take an incremental SGD step to
+    /// undo the training: SGD has no inverse, so the only way to un-apply a
+    /// bad verdict's step is to leave it out of a full replay. That means
+    /// this forces exactly the rebuild path a version bump or an arriving
+    /// synced judgment already takes — `isPrepared = false` then `prepare()`,
+    /// which reloads entries, replays every judgment still applicable
+    /// (`VerdictCalibration.trainingBadVerdicts` now excludes this photo's
+    /// bad verdicts, having seen the clearing record), saves weights,
+    /// recomputes scores and rewrites the preference cache. A full weights
+    /// replay is real cost, but it is paid only here: clearing is a rare,
+    /// deliberate, single-photo action, not the rapid per-choice duel path
+    /// FR-8.2 guards (`record`'s debounced cache flush).
+    ///
+    /// There is deliberately no `flushSynchronously` parameter, unlike
+    /// `recordVerdicts`: that one exists because a short-lived, one-off
+    /// ranker has no owner left once the call returns, so a *debounced*
+    /// write's weakly captured `self` would never fire. Here `prepare()`
+    /// above already writes the whole cache synchronously — it has no
+    /// debounce path at all — so there is nothing left to schedule either
+    /// way, and a parameter that changed nothing would only mislead.
+    ///
+    /// This does NOT route the follow-up notification through
+    /// `flushCacheNow`/`scheduleCacheFlush` themselves, unlike
+    /// `recordVerdicts`: those coalesce per-choice writes and bump
+    /// `RankingClock` only when `writePreferenceCache` finds a row that
+    /// actually moved — but `prepare()` just wrote the full cache as its
+    /// last step, so every row is already current and a follow-up
+    /// `flushCacheNow` would find nothing changed and skip the bump,
+    /// silently stranding the grid/Export on stale scores despite the
+    /// rebuild having happened. So the bump is unconditional here, the same
+    /// rebuild-then-bump pairing `AnalysisView`'s one-off `prepare()` call
+    /// already uses.
+    func clearVerdicts(_ localIdentifiers: [String]) throws {
+        let now = Date()
+        let keys = localIdentifiers.compactMap { indexByID[$0].map { entries[$0].key } }
+        for key in keys {
+            modelContext.insert(VerdictRecord(photoKey: key, isGood: false, isCleared: true, timestamp: now))
+        }
+        try modelContext.save()
+
+        isPrepared = false
+        try prepare()
+
+        Task { @MainActor in RankingClock.shared.bump() }
     }
 
     /// Records a choice, takes one SGD step, and updates the in-memory scores.
@@ -694,7 +775,10 @@ actor PreferenceRanker {
             aestheticsScore: entry.aesthetics,
             isFavorite: entry.isFavorite,
             preferenceScore: entry.score,
-            tiltDegrees: entry.tiltDegrees
+            tiltDegrees: entry.tiltDegrees,
+            // isIgnored stays at its default (false): `loadEntries()` already
+            // excludes ignored photos, so a duel `Entry` is never one.
+            isNotWallpaperMaterial: entry.isNotWallpaperMaterial
         )
     }
 

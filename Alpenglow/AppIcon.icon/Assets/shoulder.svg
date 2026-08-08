@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    The shoulder summit's glass west face — the same glass as the main
+    prism in glass.svg, but a separate file because the two live at
+    different depths. The shoulder peak stands beyond the saddle, so the
+    spectrum fan in light.svg, travelling toward the viewer across the east
+    flank, has to pass in front of this face. It is therefore a layer inside
+    the Ridge group in ../icon.json (drawn over the dark range, under the
+    Light group), borrowing that group's `specular`, `translucency` and
+    `refractivity` for its glassiness, while glass.svg stays in the frontmost
+    group to refract the light behind it.
+
+    It passes no beam, deliberately — one dispersion tells the story, two
+    would wallpaper it.
+
+    Apex (700,345) down to the saddle (560,490), cut flat at y=490 — against
+    range.svg's exact vertices and strictly inside it, so the files move
+    together. White fill: the near-white glass tint lives on the layer's
+    fill in ../icon.json.
+  -->
+  <path d="M 700,345 L 560,490 L 700,490 Z" fill="#FFFFFF"/>
+</svg>

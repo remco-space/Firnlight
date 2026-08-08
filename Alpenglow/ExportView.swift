@@ -73,9 +73,12 @@ final class ExportModel {
 
     /// FR-6.8, on the user's say-so: put the album back the way the
     /// interrupted sync found it.
+    ///
+    /// It reports no error of its own, so it has nothing to put in the place
+    /// of one already on screen and leaves it standing — see `sync` for why
+    /// clearing it up front is not allowed.
     func restoreInterruptedSync() {
         isRestoring = true
-        errorMessage = nil
         Task {
             await WallpaperAlbumSync.restoreInterruptedSync()
             hasInterruptedSync = WallpaperAlbumSync.hasInterruptedSync
@@ -136,20 +139,39 @@ final class ExportModel {
         }
     }
 
+    /// Nothing on screen is cleared here, at the start. Every one of these
+    /// three — the tally, the error, the album-missing notice — is swapped for
+    /// its replacement below, once the replacement exists.
+    ///
+    /// The card used to blank all three the moment Sync was pressed, so a
+    /// second sync collapsed a banner's worth of height out of the card and
+    /// put it back a few seconds later, taking the notices and the whole
+    /// preview grid with it both times. FR-8.7 calls that out by name: room
+    /// once granted is kept, and redoing something moves nothing at all. The
+    /// cost is that the previous tally stands for the length of the run, which
+    /// is exactly what the requirement asks for — it is the last true thing
+    /// the app knows, and the spinner beside the button says a newer one is
+    /// coming.
     func sync(container: ModelContainer) {
         isSyncing = true
-        errorMessage = nil
-        albumMissing = false
         let target = count
 
         Task {
             do {
                 outcome = try await WallpaperAlbumSync.sync(container: container, count: target)
+                errorMessage = nil
+                albumMissing = false
             } catch WallpaperAlbumSync.SyncError.albumNotVisible {
                 // FR-6.11: not an error to report, a state to wait in.
                 albumMissing = true
+                errorMessage = nil
+                // The tally would otherwise sit there claiming a healthy album
+                // this device cannot even see.
+                outcome = nil
             } catch {
                 errorMessage = error.localizedDescription
+                albumMissing = false
+                outcome = nil
             }
             // A completed sync rebuilds membership outright, so any earlier
             // interrupted sync is moot — and a failed one may have left a
@@ -163,11 +185,14 @@ final class ExportModel {
     /// existed anywhere. Deliberately user-driven — see
     /// `WallpaperAlbumSync.createAlbum`.
     func createAlbum() {
-        errorMessage = nil
         Task {
             do {
                 try await WallpaperAlbumSync.createAlbum()
                 albumMissing = false
+                // Cleared on success rather than on the click, so a failed
+                // attempt repeated does not blank the message and re-print it
+                // (FR-8.7).
+                errorMessage = nil
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -200,6 +225,7 @@ struct ExportView: View {
                 if model.totalAccepted == nil {
                     ProgressView("Loading candidates…")
                         .padding(.top, 40)
+                        .shownWhileWaiting()
                 } else if !model.preview.isEmpty {
                     LazyVGrid(
                         columns: [GridItem(.adaptive(minimum: 220, maximum: 340), spacing: 12)],
@@ -210,6 +236,14 @@ struct ExportView: View {
                         }
                     }
                 }
+
+                #if !os(macOS)
+                // FR-8.8's iPhone and iPad half: the app's identity at the
+                // foot of its last screen, where macOS has an About box
+                // instead. Static, so it never shifts anything above it
+                // (FR-8.7). See About.swift for why here.
+                AboutFooter()
+                #endif
             }
             .padding(24)
         }
@@ -283,38 +317,28 @@ struct ExportView: View {
                 }
                 .disabled(model.totalAccepted == nil)
 
-                if let suggestion = model.suggestion {
-                    HStack(spacing: 8) {
-                        Text("Suggested: \(suggestion) — where quality drops off in your ranking")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                        if suggestion != model.count {
-                            Button("Use") { model.adoptSuggestion() }
-                                .controlSize(.small)
-                        }
-                    }
-                }
-
-                if model.isLimitedAccess {
-                    limitedAccessNotice
-                }
-
-                if model.albumMissing {
-                    albumMissingNotice
-                }
-
-                if model.hasInterruptedSync {
-                    interruptedSyncNotice
-                }
+                suggestionRow
 
                 HStack(spacing: 12) {
-                    Button(model.isSyncing ? "Syncing…" : "Sync Album") {
+                    Button("Sync Album") {
                         model.sync(container: modelContext.container)
                     }
                     .buttonStyle(.borderedProminent)
                     // Same gate as the menu command: also disabled while the
                     // pool is still loading or empty, not just mid-sync.
                     .disabled(!model.canSync)
+
+                    // The wait goes beside the button, never into its title.
+                    // "Syncing…" is narrower than "Sync Album", so the button
+                    // shrank the instant it was clicked and grew back when the
+                    // sync landed — FR-8.7's "never the control whose use
+                    // produced it", about the one control most likely to still
+                    // be under the pointer. Faded in place rather than
+                    // inserted, and delayed, so an album already in sync
+                    // reports nothing at all.
+                    ProgressView()
+                        .controlSize(.small)
+                        .shownWhileWaiting(model.isSyncing)
 
                     if let outcome = model.outcome {
                         if outcome.orderVerified {
@@ -344,6 +368,26 @@ struct ExportView: View {
                     }
                 }
 
+                // The three standing notices sit *under* the Sync button, not
+                // between it and the count (FR-8.7). Each of them appears and
+                // disappears while this tab is on screen — `albumMissing` as
+                // the direct result of pressing Sync, the other two on a
+                // return from Settings — and above the button that meant the
+                // button dropped half a card's height away from the pointer
+                // that had just clicked it. Below, they push only the preview
+                // grid, which nothing is aiming at.
+                if model.isLimitedAccess {
+                    limitedAccessNotice
+                }
+
+                if model.albumMissing {
+                    albumMissingNotice
+                }
+
+                if model.hasInterruptedSync {
+                    interruptedSyncNotice
+                }
+
                 if let errorMessage = model.errorMessage {
                     Text(errorMessage)
                         .foregroundStyle(.red)
@@ -351,6 +395,45 @@ struct ExportView: View {
             }
             .padding(8)
         }
+    }
+
+    /// FR-4.7's suggested album size, in a row that is always there.
+    ///
+    /// The suggestion is computed asynchronously and recomputed on every
+    /// re-rank, so it arrives after this tab has drawn and can change or
+    /// vanish later. Inserting the row on arrival shoved the Sync button — and
+    /// everything under it — down a line just as the user reached for it, so
+    /// the row is laid out at full height from the start and its contents fade
+    /// in (FR-8.7). "Use" is reserved the same way rather than being dropped
+    /// when the count already matches: it disappears at the instant it is
+    /// clicked, which is the worst possible moment to resize the row it is in.
+    ///
+    /// Height was only half of it. The placeholder stands in `model.count` for
+    /// the number the suggestion will carry, and the two rarely have the same
+    /// number of digits — 8 becoming 120 widens the text, and with the button
+    /// packed straight after it, "Use" slid sideways the moment the suggestion
+    /// landed. The `Spacer` pins the button to the card's trailing edge, which
+    /// is fixed, so the text can now grow into the gap between them instead of
+    /// pushing the control along (FR-8.7).
+    private var suggestionRow: some View {
+        HStack(spacing: 8) {
+            Text("Suggested: \(model.suggestion ?? model.count) — where quality drops off in your ranking")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .opacity(model.suggestion == nil ? 0 : 1)
+                .accessibilityHidden(model.suggestion == nil)
+            Spacer(minLength: 8)
+            Button("Use") { model.adoptSuggestion() }
+                .controlSize(.small)
+                .opacity(canAdoptSuggestion ? 1 : 0)
+                .disabled(!canAdoptSuggestion)
+                .accessibilityHidden(!canAdoptSuggestion)
+        }
+    }
+
+    private var canAdoptSuggestion: Bool {
+        guard let suggestion = model.suggestion else { return false }
+        return suggestion != model.count
     }
 
     /// FR-1.8 *(iPhone and iPad)*: with limited access there is no album to
@@ -394,10 +477,20 @@ struct ExportView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(model.isRestoring ? "Restoring…" : "Restore Previous Album") {
-                model.restoreInterruptedSync()
+            // Same shape as the Sync button above, and for the same reason:
+            // the busy state is a spinner in reserved space beside the button
+            // rather than a shorter title inside it, so the control the user
+            // just clicked keeps its size (FR-8.7).
+            HStack(spacing: 12) {
+                Button("Restore Previous Album") {
+                    model.restoreInterruptedSync()
+                }
+                .disabled(model.isRestoring)
+
+                ProgressView()
+                    .controlSize(.small)
+                    .shownWhileWaiting(model.isRestoring)
             }
-            .disabled(model.isRestoring)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)

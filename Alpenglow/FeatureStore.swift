@@ -12,6 +12,24 @@ nonisolated struct Candidate: Sendable, Identifiable, Equatable {
     let preferenceScore: Float?
     /// Horizon tilt in degrees; 0 when level or no horizon detected.
     let tiltDegrees: Float
+    /// FR-4.8's "Ignore This Photo" state — `PhotoRecord.isExcluded` — carried
+    /// on the candidate itself, rather than looked up per cell, so the grid's
+    /// thumbnail overlay can render the toggle's current state without a
+    /// per-cell fetch on the main actor (FR-8.2). Defaulted so every existing
+    /// memberwise-init call site (duel cards, in particular, which don't
+    /// carry either verdict flag) keeps compiling.
+    // `var`, not `let`: a `let` stored property with an inline default is
+    // excluded from the synthesized memberwise initializer entirely (it
+    // becomes fixed at that value, unassignable via `init`), which is the
+    // opposite of what's needed here — every existing call site should keep
+    // compiling with these defaulting to `false`, while the handful that do
+    // know the photo's verdict/ignore state still need to pass it in.
+    var isIgnored: Bool = false
+    /// FR-4.6's "Not Wallpaper Material" toggle's current state: whether the
+    /// photo's *latest* verdict (FR-4.9 — however given, grid action or a
+    /// duel's "Both Are Bad") is bad. Same rationale as `isIgnored`: rides on
+    /// `Candidate` so the overlay renders live without a per-cell fetch.
+    var isNotWallpaperMaterial: Bool = false
 
     var id: String { localIdentifier }
 
@@ -91,13 +109,51 @@ actor FeatureStore {
     }
 
     /// Ignored photos (isExcluded), newest first — for the Library tab's
-    /// "Show Ignored" review filter, where they can be un-ignored.
+    /// Ignored view (FR-4.9), where the same toggle un-ignores them.
     func ignoredCandidates() throws -> [Candidate] {
         let descriptor = FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.isExcluded },
             sortBy: [SortDescriptor(\.creationDate, order: .reverse)]
         )
-        return try modelContext.fetch(descriptor).map { candidate(for: $0) }
+        let badVerdictKeys = try latestBadVerdictKeys()
+        return try modelContext.fetch(descriptor).map { candidate(for: $0, badVerdictKeys: badVerdictKeys) }
+    }
+
+    /// Photos whose *latest* verdict is bad (FR-4.9), however given — a grid
+    /// "Not Wallpaper Material" or a duel's "Both Are Bad" write the same
+    /// `VerdictRecord` shape — newest first, for the Library tab's own view.
+    ///
+    /// Ignored photos are excluded (`isNature && !isExcluded`, same as the
+    /// ranked queries) even if they also carry a bad verdict: an ignored
+    /// photo is fully out of the pipeline and the Ignored view already owns
+    /// showing it; listing it here too would surface it somewhere its
+    /// ignored state isn't visible. Un-ignoring it brings it back to this
+    /// list on the next fetch if the bad verdict is still its latest one.
+    func notWallpaperMaterialCandidates() throws -> [Candidate] {
+        let badVerdictKeys = try latestBadVerdictKeys()
+        guard !badVerdictKeys.isEmpty else { return [] }
+        let descriptor = FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate { $0.isNature && !$0.isExcluded },
+            sortBy: [SortDescriptor(\.creationDate, order: .reverse)]
+        )
+        return try modelContext.fetch(descriptor)
+            .filter { badVerdictKeys.contains($0.judgmentKey) }
+            .map { candidate(for: $0, badVerdictKeys: badVerdictKeys) }
+    }
+
+    /// `PhotoRecord.judgmentKey`s whose latest verdict (FR-4.9) is bad.
+    /// Fetched and reduced ONCE per public query — never per record — and
+    /// threaded into `candidate(for:badVerdictKeys:)`, the same once-per-query
+    /// discipline `rankedCore` already applies to its own vector-distance
+    /// walk: a per-cell fetch would run on the calling actor for every row
+    /// in the grid, which is exactly the kind of per-row store traffic
+    /// FR-8.2 exists to avoid.
+    private func latestBadVerdictKeys() throws -> Set<String> {
+        let verdicts = try modelContext.fetch(
+            FetchDescriptor<VerdictRecord>(sortBy: [SortDescriptor(\.timestamp)])
+        )
+        let latest = VerdictCalibration.latestByPhoto(verdicts)
+        return Set(latest.compactMap { key, isGood in isGood ? nil : key })
     }
 
     private func rankedCore(limit: Int) throws -> (kept: [Candidate], vectors: [[Float]], accepted: Int, suppressed: Int) {
@@ -105,6 +161,7 @@ actor FeatureStore {
             predicate: #Predicate { $0.isNature && !$0.isExcluded }
         )
         let fetched = try modelContext.fetch(descriptor)
+        let badVerdictKeys = try latestBadVerdictKeys()
 
         // Two tiers: records the ranker has scored rank by their raw score;
         // unscored ones (new scans, edited photos awaiting rescore) sit BELOW
@@ -150,12 +207,12 @@ actor FeatureStore {
                 let levelnessWins = record.isFavorite == kept0.isFavorite
                     && tilt + Thresholds.duplicateTiltMargin < kept0.tiltDegrees
                 if favoriteWins || levelnessWins {
-                    kept[clusterIndex] = candidate(for: record)
+                    kept[clusterIndex] = candidate(for: record, badVerdictKeys: badVerdictKeys)
                     keptVectors[clusterIndex] = vector
                 }
                 suppressed += 1
             } else if kept.count < limit {
-                kept.append(candidate(for: record))
+                kept.append(candidate(for: record, badVerdictKeys: badVerdictKeys))
                 keptVectors.append(vector)
             }
         }
@@ -311,14 +368,19 @@ actor FeatureStore {
 
     private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "FeatureStore")
 
-    private func candidate(for record: PhotoRecord) -> Candidate {
+    /// `badVerdictKeys` is `latestBadVerdictKeys()`'s result, fetched once by
+    /// the caller and passed through — never re-fetched here — so scoring a
+    /// whole grid's worth of records costs one verdict fetch, not one per row.
+    private func candidate(for record: PhotoRecord, badVerdictKeys: Set<String>) -> Candidate {
         Candidate(
             localIdentifier: record.localIdentifier,
             aestheticsScore: record.aestheticsScore,
             isFavorite: record.isFavorite,
             preferenceScore: record.preferenceScore,
-            tiltDegrees: abs(record.horizonAngleDegrees ?? 0)
+            tiltDegrees: abs(record.horizonAngleDegrees ?? 0),
             // preferenceScore is the record's raw cached score (nil = unscored).
+            isIgnored: record.isExcluded,
+            isNotWallpaperMaterial: badVerdictKeys.contains(record.judgmentKey)
         )
     }
 }

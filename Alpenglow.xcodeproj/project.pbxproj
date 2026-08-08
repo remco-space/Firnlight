@@ -251,7 +251,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 13;
+				VERSIONING_SYSTEM = "apple-generic";
 				DEVELOPMENT_TEAM = VGZ5MZ2P8B;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -265,6 +266,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Alpenglow-Info.plist";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 remco.space";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Alpenglow reads your photo library on-device to find and rank nature photos that make great wallpapers. Your photos never leave your device.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -278,7 +280,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.11.2;
 				PRODUCT_BUNDLE_IDENTIFIER = space.remco.Alpenglow;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -307,7 +309,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 13;
+				VERSIONING_SYSTEM = "apple-generic";
 				DEVELOPMENT_TEAM = VGZ5MZ2P8B;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -321,6 +324,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Alpenglow-Info.plist";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 remco.space";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Alpenglow reads your photo library on-device to find and rank nature photos that make great wallpapers. Your photos never leave your device.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -334,7 +338,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.11.2;
 				PRODUCT_BUNDLE_IDENTIFIER = space.remco.Alpenglow;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

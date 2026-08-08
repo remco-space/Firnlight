@@ -20,9 +20,20 @@ extension Array {
 @MainActor
 @Observable
 final class LibraryScanner {
+    /// Whether a scan is running, and how far along — live state only.
     enum Phase: Equatable {
         case idle
         case scanning(examined: Int, total: Int)
+    }
+
+    /// How the last scan ended. Split out of `Phase` deliberately: FR-8.7 asks
+    /// that redoing something move nothing at all, which means the summary a
+    /// scan produced has to stay on screen while the *next* scan runs, right
+    /// up until its replacement is ready. While the two lived in one enum that
+    /// was impossible — entering `.scanning` destroyed the result by
+    /// construction, the card emptied out, and everything below it slid up and
+    /// back down again a moment later.
+    enum Outcome: Equatable {
         /// `hidden` is the number of stored candidates this scan could not see,
         /// which is only ever non-zero under limited access. It is reported
         /// separately rather than folded into `candidates`, because a count
@@ -37,11 +48,30 @@ final class LibraryScanner {
 
     private(set) var phase: Phase = .idle
 
+    /// The last scan's result, kept across the next one and overwritten only
+    /// when its replacement exists. Never set back to `nil` — room once
+    /// granted is kept (FR-8.7).
+    private(set) var outcome: Outcome?
+
     private let log = Logger(subsystem: "space.remco.Alpenglow", category: "LibraryScanner")
 
     var isScanning: Bool {
         if case .scanning = phase { true } else { false }
     }
+
+    /// What the scan control is called right now — shared by the Library
+    /// card's button and the menu item FR-8.3 requires beside it, so the two
+    /// can never disagree.
+    ///
+    /// Held here, and rewritten only when a scan *settles*, because FR-8.7
+    /// forbids a control resizing while the app works. Both call sites used to
+    /// derive the title from `phase` (`phase == .idle ? "Scan Library" :
+    /// "Scan Again"`), which flipped it the instant a scan *started* — the
+    /// button widened under the pointer that had just clicked it, and did so
+    /// with nobody clicking at all on FR-2.7's launch scan. Carrying the
+    /// previous title through the scanning phase leaves the change where the
+    /// requirement allows one: on the settled result of the run.
+    private(set) var scanActionTitle = "Scan Library"
 
     /// Runs a full metadata scan. Inserts records for new candidates, refreshes
     /// mutable metadata (favorites), queues photos edited since their analysis
@@ -72,6 +102,10 @@ final class LibraryScanner {
             var visibleCandidates = 0
             var seenIdentifiers: Set<String> = []
             seenIdentifiers.reserveCapacity(existingRecords.count)
+            /// Whether this scan touched any `PhotoRecord` the grid reads —
+            /// added, removed, re-queued for analysis, or just re-flagged
+            /// favorite. Drives the `RankingClock` bump below (FR-4.5).
+            var contentChanged = false
 
             for index in 0..<total {
                 let asset = assets.object(at: index)
@@ -86,6 +120,7 @@ final class LibraryScanner {
                         if record.isFavorite != asset.isFavorite {
                             record.isFavorite = asset.isFavorite
                             unsavedChanges += 1
+                            contentChanged = true // favorite feeds ranking (FeatureStore)
                         }
                         // Edited since analysis (crop, adjustments, …): refresh
                         // metadata and queue for re-analysis. Only this photo
@@ -110,6 +145,7 @@ final class LibraryScanner {
                             record.horizonAngleDegrees = nil
                             editedQueued += 1
                             unsavedChanges += 1
+                            contentChanged = true
                         }
                     } else {
                         context.insert(PhotoRecord(
@@ -121,6 +157,7 @@ final class LibraryScanner {
                         ))
                         newlyAdded += 1
                         unsavedChanges += 1
+                        contentChanged = true
                     }
                 } else if let record {
                     // Edited out of candidacy (e.g. cropped to portrait or below
@@ -128,6 +165,7 @@ final class LibraryScanner {
                     context.delete(record)
                     removed += 1
                     unsavedChanges += 1
+                    contentChanged = true
                 }
 
                 if unsavedChanges >= Thresholds.scanSaveBatchSize {
@@ -172,6 +210,7 @@ final class LibraryScanner {
                 for (identifier, record) in recordsByIdentifier where !seenIdentifiers.contains(identifier) {
                     context.delete(record)
                     removed += 1
+                    contentChanged = true
                 }
             }
 
@@ -182,13 +221,18 @@ final class LibraryScanner {
             // library and reconciles it with the store.
             try await resolveCloudIdentifiers(in: context)
             try rekeyJudgments(in: context)
-            try reconcileIgnores(in: context)
+            if try reconcileIgnores(in: context) > 0 {
+                contentChanged = true
+            }
 
             let stored = try context.fetchCount(FetchDescriptor<PhotoRecord>())
             // Report what this scan could see, and account for the rest
             // separately. With full access these are the same number.
             let hidden = max(0, stored - visibleCandidates)
-            phase = .finished(
+            // Written in this order, and only here: the outcome is swapped for
+            // its replacement in one step, then the run is marked over. The
+            // card therefore never sees a moment with no summary in it.
+            outcome = .finished(
                 candidates: visibleCandidates,
                 examined: total,
                 newlyAdded: newlyAdded,
@@ -196,10 +240,26 @@ final class LibraryScanner {
                 removed: removed,
                 hidden: hidden
             )
+            phase = .idle
+            scanActionTitle = "Scan Again"
             log.info("Scan finished: \(total) examined, \(visibleCandidates) candidates visible of \(stored) stored (\(newlyAdded) new, \(editedQueued) edited queued for re-analysis, \(removed) removed, \(hidden) hidden)")
+            // FR-4.5: the visible Library view brings itself up to date for
+            // content, not just order. A scan can change what belongs in the
+            // grid — add, remove, or re-flag a favorite (FR-2.2), drop a
+            // deleted/disqualified photo (FR-2.6) — without ever queuing
+            // analysis, which is the only other thing that bumps this clock
+            // outside a duel/verdict/ignore write. Nothing else would notice
+            // this scan's changes, so bump here, but only when something
+            // actually changed — an unattended re-scan that found nothing new
+            // (the common case) must not force every ranked view to reload.
+            if contentChanged {
+                RankingClock.shared.bump()
+            }
         } catch {
             log.error("Scan failed: \(error.localizedDescription)")
-            phase = .failed(error.localizedDescription)
+            outcome = .failed(error.localizedDescription)
+            phase = .idle
+            scanActionTitle = "Try Again"
         }
     }
 
@@ -306,11 +366,12 @@ final class LibraryScanner {
     /// `cloudKitDatabase: .none` (see `JudgmentStore`). The reconcile is still
     /// load-bearing without it — it applies the flags the migration seeded. `isExcluded` is only a cache of this (see `IgnoreRecord`), so
     /// the judgment is the thing being honoured, not overwritten.
-    private func reconcileIgnores(in context: ModelContext) throws {
+    @discardableResult
+    private func reconcileIgnores(in context: ModelContext) throws -> Int {
         let ignores = try context.fetch(
             FetchDescriptor<IgnoreRecord>(sortBy: [SortDescriptor(\.timestamp)])
         )
-        guard !ignores.isEmpty else { return }
+        guard !ignores.isEmpty else { return 0 }
         var latest: [String: Bool] = [:]
         for ignore in ignores { latest[ignore.photoKey] = ignore.isIgnored }
 
@@ -320,9 +381,10 @@ final class LibraryScanner {
             record.isExcluded = shouldIgnore
             changed += 1
         }
-        guard changed > 0 else { return }
+        guard changed > 0 else { return 0 }
         try context.save()
         log.info("Applied \(changed) ignore judgments from the shared store")
+        return changed
     }
 
     /// Whether the app can currently see only a user-chosen subset of the

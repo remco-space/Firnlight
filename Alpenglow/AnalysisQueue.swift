@@ -14,7 +14,10 @@ import UIKit
 /// the requirements are explicit that Alpenglow obeys the user's system-wide
 /// choices rather than adding settings of its own, so there is deliberately no
 /// in-app "Wi-Fi only" toggle or thermal preference to pair with these.
-nonisolated enum AnalysisWait: Sendable, Equatable {
+/// `CaseIterable` so the view can lay out every message this can carry and
+/// size its slot to the longest of them before any wait begins (FR-8.7) — see
+/// `AnalysisView`'s waiting label.
+nonisolated enum AnalysisWait: Sendable, Equatable, CaseIterable {
     case deviceHot
     case lowPowerMode
     case systemBusy

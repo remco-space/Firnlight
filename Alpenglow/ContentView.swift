@@ -139,7 +139,7 @@ private struct LibraryTab: View {
                         if authorization.status == .limited {
                             limitedAccessBanner
                         }
-                        ScanView(scanner: scanner)
+                        ScanView(scanner: scanner, analysisModel: analysisModel)
                         AnalysisView(model: analysisModel, scanToken: scanCompletionToken)
                     }
                     .frame(maxWidth: 560)
@@ -240,7 +240,7 @@ private struct LibraryTab: View {
 
     /// Non-nil once a scan has finished; value changes when results change.
     private var scanCompletionToken: Int? {
-        if case .finished(let candidates, _, let newlyAdded, let editedQueued, let removed, let hidden) = scanner.phase {
+        if case .finished(let candidates, _, let newlyAdded, let editedQueued, let removed, let hidden) = scanner.outcome {
             candidates &+ newlyAdded &+ editedQueued &+ removed &+ hidden
         } else {
             nil
@@ -323,6 +323,9 @@ private struct LibraryTab: View {
 private struct ScanView: View {
     @Environment(\.modelContext) private var modelContext
     let scanner: LibraryScanner
+    /// Not displayed here — only consulted for whether a scan may start, which
+    /// depends on it as much as on the scanner (see `scanButton`).
+    let analysisModel: AnalysisModel
 
     var body: some View {
         GroupBox {
@@ -330,46 +333,26 @@ private struct ScanView: View {
                 Text("Library Scan")
                     .font(.headline)
 
-                switch scanner.phase {
-                case .idle:
-                    Text("Finds high-resolution landscape photos worth considering as wallpapers. Metadata only — fast, and nothing leaves your device.")
-                        .foregroundStyle(.secondary)
-                    scanButton(title: "Scan Library")
+                // Fixed order, every phase: blurb, progress, button, outcome.
+                // The card used to swap its whole contents on `scanner.phase`,
+                // which broke FR-8.7 three ways — the button vanished for the
+                // length of every scan (including FR-2.7's launch scan, which
+                // nobody asked for), the progress bar and its count appeared
+                // out of nowhere and pushed the analysis card and the grid
+                // below down with them, and the finished summary landed
+                // *above* the button, moving the very control that had just
+                // been clicked. Laid out this way, the only thing that ever
+                // changes height is `outcome`, at the bottom, where the
+                // requirement allows a result to take room.
+                Text("Finds high-resolution landscape photos worth considering as wallpapers. Metadata only — fast, and nothing leaves your device.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                case .scanning(let examined, let total):
-                    ProgressView(value: total > 0 ? Double(examined) : nil, total: Double(max(total, 1)))
-                    Text(total > 0 ? "\(examined) of \(total) photos examined" : "Preparing…")
-                        .font(.callout.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                progressRow
 
-                case .finished(let candidates, let examined, let newlyAdded, let editedQueued, let removed, let hidden):
-                    Label("\(candidates) wallpaper candidates", systemImage: "photo.stack")
-                        .font(.callout.weight(.semibold))
-                        .help("Photos whose size and shape qualify them for the wallpaper pipeline; Vision analysis filters them further.")
-                    Text(scanSummary(examined: examined, newlyAdded: newlyAdded, editedQueued: editedQueued, removed: removed))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    // FR-2.4: don't let the headline count quietly include
-                    // photos this scan couldn't see. Only ever appears under
-                    // limited access, where their records are kept on purpose
-                    // rather than deleted.
-                    if hidden > 0 {
-                        Text("\(hidden) more can't be seen with limited photo access — their analysis is kept and returns when you allow access to all photos.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    scanButton(title: "Scan Again")
+                scanButton
 
-                case .failed(let message):
-                    Label("Scan failed", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .help("The library scan stopped with the error below; scanning again is safe.")
-                    Text(message)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    scanButton(title: "Try Again")
-                }
+                outcome
             }
             .padding(8)
             // Matches `AnalysisView`'s card — see the note there for why the
@@ -377,6 +360,112 @@ private struct ScanView: View {
             // it. Both cards carry this so they render the same width; giving
             // it to only one would trade one mismatch for another.
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The running count, in a slot that is there whether or not a scan is.
+    ///
+    /// Built unconditionally and faded rather than inserted, per FR-8.7: a
+    /// scan is largely the app's own work — FR-2.7 starts one at launch — and
+    /// inserting these two rows when it began pushed the scan button, the
+    /// analysis card and the whole candidate grid down the page. Reserving the
+    /// rows for good costs a fixed strip of empty card and buys a column that
+    /// never jumps. `shownWhileWaiting` supplies the other half of the
+    /// requirement: a scan that beats `Thresholds.noticeableWaitDelay` — an
+    /// unchanged library, or one with nothing to examine — finishes without
+    /// ever flashing a bar nobody could have read.
+    private var progressRow: some View {
+        let progress = scanProgress
+        return VStack(alignment: .leading, spacing: 4) {
+            ProgressView(value: progress.value, total: progress.total)
+                // Pinned to the linear style, in both states. Left to itself a
+                // `ProgressView` with no value draws as a *circular* spinner,
+                // and a bar that turned into a spinner and back mid-scan would
+                // resize the row this slot exists to keep still (FR-8.7).
+                // Named explicitly, the indeterminate and determinate forms are
+                // the same bar in the same track.
+                .progressViewStyle(.linear)
+            Text(progress.caption)
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .shownWhileWaiting(scanner.isScanning)
+    }
+
+    /// Indeterminate until the library's size is known, determinate after —
+    /// and exactly one line of caption throughout.
+    ///
+    /// The `nil` value is deliberate, and it is the one place this row is
+    /// allowed to change what it draws. `PHAsset.fetchAssets` has to come back
+    /// before there is any denominator to count against, and on a large cold
+    /// library that gap outlasts `Thresholds.noticeableWaitDelay`, so the slot
+    /// is on screen for it. A determinate bar sitting at zero for those
+    /// seconds reads as a scan that has stalled, which is the opposite of the
+    /// live progress FR-2.4 promises; an indeterminate bar says "working, no
+    /// count yet", which is the truth. It costs nothing under FR-8.7 because
+    /// `.progressViewStyle(.linear)` above keeps both forms the same size —
+    /// only the fill changes, not the geometry.
+    ///
+    /// A one-line caption for the same reason as the fixed slot: the longest
+    /// count must not wrap and grow the row. The values outside `.scanning`
+    /// are only ever rendered at zero opacity, so they just have to keep the
+    /// slot the size it will need.
+    private var scanProgress: (value: Double?, total: Double, caption: String) {
+        guard case .scanning(let examined, let total) = scanner.phase, total > 0 else {
+            return (nil, 1, "Preparing…")
+        }
+        return (Double(examined), Double(total), "\(examined) of \(total) photos examined")
+    }
+
+    /// What the last settled scan found, below the button that ran it — never
+    /// above it, which is FR-8.7's one hard rule about results ("never the
+    /// control whose use produced it"). Everything this pushes down is the
+    /// analysis card and the grid, neither of which the click was aimed at.
+    ///
+    /// It reads `scanner.outcome`, not `scanner.phase`, and so survives the
+    /// next scan: the previous summary stays put for the whole run and is
+    /// swapped for the new one at the instant that one exists. An earlier
+    /// version emptied this out when a scan started, on the reasoning that
+    /// clicking the button was itself the user's act — but FR-8.7 asks for
+    /// more than that, that redoing something move nothing *at all*, and
+    /// clearing the summary only to refill the same space a few seconds later
+    /// is the exact shape it names.
+    @ViewBuilder
+    private var outcome: some View {
+        if let outcome = scanner.outcome {
+            outcomeContent(outcome)
+        }
+    }
+
+    @ViewBuilder
+    private func outcomeContent(_ outcome: LibraryScanner.Outcome) -> some View {
+        switch outcome {
+        case .finished(let candidates, let examined, let newlyAdded, let editedQueued, let removed, let hidden):
+            Label("\(candidates) wallpaper candidates", systemImage: "photo.stack")
+                .font(.callout.weight(.semibold))
+                .help("Photos whose size and shape qualify them for the wallpaper pipeline; Vision analysis filters them further.")
+            Text(scanSummary(examined: examined, newlyAdded: newlyAdded, editedQueued: editedQueued, removed: removed))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            // FR-2.4: don't let the headline count quietly include photos this
+            // scan couldn't see. Only ever appears under limited access, where
+            // their records are kept on purpose rather than deleted.
+            if hidden > 0 {
+                Text("\(hidden) more can't be seen with limited photo access — their analysis is kept and returns when you allow access to all photos.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+        case .failed(let message):
+            Label("Scan failed", systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+                .help("The library scan stopped with the error below; scanning again is safe.")
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -410,10 +499,21 @@ private struct ScanView: View {
     /// and renders a prominent "Analyze N Photos" beside it. A rule that holds
     /// only while the call graph above it stays a particular shape is not a
     /// rule; this one holds unconditionally.
-    private func scanButton(title: String) -> some View {
-        Button(title) {
+    /// Its title comes from `LibraryScanner.scanActionTitle` rather than from
+    /// `phase`, so it stays put for the length of a run — see the property.
+    /// Disabled rather than removed: a disabled button is the same size in the
+    /// same place, which is what FR-8.7 asks of a control during the app's own
+    /// work.
+    ///
+    /// The disabled condition is `LibraryCommandTarget.canScan`, the same one
+    /// the menu item uses, rather than a local `isScanning` test — an analysis
+    /// run has to be idle too, and the two routes to this action must agree
+    /// (FR-8.3).
+    private var scanButton: some View {
+        Button(scanner.scanActionTitle) {
             Task { await scanner.scan(into: modelContext) }
         }
+        .disabled(!LibraryCommandTarget.canScan(scanner: scanner, analysisModel: analysisModel))
     }
 }
 
