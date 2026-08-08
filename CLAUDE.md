@@ -60,6 +60,19 @@ ever present the same version-and-build pair. Where the numbers live in the
 project and how they reach what the user sees is, as with all technical
 detail, documented at the site.
 
+## Committing
+
+Claude commits its own work without asking. The moment a change is verified
+to function as intended — built, and vetted at whatever depth the change
+warrants (for UI, that includes the review the skills section requires) — it
+is committed, with the version bump FR-8.9 ties to it, rather than left
+waiting for permission. One body of related work is one commit. Two things
+are never swept into such a commit silently: another agent's unfinished
+edits sharing the working tree (coordinate a commit order instead — every
+commit must describe a state that actually compiled and ran), and work the
+user explicitly asked to hold. An unverified change stays uncommitted, and
+saying so beats committing it with a hopeful message.
+
 ## Build & run
 
 Xcode project (no SwiftPM manifest, no test target):
@@ -176,13 +189,24 @@ image the Dock tile draws, and passing it as the About panel's
 stale.** Seen here: the app at its DerivedData path rendered the icon design
 from *weeks* earlier through `NSWorkspace.icon(forFile:)` while its Dock tile
 drew the empty Icon Composer placeholder grid — with the current artwork
-sitting correctly in the same bundle's `.icns`. Rebuilding does not clear it
-and neither does `lsregister -f -R -trusted <app>` (which every build already
-runs). The tell is that the *identical* bundle copied to a fresh path renders
-correctly; that copy is also the way to check what the icon really looks like
-in situ:
+sitting correctly in the same bundle's `.icns`. Rebuilding does not clear it,
+and neither does `lsregister -f -R -trusted <app>` — which every build already
+runs anyway, as Xcode's own `RegisterWithLaunchServices` phase. The tell is
+that the *identical* bundle copied to a fresh path renders correctly; that copy
+is also the way to check what the icon really looks like in situ:
 ```bash
 cp -R "$(...)/Build/Products/Debug/Alpenglow.app" /tmp/iconcheck/ && open /tmp/iconcheck/Alpenglow.app
+```
+Deleting the icon store is what actually shifts it. `build-and-run.sh` does that
+for you, but only when the contents of `AppIcon.icon` changed — the deletion is
+machine-wide and the Dock restart blinks every tile, so routine builds stay
+quiet. Outside the script, by hand:
+```bash
+# -exec, not a bare glob: under zsh an unmatched glob aborts the whole command.
+# (2>/dev/null swallows the permission noise from unrelated sandboxed caches.)
+find "$(getconf DARWIN_USER_CACHE_DIR)" -maxdepth 1 -name 'com.apple.iconservices*' \
+  -exec rm -rf {} + 2>/dev/null
+killall iconservicesagent; killall Dock
 ```
 
 Validate and preview from the command line — there is no need to open the GUI:

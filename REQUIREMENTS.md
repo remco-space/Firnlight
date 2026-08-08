@@ -222,19 +222,25 @@ The app has three tabs matching the three stages of the journey:
   handful of photos to every candidate the library holds. The scale is
   proportional — a nudge changes the count by a fraction of it, not a fixed
   amount — and carries a few labeled marks at round counts so the unusual
-  scale reads at a glance. The exact count is shown beside the slider,
-  editable as a number with a stepper.
+  scale reads at a glance. The exact count is shown beside the slider and can
+  be edited directly as a number. The thumb moves freely, and equally freely
+  on every platform: the marks are a scale to read the track by, never stops
+  the thumb is confined to — every count is reachable by dragging, with one
+  deliberate exception: the suggestion's mark gently catches the passing
+  thumb (FR-6.4), so the one point that is easy to mean and hard to hit is
+  easy to hit too.
 - **FR-6.4** The app suggests a count — where quality drops off in the user's
   own ranking, informed by their Great/Bad verdicts — and marks it on the
   slider's scale. Adopting it is moving the thumb onto the mark; there is no
   separate button. The suggestion is followed automatically until the user
-  first sets a size of their own — by slider, stepper, or typing — and never
+  first sets a size of their own — by slider or by typing — and never
   overrides them after that (FR-6.12).
 - **FR-6.12** The app remembers the choice **relative to the suggestion**,
   not as a count: when the suggestion shifts with new analysis and judgments,
   the set count shifts with it, preserving the user's strictness. A pool
   momentarily too small to honour that standard limits only what is shown,
-  never what is remembered. The album
+  never what is remembered. The standard is the user's, not the device's: it
+  counts on every device, like any other judgment (section 9). The album
   itself still changes only on sync (FR-6.10). *(Why: "half as many as you
   think" should be said once, not re-derived after every scan.)*
 - **FR-6.5** Before syncing, the Export tab previews exactly the photos a sync
@@ -350,6 +356,19 @@ The app has three tabs matching the three stages of the journey:
   Alpenglow does this happen in?" — and it only works if it is truthful and
   moves with the app.)*
 
+- **FR-8.10** The interface holds only what this brief calls for: every
+  control, view, and adornment traces back to a requirement, and no two
+  controls in one place do the same job — where several could, the one that
+  serves the whole range of the task stays and the others are left out.
+  *(Why: an unasked-for control is not a free extra — it is one more thing to
+  read, reach past, and maintain, and two ways to do the same thing make each
+  other harder to understand.)*
+- **FR-8.11** Text never collides with text: no label, badge, or mark is ever
+  drawn over another, at any window size, text size, or data the app can
+  reach. When space runs short, something yields — moves, abbreviates, or
+  goes — rather than overlaps. *(Why: two labels printed over each other read
+  as neither; a layout is only correct if no reachable state breaks it.)*
+
 ## 9. Across the user's devices
 
 - **FR-9.1** A judgment made on one device counts on all of them, against the
@@ -361,6 +380,12 @@ The app has three tabs matching the three stages of the journey:
   were used apart.
 
 ## Parked (deferred, or not currently possible)
+
+- The iCloud transport behind section 9 and FR-6.12: judgments and the
+  album-size standard are held ready to travel, but carrying them needs an
+  iCloud entitlement the app's current signing cannot have. Until it can,
+  each device keeps its own copy and no judgment is lost — the fallback
+  FR-9.3 demands anyway.
 
 - Auto-leveling the horizon if the app ever sets wallpapers directly rather
   than via the album.
