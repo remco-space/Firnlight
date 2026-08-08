@@ -109,26 +109,48 @@ The app has three tabs matching the three stages of the journey:
 - **FR-4.4** Favorites show a heart badge, and every thumbnail shows its
   current score.
 - **FR-4.5** The grid re-orders itself live as the app learns the user's taste
-  from duels.
+  from duels. Live means whenever the grid is on screen: while the user is busy
+  elsewhere — mid-duel especially — the ranking need not be kept current in the
+  background, only brought up to date by the time they see it again. This holds
+  for content as well as order, and for all three Library views (FR-4.9):
+  whatever changes — a scan finding or refreshing photos, analysis finishing, a
+  verdict or ignore given anywhere — the visible view brings itself up to date,
+  and the user is never given, and never needs, a manual refresh control. *(Why:
+  recomputing an order nobody is looking at is wasted work on a busy device,
+  and a refresh button admits the app cannot tell when its own data changed —
+  it always can.)*
 - **FR-4.6** Every photo, anywhere in the app (grid, export preview, duel),
   offers three actions: "Open in Photos", "Not Wallpaper Material", and "Ignore
   This Photo" — reached by right-click on the Mac and by touch on iPhone and
   iPad, and always also by name as a command (FR-8.3, FR-8.4), never only by a
-  gesture. All three apply only to the exact photo, never to its collapsed
+  gesture. The two verdicts are toggles: choosing one again on a photo that
+  already carries it reverses it — undoing a decision uses the same action as
+  making it. All three apply only to the exact photo, never to its collapsed
   near-duplicate siblings (FR-4.2).
 - **FR-4.7** "Not Wallpaper Material" records the same absolute bad-quality
-  verdict as "Both Are Bad" (FR-5.7). It does **not** remove the photo — it
-  stays in the grid, future duels, and the album-size suggestion, but sinks in
-  the ranking over time and so out of the album. Using it mid-duel advances to
-  a fresh pair.
+  verdict as "Both Are Bad" (FR-5.7): a judgment of the photo's visible,
+  weighable merits. It does **not** remove the photo — it stays in the grid,
+  future duels, and the album-size suggestion, but sinks in the ranking over
+  time and so out of the album. Clearing the verdict (FR-4.6) returns the photo
+  to normal standing, as if it had never been marked. Using it mid-duel
+  advances to a fresh pair. *(Why: this verdict teaches the app what bad looks
+  like, so it must be given for reasons visible in the photo — a flaw the app
+  cannot see belongs to "Ignore This Photo" (FR-4.8).)*
 - **FR-4.8** "Ignore This Photo" fully removes a photo from the grid, future
-  duels, the album-size suggestion, and (on next sync) the album. *(Why: some
-  photos are a genuinely good shot but personally unwanted as a wallpaper —
-  e.g. emotionally triggering — and should disappear entirely rather than
-  merely be marked poor quality.)* Using it mid-duel advances to a fresh pair.
-- **FR-4.9** The Library tab has a "Show Ignored" filter to review ignored
-  photos and un-ignore any of them, returning them to the normal grid, duels,
-  and album sizing.
+  duels, the album-size suggestion, and (on next sync) the album. It is the
+  right verdict when the flaw is one the app cannot see — orthogonal or
+  emotional, e.g. a person the user would rather not face every day — even on
+  a genuinely good shot. *(Why: marking such a photo poor quality instead
+  would teach the app a falsehood about photos like it; ignoring removes it
+  without teaching anything.)* While a photo is ignored its quality verdict
+  cannot be changed: the control stays visible but is unavailable, and says
+  why. Un-ignoring re-enables it, with any earlier verdict still in force.
+  Using it mid-duel advances to a fresh pair.
+- **FR-4.9** The Library tab switches among three views: Library (top
+  candidates), Not Wallpaper Material, and Ignored. The latter two list the
+  photos currently carrying that verdict — however it was given, from the grid
+  or in a duel — and the same toggle (FR-4.6) clears it from there, returning
+  the photo to the normal grid, duels, and album sizing.
 - **FR-4.10** Every thumbnail is a clean, fixed-shape tile with the photo
   filling it; clicks and taps land only on the visible tile — a wide
   panorama must not spill over or steal clicks from neighboring cells.
@@ -142,6 +164,12 @@ The app has three tabs matching the three stages of the journey:
   layered on top as a convenience for mouse users. *(Why: hover text explains an
   icon to pointer users but is invisible to keyboard, VoiceOver, and touch — it
   can enrich meaning, never carry it alone.)*
+- **FR-4.14** Every thumbnail carries the two verdict toggles (FR-4.6) as
+  translucent overlay buttons in the same visual family as the favorite heart
+  (FR-4.4), so one tap or click marks or unmarks a photo — no context menu or
+  long-press needed. The verdict toggle is unavailable while the photo is
+  ignored (FR-4.8). Like the heart badge, they are tile markings, not the
+  bar-style glass FR-8.5 reserves for the app's own chrome.
 
 ## 5. Learning taste (Duel tab)
 
@@ -177,6 +205,10 @@ The app has three tabs matching the three stages of the journey:
   friendly empty state when there aren't yet two candidates to compare.
 - **FR-5.9** Each duel card carries a visible ignore control (FR-4.8), distinct
   from "Both Are Bad", which judges quality rather than removing the photo.
+- **FR-5.10** Every newly drawn duel pair reflects all judgments made so far,
+  anywhere in the app. A pair already on screen when a judgment changes
+  elsewhere may predate it — judging it is still valid, since the user judges
+  the photos in front of them, not the bookkeeping behind them.
 
 ## 6. The wallpaper album (Export tab)
 
@@ -186,14 +218,22 @@ The app has three tabs matching the three stages of the journey:
 - **FR-6.2** The album is ordered for visual variety, so that on "rotate in
   order" consecutive wallpapers look as different as possible. *(Why: avoid
   samey streaks of the same scene or mood.)*
-- **FR-6.3** The user picks how many photos go in the album by typing an exact
-  number or nudging a stepper, with **no upper limit** — if the whole library
-  is awesome, the whole library can be the album. The count is clamped to what
-  the library actually has available.
+- **FR-6.3** The user picks the album size with one slider running from a
+  handful of photos to every candidate the library holds. The scale is
+  proportional — a nudge changes the count by a fraction of it, not a fixed
+  amount — and carries a few labeled marks at round counts so the unusual
+  scale reads at a glance. The exact count is shown beside the slider,
+  editable as a number with a stepper.
 - **FR-6.4** The app suggests a count — where quality drops off in the user's
-  own ranking, informed by their Great/Bad verdicts. The suggestion is
-  displayed, adopted automatically only the first time, and never overrides a
-  manual adjustment.
+  own ranking, informed by their Great/Bad verdicts — and marks it on the
+  slider's scale. Adopting it is moving the thumb onto the mark; there is no
+  separate button. The suggestion is followed automatically until the user
+  first moves the slider, and never overrides them after that (FR-6.12).
+- **FR-6.12** The app remembers the choice **relative to the suggestion**,
+  not as a count: when the suggestion shifts with new analysis and judgments,
+  the set count shifts with it, preserving the user's strictness. The album
+  itself still changes only on sync (FR-6.10). *(Why: "half as many as you
+  think" should be said once, not re-derived after every scan.)*
 - **FR-6.5** Before syncing, the Export tab previews exactly the photos a sync
   would put in the album, in the album's actual order, in the same grid style
   as the Library tab. While the candidate pool is still loading, the tab shows
@@ -246,8 +286,9 @@ The app has three tabs matching the three stages of the journey:
   honest waiting should never take the whole app hostage.)*
 - **FR-8.3** *(macOS)* Alpenglow has a standard menu bar that exposes its real
   commands as named menu items with correct enabled/disabled state and standard
-  keyboard shortcuts — at least Quit (⌘Q), the three photo actions of FR-4.6,
-  the Show Ignored toggle (FR-4.9), scan / re-scan, and album sync. *(Why: the
+  keyboard shortcuts — at least Quit (⌘Q), the three photo actions of FR-4.6
+  (worded as their reverse when the photo already carries the verdict), the
+  Library view switch (FR-4.9), scan / re-scan, and album sync. *(Why: the
   menu bar is where macOS users look for a command first, and it names every
   action in words with a shortcut, so nothing essential lives only behind a
   right-click or an unlabeled icon.)*
@@ -265,6 +306,46 @@ The app has three tabs matching the three stages of the journey:
   and blurring as it passes through the glass, and a shadow beneath. It reads
   clearly in all six appearances the system draws — default, dark, clear light
   and dark, tinted light and dark — and at the smallest size it is ever shown.
+- **FR-8.7** The interface holds still: a control only ever moves or resizes
+  as the direct result of the user's own act. Whatever the app shows of its
+  own accord while it works — however it takes shape: a wait, a status, a
+  running count, a whole view's busy state — leaves every control exactly
+  where and as big as it was, and is shown at all only when the wait is long
+  enough to notice: near-instant work finishes silently. Which actions are
+  offered may itself change as work starts and settles — stopping a run is
+  rightly only on offer while one is going — but an action that changes does
+  so in place, taking no neighbour with it. What arrives and
+  stays — a result, a notice, a banner — may take room, pushing what follows
+  it, but never the control whose use produced it. And room once granted is
+  kept: work that will end by replacing what the user already sees — a fresh
+  summary where the last one stands — leaves the old one showing until the
+  new one is ready, never clearing it only to refill the space, so redoing
+  something moves nothing at all. *(Why: the moment a
+  target moves is usually the moment a hand is reaching for it; an interface
+  that jolts of its own accord reads as broken, and a calm, stable frame is
+  as much of what makes an app feel native as any control style.)*
+- **FR-8.8** The app tells the user what it is and which one they have, in
+  each platform's own place for that: on macOS a filled-in About box —
+  Alpenglow's icon and name, one sentence saying what it does, its true
+  version, and a copyright line naming its author; on iPhone and iPad the
+  same facts somewhere the user would naturally find them. The icon shown is
+  the icon: the same rendering the system presents for the app everywhere
+  else — Dock, Home Screen, app switcher — never a second, subtly different
+  version of it. Nothing there is
+  a template leftover or a placeholder. *(Why: About is where a user checks
+  what they are running before reporting a problem or updating; an empty box
+  or a stock "1.0" says nobody finished the app.)*
+- **FR-8.9** Alpenglow is versioned as major.minor.patch, semantic-versioning
+  style read for an app: the major number marks a release that changes what
+  the app is or asks the user to relearn something, minor adds features, and
+  patch only fixes. Every user-visible change bumps the version, the version
+  shown to the user is always the one actually running, and no two different
+  builds ever present the same version and build number. Until the app is
+  fit for its first real release it stays at 0.minor.patch, so the version
+  never claims a maturity the app does not have. *(Why: a version is the one
+  handle user and author share when something must be identified — "which
+  Alpenglow does this happen in?" — and it only works if it is truthful and
+  moves with the app.)*
 
 ## 9. Across the user's devices
 
