@@ -228,10 +228,13 @@ The app has three tabs matching the three stages of the journey:
   own ranking, informed by their Great/Bad verdicts — and marks it on the
   slider's scale. Adopting it is moving the thumb onto the mark; there is no
   separate button. The suggestion is followed automatically until the user
-  first moves the slider, and never overrides them after that (FR-6.12).
+  first sets a size of their own — by slider, stepper, or typing — and never
+  overrides them after that (FR-6.12).
 - **FR-6.12** The app remembers the choice **relative to the suggestion**,
   not as a count: when the suggestion shifts with new analysis and judgments,
-  the set count shifts with it, preserving the user's strictness. The album
+  the set count shifts with it, preserving the user's strictness. A pool
+  momentarily too small to honour that standard limits only what is shown,
+  never what is remembered. The album
   itself still changes only on sync (FR-6.10). *(Why: "half as many as you
   think" should be said once, not re-derived after every scan.)*
 - **FR-6.5** Before syncing, the Export tab previews exactly the photos a sync
