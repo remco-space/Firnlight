@@ -379,6 +379,30 @@ The app has three tabs matching the three stages of the journey:
   all. Devices catch up later, and no judgment is ever lost because two of them
   were used apart.
 
+## 10. Distribution
+
+- **FR-10.1** Alpenglow is available as a free download from GitHub
+  Releases, alongside its public source under an open license — never
+  gated behind a store account, a paid tier, or a build step the user has
+  to run themselves.
+- **FR-10.2** A downloaded release launches. Without a paid developer
+  account there is one unavoidable warning — Gatekeeper flagging an
+  unidentified developer — and the release always ships the one
+  instruction that clears it, never a silent failure to open. *(Why:
+  friction the user can't avoid is fine; friction they aren't warned about
+  isn't.)*
+- **FR-10.3** Every release carries a changelog entry the user can read
+  before deciding whether to update, and the version named in the release
+  matches the version the running app reports (FR-8.9) — never released
+  ahead of or behind what FR-8.9 already governs.
+- **FR-10.4** Nothing personal to the developer's own machine or accounts —
+  file paths, credentials, tokens, or other data that identifies them or
+  their setup rather than the project — is ever tracked in the public
+  repository. This is checked before every push, not fixed once and
+  forgotten. *(Why: a public repo is written once and read forever; a
+  personal detail committed today is exposed the moment it's public, however
+  long ago it was written.)*
+
 ## Parked (deferred, or not currently possible)
 
 - The iCloud transport behind section 9 and FR-6.12: judgments and the

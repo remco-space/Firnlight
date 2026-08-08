@@ -60,6 +60,38 @@ ever present the same version-and-build pair. Where the numbers live in the
 project and how they reach what the user sees is, as with all technical
 detail, documented at the site.
 
+## Release process (FR-10)
+
+Signing state: automatic signing under the free personal team (`VGZ5MZ2P8B`)
+only — no Developer ID, no notarization. A downloaded release is ad-hoc
+signed enough to run, but Gatekeeper still blocks first launch as "Apple
+cannot check it for malicious software" (FR-10.2); the fix users need is
+right-click → Open, or `xattr -cr Alpenglow.app`.
+
+CI is currently blocked, not absent by choice: GitHub-hosted macOS runners
+are on the `macos-26` image (Xcode 26.0–26.3 as of its Aug 2026 GA) and don't
+carry the Xcode 27 beta this project requires, so a GitHub Actions build
+would fail today. Releases are built manually from this Mac's Xcode 27
+install until `actions/runner-images` ships Xcode 27 GA — revisit
+Actions-based automation then.
+
+File formats to use, once built: `LICENSE` follows
+[choosealicense.com/licenses/mit](https://choosealicense.com/licenses/mit/);
+`CHANGELOG.md` follows [keepachangelog.com](https://keepachangelog.com/),
+with an entry added to `Unreleased` as part of the change that prompts it,
+not written retroactively from git history; `README.md` follows
+[makeareadme.com](https://www.makeareadme.com/), trimmed to what a small app
+(not a library) needs.
+
+Pre-publish check (FR-10.4): before the first push and before every push
+after, diff what's about to be pushed against the developer's own home
+directory path and against common secret/token patterns — a standing check,
+not a one-time cleanup. Project identifiers that are already meant to be
+public — the Apple Developer Team ID, the bundle identifier — are not
+personal data and don't need scrubbing; this check is about the developer's
+own machine and accounts, not the project's own public-by-design
+identifiers.
+
 ## Committing
 
 Claude commits its own work without asking. The moment a change is verified
