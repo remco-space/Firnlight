@@ -45,6 +45,28 @@ the **`ui-review-tahoe`** checklist and against section 8 of `REQUIREMENTS.md`
 complete, and when a native-feel defect slips through anyway, add the missing
 class of rule to section 8 as part of the fix (that is how FR-8.7 came to be).
 
+## Framework skills (project-scoped, some auto-updating)
+
+`.claude/skills/` carries, alongside the UI skills above, ten framework skills
+vendored via a live symlink into the `.claude/skills-src/swift-ios-skills` git
+submodule ([dpearson2699/swift-ios-skills](https://github.com/dpearson2699/swift-ios-skills)):
+`photokit`, `vision-framework`, `swiftdata`, `swiftui-patterns`,
+`swiftui-uikit-interop`, `background-processing`, `ios-accessibility`,
+`ios-localization`, `swift-concurrency`, `app-store-review`. A `SessionStart`
+hook (`.claude/hooks/skills-submodule-update.sh`) fast-forwards that submodule
+to upstream every session, so these stay current with no manual step — see
+`.claude/skills/README.md` for the full provenance table and how to pin a
+revision if upstream ever regresses.
+
+That upstream repo has ~86 skills, one per Apple framework/topic; only the
+ones this app actually touches were added, deliberately, not the whole set.
+**When a change adds a new framework or platform capability** (a new
+`import`, a new App Store surface, a new Apple framework), check that repo's
+skill list for a matching one before writing the feature from scratch, and if
+it fits, add it the same way: symlink `.claude/skills-src/swift-ios-skills/skills/<name>`
+into `.claude/skills/<name>`, and add its row to the provenance table. Don't
+add speculative skills for frameworks the app doesn't use yet.
+
 ## Versioning (FR-8.9)
 
 Keeping the version truthful is Claude's job and part of making a change, not

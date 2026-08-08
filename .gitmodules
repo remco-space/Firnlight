@@ -1,0 +1,3 @@
+[submodule ".claude/skills-src/swift-ios-skills"]
+	path = .claude/skills-src/swift-ios-skills
+	url = https://github.com/dpearson2699/swift-ios-skills.git
