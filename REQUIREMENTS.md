@@ -424,6 +424,13 @@ The app has three tabs matching the three stages of the journey:
   explaining. *(Why: for a public project, the development process is part
   of the interface; a bespoke process taxes every contributor after the
   first.)*
+- **FR-10.7** Everything tracked in the repository is written for any
+  contributor on their own machine: no tracked file states, or depends on,
+  facts true only of the developer's particular computer, devices, or
+  installed tools. What only one machine needs lives on that machine, not
+  in the repository. *(Why: a public repository is every contributor's
+  working instructions; a fact about one person's setup is noise at best
+  and a wrong instruction at worst.)*
 
 ## Parked (deferred, or not currently possible)
 
