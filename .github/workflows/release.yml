@@ -103,8 +103,12 @@ jobs:
           # Pull the section between this version's heading and the next
           # "## [" heading out of CHANGELOG.md (FR-10.3: every release
           # carries a changelog entry the user can read before updating).
+          # Prefix match, not exact: Keep a Changelog's own convention (see
+          # CHANGELOG.md's preamble) is "## [X.Y.Z] - YYYY-MM-DD", and an
+          # exact match against "## [X.Y.Z]" alone rejected that dated
+          # heading on this project's first release.
           awk -v ver="## [$VERSION]" '
-            $0 == ver { found=1; print; next }
+            index($0, ver) == 1 { found=1; print; next }
             found && /^## \[/ { exit }
             found { print }
           ' CHANGELOG.md > release-notes.md
