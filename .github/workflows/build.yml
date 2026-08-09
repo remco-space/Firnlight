@@ -1,0 +1,56 @@
+name: Build
+
+# Regression check: the project must build with the Xcode version and SDK
+# generation users actually run it against (macOS/iOS 26 — REQUIREMENTS.md's
+# opening). This runner image is the authoritative check for that; a build
+# on the maintainer's own Xcode 27 beta cannot prove it (see CLAUDE.md's
+# Release process section for why local development stays on 27 while the
+# app targets 26).
+#
+# Signing is disabled here on purpose: this workflow verifies the app
+# compiles, not that it can be distributed — the release workflow handles
+# the ad-hoc-signed, distributable build (FR-10.2).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode 26
+        run: |
+          # macos-26 runners carry several Xcode 26.x patch releases side by
+          # side; pick the newest rather than pinning a patch version that
+          # will eventually be pruned from the image.
+          XCODE_PATH="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)"
+          if [ -z "$XCODE_PATH" ]; then
+            echo "::error::No Xcode 26.x found on this runner image (checked /Applications/Xcode_26*.app)"
+            find /Applications -maxdepth 1 -iname "*xcode*"
+            exit 1
+          fi
+          echo "Selecting $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+
+      - name: Build (macOS)
+        run: |
+          xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow \
+            -configuration Debug -destination "platform=macOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Build (iOS Simulator)
+        run: |
+          xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow \
+            -configuration Debug -destination "generic/platform=iOS Simulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
