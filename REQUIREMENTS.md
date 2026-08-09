@@ -30,9 +30,8 @@ The app has three tabs matching the three stages of the journey:
   explicit action, never silently at launch.
 - **FR-1.2** The Library tab reflects the current access state (not yet asked /
   granted / limited / denied / restricted) and offers the right next step for
-  each: a grant button, or a shortcut into Privacy Settings. When access is
-  limited to a selection of photos, the tab says so plainly and offers a
-  shortcut to change the selection in Photos settings (but see FR-1.8).
+  each: a grant button, or a shortcut into Privacy Settings. A limited
+  selection counts as not yet granted (FR-1.8).
 - **FR-1.3** A grant made in System Settings while the app is open takes
   effect when the user returns to the app — no relaunch needed.
 - **FR-1.4** The app only ever adds or removes photos in its own wallpaper
@@ -50,9 +49,10 @@ The app has three tabs matching the three stages of the journey:
   quits it, as does ⌘Q (FR-8.3). *(Why: for a single-window utility a
   windowless, still-running state is a no-op with nothing for the user to do.)*
   If a sync is running, quitting waits for it to finish or undo itself (FR-6.8).
-- **FR-1.8** *(iPhone and iPad)* With limited access the app cannot maintain the
-  album at all. It says so and offers the upgrade to full access, rather than
-  appearing to work.
+- **FR-1.8** Alpenglow works only with access to the whole library. Given a
+  limited selection it does nothing but say so and offer the upgrade to full
+  access — including when access is narrowed while the app is open — rather
+  than appearing to work on part of a library.
 - **FR-1.9** Alpenglow asks before every change it makes in Photos, naming
   exactly what will be created, added, or removed. The user can turn off asking
   for each kind of change from the alert itself, and turn it back on in the
@@ -66,20 +66,20 @@ The app has three tabs matching the three stages of the journey:
   Older, smaller photos are not thrown out — they are admitted and simply
   ranked lower if the user's choices show they matter. *(Why: photos from older
   cameras are rarer and shouldn't be thrown away outright.)*
-- **FR-2.2** Re-scanning is always safe to repeat: it adds only genuinely new
-  photos, never duplicates, and refreshes what can change in Photos — in
-  particular the favorite heart.
-- **FR-2.4** Scanning shows live progress and ends with a clear summary: how
-  many candidates there are and what changed (new / re-queued / removed).
+- **FR-2.2** Keeping up to date only ever adds genuinely new photos, never
+  duplicates, and refreshes what can change in Photos — in particular the
+  favorite heart.
+- **FR-2.4** Catching up shows live progress and what changed (new /
+  re-queued / removed). A change small enough to be instant simply appears.
 - **FR-2.5** If the user edits a photo (crop, adjustments) after it was
   examined, only that photo is re-examined — never the whole library.
 - **FR-2.6** Photos deleted from the library, or edited until they no longer
   qualify (e.g. cropped too small), drop out of the app automatically —
   including while the app is open, without a re-scan.
-- **FR-2.7** When Photos access is already granted, launching the app
-  automatically re-syncs: scanning and analysis run to completion without the
-  user clicking anything. Manual re-scan and retry controls remain available
-  at any time.
+- **FR-2.7** Alpenglow is always current with the user's library: it catches
+  up at launch and follows changes as they happen, with nothing to press.
+  There is no re-scan control, because there is nothing a re-scan would find
+  that the app has not already found.
 
 ## 3. Analysis (Library tab)
 
@@ -92,13 +92,16 @@ The app has three tabs matching the three stages of the journey:
 - **FR-3.4** Photos stored only in iCloud are deferred, not skipped: the app
   finishes everything local first, then comes back to download and examine the
   rest. Progress honestly distinguishes "waiting on iCloud" from "done" — the
-  app never claims completion while deferred work remains.
-- **FR-3.5** The Library tab always offers the one obvious next action as the
-  pipeline progresses ("Analyze N Photos", "Resume", "Retry N iCloud Photos",
-  and finally "Analysis complete").
-- **FR-3.6** *(iPhone and iPad)* A long run needs no babysitting: the user
-  starts it, can stop it at any moment, and it carries on with the screen locked
-  while the device is charging. If continuing would cost too much battery or run
+  app never claims completion while deferred work remains. Deferred photos
+  are retried by the app itself when network and power allow, never by the
+  user pressing retry.
+- **FR-3.5** The Library tab says what the pipeline is doing and what remains,
+  and offers only stopping it — and resuming, if the user stopped it. Work the
+  app should be doing anyway is never gated behind a button the user has to
+  find.
+- **FR-3.6** *(iPhone and iPad)* A long run needs no babysitting: it carries on
+  with the screen locked while the device is charging, and the user can stop it
+  at any moment. If continuing would cost too much battery or run
   the device hot, it pauses and says that it is waiting.
 - **FR-3.7** The app obeys the user's system-wide choices about which networks
   may carry data, rather than inventing a rule of its own. When photos must come
@@ -315,7 +318,8 @@ The app has three tabs matching the three stages of the journey:
   commands as named menu items with correct enabled/disabled state and standard
   keyboard shortcuts — at least Quit (⌘Q), the three photo actions of FR-4.6
   (worded as their reverse when the photo already carries the verdict), the
-  Library view switch (FR-4.9), scan / re-scan, and album sync. *(Why: the
+  Library view switch (FR-4.9), stopping and resuming a run (FR-3.5), and
+  album sync. *(Why: the
   menu bar is where macOS users look for a command first, and it names every
   action in words with a shortcut, so nothing essential lives only behind a
   right-click or an unlabeled icon.)*
