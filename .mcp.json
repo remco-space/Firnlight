@@ -7,7 +7,7 @@
         "mcpbridge"
       ],
       "env": {
-        "DEVELOPER_DIR": "/Users/USER/Developer/Xcode-current"
+        "DEVELOPER_DIR": "${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
       }
     },
     "XcodeBuildMCP": {
@@ -19,7 +19,7 @@
         "mcp"
       ],
       "env": {
-        "DEVELOPER_DIR": "/Users/USER/Developer/Xcode-current"
+        "DEVELOPER_DIR": "${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
       }
     }
   }
