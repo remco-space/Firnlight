@@ -53,6 +53,11 @@ The app has three tabs matching the three stages of the journey:
 - **FR-1.8** *(iPhone and iPad)* With limited access the app cannot maintain the
   album at all. It says so and offers the upgrade to full access, rather than
   appearing to work.
+- **FR-1.9** Alpenglow asks before every change it makes in Photos, naming
+  exactly what will be created, added, or removed. The user can turn off asking
+  for each kind of change from the alert itself, and turn it back on in the
+  app's settings. *(Why: the library is the user's, not the app's — but a
+  warning that can never be dismissed for good is one nobody reads.)*
 
 ## 2. Finding candidate photos (Library tab)
 
@@ -69,7 +74,8 @@ The app has three tabs matching the three stages of the journey:
 - **FR-2.5** If the user edits a photo (crop, adjustments) after it was
   examined, only that photo is re-examined — never the whole library.
 - **FR-2.6** Photos deleted from the library, or edited until they no longer
-  qualify (e.g. cropped too small), drop out of the app automatically.
+  qualify (e.g. cropped too small), drop out of the app automatically —
+  including while the app is open, without a re-scan.
 - **FR-2.7** When Photos access is already granted, launching the app
   automatically re-syncs: scanning and analysis run to completion without the
   user clicking anything. Manual re-scan and retry controls remain available
@@ -273,8 +279,17 @@ The app has three tabs matching the three stages of the journey:
 - **FR-7.1** All of the user's invested effort — scan results, analysis,
   choices, verdicts, exclusions — survives quitting, relaunching, and app
   updates. Long-running work always resumes where it stopped.
-- **FR-7.2** Rebuilding or upgrading the app never requires the user to
-  re-grant Photos access.
+- **FR-7.2** Rebuilding, upgrading, or installing a downloaded release never
+  requires the user to re-grant Photos access.
+- **FR-7.3** An update never costs the user accumulated work. A version that
+  cannot read what an older one saved says so and leaves it intact, rather
+  than starting empty or refusing to open.
+- **FR-7.4** The user can copy everything they have decided off the device, and
+  restore it — here or on another device. *(Why: until judgments travel on
+  their own (section 9), one lost container is a total loss.)*
+- **FR-7.5** The user can discard what the app has learned and start their
+  taste over, told first what goes and what stays. It never happens by
+  accident.
 
 ## 8. Native feel
 
@@ -371,6 +386,9 @@ The app has three tabs matching the three stages of the journey:
   reach. When space runs short, something yields — moves, abbreviates, or
   goes — rather than overlaps. *(Why: two labels printed over each other read
   as neither; a layout is only correct if no reachable state breaks it.)*
+- **FR-8.12** No failure is silent. The app never claims a success it did not
+  achieve, and never shows lost work as an empty state. *(Why: an empty grid
+  otherwise means both "nothing yet" and "your work is gone".)*
 
 ## 9. Across the user's devices
 
@@ -391,9 +409,10 @@ The app has three tabs matching the three stages of the journey:
 - **FR-10.2** A downloaded release launches. Without a paid developer
   account there is one unavoidable warning — Gatekeeper flagging an
   unidentified developer — and the release always ships the one
-  instruction that clears it, never a silent failure to open. *(Why:
-  friction the user can't avoid is fine; friction they aren't warned about
-  isn't.)*
+  instruction that clears it, never a silent failure to open. That it
+  launches is verified before publishing, never inferred from a successful
+  build. *(Why: friction the user can't avoid is fine; friction they aren't
+  warned about isn't.)*
 - **FR-10.3** Every release carries a changelog entry the user can read
   before deciding whether to update, and the version named in the release
   matches the version the running app reports (FR-8.9) — never released
@@ -401,7 +420,8 @@ The app has three tabs matching the three stages of the journey:
 - **FR-10.4** Nothing personal to the developer's own machine or accounts —
   file paths, credentials, tokens, or other data that identifies them or
   their setup rather than the project — is ever tracked in the public
-  repository. This is checked before every push, not fixed once and
+  repository. The repository runs this check itself and refuses a failing
+  push, rather than relying on anyone to remember — not fixed once and
   forgotten. *(Why: a public repo is written once and read forever; a
   personal detail committed today is exposed the moment it's public, however
   long ago it was written.)*
@@ -432,6 +452,10 @@ The app has three tabs matching the three stages of the journey:
   in the repository. *(Why: a public repository is every contributor's
   working instructions; a fact about one person's setup is noise at best
   and a wrong instruction at worst.)*
+- **FR-10.8** The app tells the user when a newer release exists and how to
+  get it — only with their agreement, and reporting nothing about them or
+  their library. *(Why: outside a store there is no other route from a
+  published fix to the person it fixes something for.)*
 
 ## Parked (deferred, or not currently possible)
 
@@ -440,6 +464,9 @@ The app has three tabs matching the three stages of the journey:
   iCloud entitlement the app's current signing cannot have. Until it can,
   each device keeps its own copy and no judgment is lost — the fallback
   FR-9.3 demands anyway.
+
+- Other languages: the app is English throughout, and nothing is designed to
+  be translated.
 
 - Auto-leveling the horizon if the app ever sets wallpapers directly rather
   than via the album.
