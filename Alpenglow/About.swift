@@ -88,7 +88,7 @@ enum AppIdentity {
 /// Left to itself the panel resolves `NSImage.applicationIconName`, which goes
 /// out to IconServices for a *rendering of* this bundle; the Dock tile is
 /// `applicationIconImage`. Those are two paths to the same artwork and they can
-/// disagree — observed on this machine, where IconServices kept serving a
+/// disagree — observed during development, where IconServices kept serving a
 /// months-old composition for the build path (`lsregister -f` did not shift it;
 /// the identical bundle copied to a fresh path rendered correctly), so the panel
 /// showed the previous icon design while the Dock showed something else again.
