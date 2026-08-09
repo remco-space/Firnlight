@@ -74,4 +74,6 @@ see the commit history for co-authorship attribution.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). A few Claude Code skill files under
+`.claude/skills/` are third-party; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
