@@ -13,7 +13,7 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, icon-26-compat] # TEMP: icon-26-compat added for CI-driven debugging, strip before merge
   pull_request:
     branches: [main]
   workflow_dispatch:
