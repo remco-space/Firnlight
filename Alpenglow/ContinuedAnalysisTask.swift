@@ -108,11 +108,32 @@ final class ContinuedAnalysisTask {
             // though deprecated as of 27 in favor of the async one — is the
             // fallback down to 26. Both report failure the same way to this
             // call site: a thrown error, handled identically below.
+            //
+            // submitTaskRequest(_:) isn't just runtime-gated by `#available`
+            // — it isn't declared in the iOS 26 SDK at all, so a compiler
+            // built against that SDK can't resolve the symbol (the CI
+            // runner's Xcode 26.6 reports it as "renamed to submit(_:),
+            // obsoleted in Swift 3" — an apinotes rename diagnostic landing
+            // on an unresolved name, not a real Swift-3-era API). `#if
+            // compiler(>=6.4)` gates the whole runtime-branching statement at
+            // the toolchain boundary — Xcode 27 ships exactly Swift 6.4
+            // (confirmed locally); an earlier attempt at `>=6.3` still
+            // matched Xcode 26.6's compiler and had to be raised, so 6.4 is
+            // the verified floor, not merely a plausible one — it's only even
+            // parsed when compiling with a toolchain new enough to declare
+            // the symbol; the 26-toolchain build (every release build until
+            // the project's floor moves to 27) falls straight to submit(_:),
+            // same as the runtime fallback above already did for pre-27
+            // devices.
+            #if compiler(>=6.4)
             if #available(iOS 27, *) {
                 try await BGTaskScheduler.shared.submitTaskRequest(request)
             } else {
                 try BGTaskScheduler.shared.submit(request)
             }
+            #else
+            try BGTaskScheduler.shared.submit(request)
+            #endif
         } catch {
             Self.log.error("Background analysis not started (\(error.localizedDescription, privacy: .public)); continuing in the foreground only")
         }

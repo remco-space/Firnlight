@@ -99,11 +99,28 @@ enum RunConditions {
     /// aggregate signal is not documented to cover both — the deployment
     /// target is 26 (REQUIREMENTS.md's opening), so the 27-only signal is a
     /// bonus on newer devices, not something FR-3.6 depends on.
+    ///
+    /// `systemPrefersReducedResourceUsage` doesn't just need the runtime
+    /// `#available` guard — it isn't declared at all in the iOS 26 SDK
+    /// (`API_AVAILABLE(ios(27.0)...)`), so a compiler built against that SDK
+    /// can't resolve the symbol regardless of the runtime check. `#if
+    /// compiler(>=6.4)` gates it at the toolchain, not the OS, boundary:
+    /// Xcode 27 ships exactly Swift 6.4 (confirmed locally), and 6.4 is high
+    /// enough to exclude Xcode 26.6 (the CI release runner as of this
+    /// writing) regardless of its precise point version — an earlier attempt
+    /// at `>=6.3` still matched 26.6 and had to be raised. A build made with
+    /// the 26 toolchain — every release build until the project's floor
+    /// moves to 27 — simply omits the bonus check; FR-3.6's actual
+    /// requirements (thermal state, Low Power Mode) are unconditional below
+    /// and unaffected. The bonus check returns on its own once the CI
+    /// toolchain moves to 27.
     static func pauseReason() -> AnalysisWait? {
         #if os(iOS)
+        #if compiler(>=6.4)
         if #available(iOS 27, *), UIApplication.shared.systemPrefersReducedResourceUsage {
             return .systemBusy
         }
+        #endif
         switch ProcessInfo.processInfo.thermalState {
         case .serious, .critical: return .deviceHot
         default: break
