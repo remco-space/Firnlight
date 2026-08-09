@@ -185,11 +185,15 @@ xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow -configuration Debug b
 open Alpenglow.xcodeproj
 ```
 
-Requires the full **Xcode 27+** toolchain, not the Command Line Tools. If
-`xcodebuild` errors with *"requires Xcode, but active developer directory …
-is a command line tools instance"*, the CLT are selected. The exact install
-path depends on how Xcode is managed on the machine (Xcodes app, direct
-download, App Store) — select the full Xcode permanently with
+Requires the full **Xcode 26+** toolchain (matching the app's macOS/iOS 26+
+target — see REQUIREMENTS.md's opening and the Release process section
+above), not the Command Line Tools. A newer Xcode/macOS beta builds *for* 26
+just as well (see the CI paragraph above) if that's what a given machine has
+installed instead. If `xcodebuild` errors with *"requires Xcode, but active
+developer directory … is a command line tools instance"*, the CLT are
+selected. The exact install path depends on how Xcode is managed on the
+machine (Xcodes app, direct download, App Store) — select the full Xcode
+permanently with
 `sudo xcode-select -s /Applications/Xcode<version>.app/Contents/Developer`,
 or override for one command without sudo via
 `DEVELOPER_DIR=/Applications/Xcode<version>.app/Contents/Developer xcodebuild …`.
