@@ -4,7 +4,7 @@ import SwiftData
 /// FR-8.3's menu bar and the focused-value plumbing that feeds it.
 ///
 /// The commands here act on state that already lives view-locally (the
-/// grid's `showingIgnored`, `LibraryTab`'s `scanner`/`analysisModel`,
+/// grid's `selection`, `LibraryTab`'s `scanner`/`analysisModel`,
 /// `ExportView`'s sync model, and whichever photo currently has keyboard
 /// focus). `Commands` runs outside that view hierarchy, so the bridge is
 /// `FocusedValues`: each owning view publishes its state via
@@ -14,11 +14,11 @@ import SwiftData
 /// below sits inside an `if authorization.isAuthorized` branch (or, for the
 /// photo actions, inside a view that only exists once there's a photo to
 /// show), so there's nothing to publish when the precondition doesn't hold.
-/// A deliberate consequence: Scan, Sync Album, and Show Ignored are enabled
-/// only while their owning tab is mounted (a `focusedSceneValue` publishes
-/// only from views in the hierarchy). That errs safe — a disabled item is
-/// never wrong, and the enabled state always reflects a target that really
-/// can act — at the cost of the commands being tab-scoped rather than
+/// A deliberate consequence: Scan, Sync Album, and the Library view switch
+/// are enabled only while their owning tab is mounted (a `focusedSceneValue`
+/// publishes only from views in the hierarchy). That errs safe — a disabled
+/// item is never wrong, and the enabled state always reflects a target that
+/// really can act — at the cost of the commands being tab-scoped rather than
 /// app-global.
 ///
 /// Every value published here is a reference type (a `@MainActor
@@ -29,6 +29,23 @@ import SwiftData
 /// `environment.md`); by publishing the model instead and letting the
 /// command call real methods on it, comparison is by identity and reads
 /// stay stable.
+///
+/// FR-8.3 is marked *(macOS)*, so only `AppCommands` itself — the menu bar —
+/// is compiled out on iPhone and iPad. The focused-value keys below stay
+/// cross-platform on purpose: they are how a view says "this is the photo the
+/// user is on", which is true on any platform, and keeping them unconditional
+/// means the publishing views need no `#if` of their own.
+///
+/// FR-8.4 is the iPhone and iPad counterpart, and it is answered in the views
+/// rather than here, because touch has no menu bar to hang commands off. Every
+/// command FR-8.3 lists already has a visible, named, touch-reachable control
+/// on those platforms: scan / re-scan is `ScanView`'s button, album sync is
+/// `ExportView`'s, and the Library view switch is the picker in the grid
+/// header. The three photo actions and the un-marking directions were the
+/// exception — reachable only by a long press — so `ThumbnailCell` and
+/// `DuelCard` grow a visible actions menu there, offering the same commands
+/// by the same names this menu bar does, and `ThumbnailCell` additionally
+/// grows the FR-4.14 overlay toggles for one-tap access.
 
 // MARK: - Focused photo (FR-4.6)
 
@@ -39,10 +56,16 @@ import SwiftData
 /// state is exactly as local as `View.focusable()` already makes it).
 struct FocusedPhoto {
     let localIdentifier: String
-    /// True only for a grid cell shown in the Library tab's "Show Ignored"
-    /// filter — the Photo menu offers "Un-ignore" instead of the other two
-    /// actions there, mirroring `ThumbnailCell.menu`.
+    /// Whether this photo currently carries the "Ignore This Photo" verdict
+    /// (FR-4.6) — true anywhere it is shown, not just in a particular
+    /// review list. The Photo menu reads this to word its "Ignore This
+    /// Photo" / "Un-ignore" item as the action's reverse (FR-8.3).
     let isIgnored: Bool
+    /// Whether this photo currently carries the "Not Wallpaper Material"
+    /// verdict (FR-4.6), same rationale as `isIgnored`. Read by the Photo
+    /// menu to word its verdict item as "Not Wallpaper Material" / "Clear
+    /// Verdict".
+    let isNotWallpaperMaterial: Bool
     let modelContext: ModelContext
     /// Set only when the focused photo is a duel card: "Not Wallpaper
     /// Material" and "Ignore This Photo" spend the current pair, so the menu
@@ -74,7 +97,18 @@ struct LibraryCommandTarget {
     let analysisModel: AnalysisModel
     let modelContext: ModelContext
 
-    var canScan: Bool { !scanner.isScanning && !analysisModel.isRunning }
+    var canScan: Bool { Self.canScan(scanner: scanner, analysisModel: analysisModel) }
+
+    /// The one definition of when a scan may start, so FR-8.3's two routes to
+    /// the same action — this menu command and the Library card's own button —
+    /// cannot drift apart. They did: the card knew only about `isScanning` and
+    /// stayed clickable right through an analysis run that the menu item was
+    /// correctly greyed out for, which is both a parity break and the race the
+    /// type comment above warns about. `LibraryTab` owns both objects, so the
+    /// card can be handed the same pair the command target carries.
+    static func canScan(scanner: LibraryScanner, analysisModel: AnalysisModel) -> Bool {
+        !scanner.isScanning && !analysisModel.isRunning
+    }
 }
 
 private struct LibraryCommandTargetKey: FocusedValueKey {
@@ -88,7 +122,7 @@ extension FocusedValues {
     }
 }
 
-// MARK: - Grid model (Show Ignored, FR-4.9)
+// MARK: - Grid model (Library view switch, FR-4.9)
 
 private struct LibraryGridModelKey: FocusedValueKey {
     typealias Value = GridModel
@@ -96,9 +130,9 @@ private struct LibraryGridModelKey: FocusedValueKey {
 
 extension FocusedValues {
     /// Published by `CandidateGridView` (the Library tab's grid) so the View
-    /// menu's "Show Ignored" toggle reflects and controls the same
-    /// `GridModel.showingIgnored` the in-view switch does — one source of
-    /// truth, read from two places.
+    /// menu's Library-view commands reflect and control the same
+    /// `GridModel.selection` the in-view picker does — one source of truth,
+    /// read from two places.
     var libraryGridModel: GridModel? {
         get { self[LibraryGridModelKey.self] }
         set { self[LibraryGridModelKey.self] = newValue }
@@ -125,12 +159,14 @@ extension FocusedValues {
     }
 }
 
-// MARK: - The menu bar
+// MARK: - The menu bar (macOS)
 
-/// Named commands for FR-8.3, attached to the `WindowGroup` via
+#if os(macOS)
+/// Named commands for FR-8.3, attached to the `Window` scene via
 /// `.commands { AppCommands() }`. Quit (⌘Q) needs no entry here — it's part
 /// of the automatic app menu and nothing below replaces it.
 struct AppCommands: Commands {
+    @Environment(\.openURL) private var openURL
     @FocusedValue(\.focusedPhoto) private var focusedPhoto
     @FocusedValue(\.libraryCommandTarget) private var libraryCommandTarget
     @FocusedValue(\.libraryGridModel) private var gridModel
@@ -140,52 +176,77 @@ struct AppCommands: Commands {
         CommandMenu("Photo") {
             Button("Open in Photos") {
                 guard let focusedPhoto else { return }
-                CandidateActions.openInPhotos(focusedPhoto.localIdentifier)
+                CandidateActions.openInPhotos(focusedPhoto.localIdentifier, using: openURL)
             }
             .keyboardShortcut("o", modifiers: [.command])
             .disabled(focusedPhoto == nil)
 
             Divider()
 
-            if focusedPhoto?.isIgnored == true {
-                Button("Un-ignore") {
-                    guard let focusedPhoto else { return }
-                    CandidateActions.unignore(focusedPhoto.localIdentifier, in: focusedPhoto.modelContext)
-                }
-                .keyboardShortcut(.delete, modifiers: [.command])
-            } else {
-                Button("Not Wallpaper Material") {
-                    guard let focusedPhoto else { return }
-                    CandidateActions.markNotWallpaperMaterial(focusedPhoto.localIdentifier, in: focusedPhoto.modelContext)
+            // FR-8.3: both verdict items are always listed — the old code
+            // hid "Not Wallpaper Material" entirely for an ignored photo,
+            // which left the menu silently missing a command FR-8.3 names —
+            // and each reads as its reverse once the photo already carries
+            // that verdict (FR-4.6). The verdict item is *disabled* rather
+            // than hidden on an ignored photo, for the reason
+            // `ThumbnailCell.verdictToggles` documents: an ignored photo has
+            // no ranker entry, so the verdict would be silently dropped.
+            //
+            // Only the *marking* direction spends the duel pair: clearing a
+            // verdict mid-duel doesn't remove the photo from the pool, so
+            // nothing needs to advance past it — the un-marking branches
+            // below deliberately don't call `duelModel?.skip()`.
+            Button(focusedPhoto?.isNotWallpaperMaterial == true ? "Clear Verdict" : "Not Wallpaper Material") {
+                guard let focusedPhoto else { return }
+                CandidateActions.setNotWallpaperMaterial(
+                    focusedPhoto.localIdentifier,
+                    !focusedPhoto.isNotWallpaperMaterial,
+                    in: focusedPhoto.modelContext
+                )
+                if !focusedPhoto.isNotWallpaperMaterial {
                     // Mid-duel, the acted-on pair is spent (FR-4.7).
                     focusedPhoto.duelModel?.skip()
                 }
-                .keyboardShortcut(.delete, modifiers: [.command, .shift])
-                .disabled(focusedPhoto == nil)
+            }
+            .keyboardShortcut(.delete, modifiers: [.command, .shift])
+            .disabled(focusedPhoto == nil || focusedPhoto?.isIgnored == true)
 
-                Button("Ignore This Photo") {
-                    guard let focusedPhoto else { return }
-                    CandidateActions.ignore(focusedPhoto.localIdentifier, in: focusedPhoto.modelContext)
+            Button(focusedPhoto?.isIgnored == true ? "Un-ignore" : "Ignore This Photo") {
+                guard let focusedPhoto else { return }
+                CandidateActions.setIgnored(focusedPhoto.localIdentifier, !focusedPhoto.isIgnored, in: focusedPhoto.modelContext)
+                if !focusedPhoto.isIgnored {
                     // Mid-duel, advance immediately (FR-4.8) rather than
                     // waiting for the RankingClock reload to notice the
                     // excluded photo.
                     focusedPhoto.duelModel?.skip()
                 }
-                .keyboardShortcut(.delete, modifiers: [.command])
-                .disabled(focusedPhoto == nil)
             }
+            .keyboardShortcut(.delete, modifiers: [.command])
+            .disabled(focusedPhoto == nil)
         }
 
         // Placed in the standard View menu, alongside the toolbar-visibility
-        // toggles SwiftUI already puts there — "Show Ignored" is exactly
-        // that kind of filter toggle (FR-4.9).
+        // toggles SwiftUI already puts there — the Library view switch is
+        // exactly that kind of view-mode command (FR-4.9). Three `Button`s
+        // with checkmarks rather than a `Picker`: a `Picker` embedded in
+        // `Commands` renders as a submenu whose items can't each carry their
+        // own `.keyboardShortcut`, and ⌘1/⌘2/⌘3 (the standard macOS
+        // view-mode idiom, as in Finder's icon/list/column switch) needs
+        // per-item shortcuts.
         CommandGroup(after: .toolbar) {
-            Toggle("Show Ignored", isOn: Binding(
-                get: { gridModel?.showingIgnored ?? false },
-                set: { gridModel?.showingIgnored = $0 }
-            ))
-            .keyboardShortcut("i", modifiers: [.command, .shift])
-            .disabled(gridModel == nil)
+            ForEach(LibraryView.allCases) { view in
+                Button {
+                    gridModel?.selection = view
+                } label: {
+                    if gridModel?.selection == view {
+                        Label(view.title, systemImage: "checkmark")
+                    } else {
+                        Text(view.title)
+                    }
+                }
+                .keyboardShortcut(shortcutKey(for: view), modifiers: [.command])
+                .disabled(gridModel == nil)
+            }
         }
 
         CommandMenu("Library") {
@@ -198,7 +259,12 @@ struct AppCommands: Commands {
 
             Divider()
 
-            Button(exportCommandTarget?.model.isSyncing == true ? "Syncing…" : "Sync Album") {
+            // Named for the command, not for the state of the work: retitling
+            // it "Syncing…" mid-sync resized a menu item while the app worked,
+            // which FR-8.7 forbids. `canSync` already goes false for the
+            // duration, so the item greys out — same width, same place — and
+            // the Export tab's own spinner reports the wait.
+            Button("Sync Album") {
                 guard let exportCommandTarget else { return }
                 exportCommandTarget.model.sync(container: exportCommandTarget.modelContext.container)
             }
@@ -208,8 +274,24 @@ struct AppCommands: Commands {
     }
 
     private var scanTitle: String {
+        // The scanner owns the wording (see `LibraryScanner.scanActionTitle`):
+        // it holds the title steady across a run, which the old
+        // `phase == .idle` test did not — that renamed the item mid-scan, and
+        // FR-8.7 does not allow the app's own work to resize a control.
         // Defaults to "Scan Library" when no target is published (item
         // disabled on other tabs) — "Scan Again" would misstate a first run.
-        libraryCommandTarget.map { $0.scanner.phase == .idle } ?? true ? "Scan Library" : "Scan Again"
+        libraryCommandTarget?.scanner.scanActionTitle ?? "Scan Library"
+    }
+
+    /// ⌘1/⌘2/⌘3 for the three Library views, in `LibraryView.allCases` order.
+    /// The TabView in ContentView.swift doesn't claim ⌘1–⌘3 itself, so these
+    /// are free for the Library tab's own view switch.
+    private func shortcutKey(for view: LibraryView) -> KeyEquivalent {
+        switch view {
+        case .library: "1"
+        case .notWallpaperMaterial: "2"
+        case .ignored: "3"
+        }
     }
 }
+#endif

@@ -1,8 +1,122 @@
-import AppKit
+import CoreGraphics
 import Foundation
+import Network
 import Photos
 import SwiftData
 import os
+#if os(iOS)
+import UIKit
+#endif
+
+/// Why an analysis run is waiting rather than working (FR-3.6, FR-3.7).
+///
+/// Every case is a condition the *system* reports, never one the app invented:
+/// the requirements are explicit that Alpenglow obeys the user's system-wide
+/// choices rather than adding settings of its own, so there is deliberately no
+/// in-app "Wi-Fi only" toggle or thermal preference to pair with these.
+/// `CaseIterable` so the view can lay out every message this can carry and
+/// size its slot to the longest of them before any wait begins (FR-8.7) — see
+/// `AnalysisView`'s waiting label.
+nonisolated enum AnalysisWait: Sendable, Equatable, CaseIterable {
+    case deviceHot
+    case lowPowerMode
+    case systemBusy
+    case lowDataMode
+    case cellularNetwork
+    case noNetwork
+
+    /// Said in the user's terms — what is being waited for, and why — rather
+    /// than naming the API that reported it.
+    var message: String {
+        switch self {
+        case .deviceHot:
+            "Waiting — the device is too warm to keep analyzing."
+        case .lowPowerMode:
+            "Waiting — Low Power Mode is on."
+        case .systemBusy:
+            "Waiting — the system has asked apps to ease off."
+        case .lowDataMode:
+            "Waiting for Wi-Fi — Low Data Mode is on, so iCloud photos aren't downloading."
+        case .cellularNetwork:
+            "Waiting for Wi-Fi — iCloud photos aren't downloading over cellular."
+        case .noNetwork:
+            "Waiting for a network connection to download iCloud photos."
+        }
+    }
+}
+
+/// FR-3.7: the user's system-wide network policy, taken from the system's own
+/// description of the current path.
+///
+/// `isConstrained` is Low Data Mode and `isExpensive` is cellular — the two
+/// ways the user tells the whole system to go easy on a network. PhotoKit
+/// offers exactly one knob, `isNetworkAccessAllowed`, with no per-request
+/// constrained/expensive option, and the download runs out-of-process in the
+/// Photos daemon, so the app's own `URLSessionConfiguration` flags cannot
+/// reach it. Consulting the path and declining to *ask* is therefore the only
+/// way to honour those settings for iCloud originals — which are exactly the
+/// kind of deferrable bulk transfer they exist to hold back.
+///
+/// One long-lived monitor: `currentPath` is only populated once started, and
+/// starting one per query would answer from a default path. The first query
+/// after launch can still race the monitor's first update; the run re-checks
+/// on `Thresholds.analysisPauseRecheckInterval`, so a momentarily wrong answer
+/// costs one interval and nothing else.
+nonisolated final class NetworkPolicy: Sendable {
+    static let shared = NetworkPolicy()
+
+    private let monitor = NWPathMonitor()
+
+    private init() {
+        monitor.start(queue: DispatchQueue(label: "space.remco.Alpenglow.NetworkPolicy"))
+    }
+
+    /// nil when iCloud downloads may proceed, else what to wait for.
+    var iCloudDownloadWait: AnalysisWait? {
+        let path = monitor.currentPath
+        guard path.status == .satisfied else { return .noNetwork }
+        if path.isConstrained { return .lowDataMode }
+        if path.isExpensive { return .cellularNetwork }
+        return nil
+    }
+}
+
+/// The system conditions that decide whether a run may proceed at all, and
+/// whether it may pull originals down from iCloud.
+@MainActor
+enum RunConditions {
+    /// FR-3.6 *(iPhone and iPad)*: a long run shouldn't cost the user battery
+    /// or a hot device. Checked between batches, which is already the loop's
+    /// natural checkpoint — analysis is saved per batch, so pausing there
+    /// costs nothing and resumes exactly where it stopped.
+    ///
+    /// iOS only, because the requirement is: a Mac pausing its own analysis
+    /// because it is warm would be surprising behaviour no requirement asks
+    /// for. `systemPrefersReducedResourceUsage` (new in 27) is checked first
+    /// as the system's own aggregate judgement; thermal state and Low Power
+    /// Mode are the specific conditions FR-3.6 names, kept because the
+    /// aggregate signal is not documented to cover both.
+    static func pauseReason() -> AnalysisWait? {
+        #if os(iOS)
+        if UIApplication.shared.systemPrefersReducedResourceUsage { return .systemBusy }
+        switch ProcessInfo.processInfo.thermalState {
+        case .serious, .critical: return .deviceHot
+        default: break
+        }
+        if ProcessInfo.processInfo.isLowPowerModeEnabled { return .lowPowerMode }
+        return nil
+        #else
+        return nil
+        #endif
+    }
+
+    /// FR-3.7: nil when iCloud downloads may proceed. Applies on every
+    /// platform — the requirement is unmarked, and Low Data Mode exists on
+    /// the Mac too.
+    static var iCloudDownloadWait: AnalysisWait? {
+        NetworkPolicy.shared.iCloudDownloadWait
+    }
+}
 
 /// Aggregate analysis counters across the whole store.
 /// `nonisolated`: plain value type, produced inside the AnalysisQueue actor.
@@ -14,10 +128,16 @@ nonisolated struct AnalysisStatistics: Sendable, Equatable {
     var people = 0
     var notNature = 0
     var skipped = 0
+    /// Pixels were available and Vision failed anyway — see
+    /// `PhotoRecord.analysisFailed`. Distinct from `skipped`, which is the
+    /// genuinely-waiting-on-iCloud bucket.
+    var failed = 0
 
     var analyzed: Int { total - pending }
 
     /// Fully analyzed — deferred iCloud records don't count until they're done.
+    /// Failures *do* count: nothing further will happen to them, so leaving
+    /// them out would stall the pipeline short of "complete" forever (FR-3.5).
     var completed: Int { total - pending - skipped }
 }
 
@@ -40,7 +160,12 @@ actor AnalysisQueue {
 
     private enum ItemResult: Sendable {
         case analyzed(String, ImageAnalyzer.Outcome)
-        case skipped(String)
+        /// Pixels weren't available locally — retryable once the network allows
+        /// the download.
+        case deferred(String)
+        /// Pixels were there and Vision failed anyway. Never retried as an
+        /// iCloud download, because the network was never the problem.
+        case failed(String)
     }
 
     /// Deferred (iCloud-only) records already retried this run session, so a
@@ -58,7 +183,14 @@ actor AnalysisQueue {
     /// Two passes: first every pending record, local resources only. Once none
     /// are pending, deferred iCloud-only records are retried with network
     /// downloads allowed — so local photos always finish first.
-    func processNextBatch() async throws -> Int? {
+    ///
+    /// `allowNetworkDownloads` is the caller's answer to FR-3.7: when the
+    /// user's network settings don't permit pulling originals down, the second
+    /// pass is skipped entirely and this returns nil once local work is done.
+    /// Deferred records then stay deferred, which is the honest state — the
+    /// caller distinguishes "finished" from "waiting on the network" by
+    /// whether any remain (FR-3.4).
+    func processNextBatch(allowNetworkDownloads: Bool) async throws -> Int? {
         let version = Thresholds.currentAnalysisVersion
         var descriptor = FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.analysisVersion < version }
@@ -67,7 +199,7 @@ actor AnalysisQueue {
         var batch = try modelContext.fetch(descriptor)
         var allowNetwork = false
 
-        if batch.isEmpty {
+        if batch.isEmpty && allowNetworkDownloads {
             let attempted = Array(attemptedNetworkRetries)
             var retryDescriptor = FetchDescriptor<PhotoRecord>(
                 predicate: #Predicate { $0.isSkipped && !attempted.contains($0.localIdentifier) }
@@ -100,11 +232,25 @@ actor AnalysisQueue {
                 record.horizonAngleDegrees = outcome.horizonAngleDegrees
                 record.horizonMeasured = true
                 record.isSkipped = false
+                record.analysisFailed = false
                 record.analysisVersion = version
                 record.analyzedAt = Date()
-            case .skipped(let id):
+            case .deferred(let id):
                 guard let record = byIdentifier[id] else { continue }
                 record.isSkipped = true
+                record.analysisFailed = false
+                record.analysisVersion = version
+                record.analyzedAt = Date()
+            case .failed(let id):
+                guard let record = byIdentifier[id] else { continue }
+                // Finished, not deferred: `isSkipped` stays false so this never
+                // enters the iCloud retry pass or the "waiting on iCloud"
+                // tally, and `analysisVersion` is stamped so the pending pass
+                // doesn't pick it up forever either. A version bump re-tries it,
+                // which is the right trigger — the analysis logic changing is
+                // the one thing that might make it succeed.
+                record.isSkipped = false
+                record.analysisFailed = true
                 record.analysisVersion = version
                 record.analyzedAt = Date()
             }
@@ -151,36 +297,49 @@ actor AnalysisQueue {
         stats.accepted = try count(#Predicate { $0.isNature })
         stats.utility = try count(#Predicate { $0.isUtility })
         stats.people = try count(#Predicate { $0.hasPeople })
+        // `analysisFailed` is excluded here too: a photo Vision couldn't read
+        // was never judged "not nature" — the app has no opinion about it.
         stats.notNature = try count(#Predicate {
-            $0.analysisVersion == version && !$0.isNature && !$0.isUtility && !$0.hasPeople && !$0.isSkipped
+            $0.analysisVersion == version && !$0.isNature && !$0.isUtility && !$0.hasPeople && !$0.isSkipped && !$0.analysisFailed
         })
         stats.skipped = try count(#Predicate { $0.isSkipped })
+        stats.failed = try count(#Predicate { $0.analysisFailed })
         return stats
     }
 
     // MARK: Per-asset work (off-actor; no model objects cross this boundary)
 
     private static func analyzeAsset(_ identifier: String, allowNetwork: Bool) async -> ItemResult {
+        // No pixels: genuinely waiting on a download, so deferrable.
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject,
               let image = await analysisBitmap(for: asset, allowNetwork: allowNetwork) else {
-            return .skipped(identifier)
+            return .deferred(identifier)
         }
         do {
             return .analyzed(identifier, try await ImageAnalyzer.analyze(image))
         } catch {
+            // The pixels were here and Vision still failed, so this is not an
+            // iCloud problem and must not be reported as one. Seen for real in
+            // the iOS Simulator, where CoreML has no ANE and every request
+            // fails with "Failed to create espresso context" — which the app
+            // used to present as ten photos waiting on iCloud, on a device with
+            // no iCloud account at all.
             log.error("Vision analysis failed for \(identifier, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return .skipped(identifier)
+            return .failed(identifier)
         }
     }
 
-    /// Requests a ≤1024 px analysis bitmap, center-cropped to the main display's
-    /// aspect ratio. In the local pass, iCloud-only originals return nil and the
-    /// record is deferred; the retry pass allows network downloads so deferred
-    /// photos are analyzed after all local ones.
+    /// Requests a ≤1024 px analysis bitmap, center-cropped to
+    /// `Thresholds.desktopAspectRatio`. In the local pass, iCloud-only
+    /// originals return nil and the record is deferred; the retry pass allows
+    /// network downloads so deferred photos are analyzed after all local ones.
     ///
-    /// Cropping before any Vision request is deliberate: macOS fills the desktop
-    /// with a center crop and the duels judge that same crop, so the ranker must
-    /// learn from the pixels the user will actually see — not the whole panorama.
+    /// Cropping before any Vision request is deliberate: the desktop is filled
+    /// with a center crop and the duels judge that same crop, so the ranker
+    /// must learn from the pixels the user will actually see — not the whole
+    /// panorama. The crop is the one fixed desktop shape rather than this
+    /// device's screen, so a record analyzed on an iPhone measures the same
+    /// rectangle as one analyzed on the Mac (FR-5.1).
     private static func analysisBitmap(for asset: PHAsset, allowNetwork: Bool) async -> CGImage? {
         let side = CGFloat(Thresholds.analysisPixelSize)
         guard let image = await PhotoImageLoading.image(
@@ -189,16 +348,7 @@ actor AnalysisQueue {
             contentMode: .aspectFit,
             allowNetwork: allowNetwork
         ) else { return nil }
-        return centerCropped(image, toAspect: mainDisplayAspectRatio)
-    }
-
-    /// Main display's aspect ratio (width / height). Read via CoreGraphics so it
-    /// is safe off the main actor; falls back to 16:10 when the bounds are
-    /// unavailable (e.g. headless) and would otherwise be zero.
-    private static var mainDisplayAspectRatio: CGFloat {
-        let bounds = CGDisplayBounds(CGMainDisplayID())
-        guard bounds.width > 0, bounds.height > 0 else { return 16.0 / 10.0 }
-        return bounds.width / bounds.height
+        return centerCropped(image, toAspect: Thresholds.desktopAspectRatio)
     }
 
     /// Center-crops `image` to `aspect` (width / height), trimming whichever

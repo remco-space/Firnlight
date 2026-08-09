@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    The sun, low in open sky at the upper left — the light source the whole
+    composition obeys. Bottom-most group in ../icon.json; nothing occludes it,
+    because the depth-by-occlusion work the old moon did from behind the ridge
+    is now carried by the glass face and the spectrum overlapping the dark
+    east flank (see light.svg).
+
+    Centre (140,260) r=100 clears both the ridge's left flank (still at x≈387
+    at this height) and the glass face's left edge, leaving a visible run of
+    beam before the light enters the glass: the beam in light.svg leaves this
+    disc's lower-right edge at 25° below horizontal, so the two files are
+    pinned together — move the disc and the beam's start point and angle must
+    be re-derived.
+
+    No radial spikes, deliberately: rays radiating from the disc read as
+    emission in every direction and would muddle the refraction story. The
+    single beam into the prism is the sun's ray; the disc only has to read
+    as the warm source.
+
+    Colour lives here, not in ../icon.json, as the exception the layer-fill
+    convention allows (see light.svg): a flat fill reads as a circle, a
+    sphere needs a ramp, and a layer fill takes exactly one colour. The
+    radial gradient — near-white core falling to a deep warm rim, its centre
+    pulled toward the beam's origin at the lower right — is what makes the
+    disc read as a glowing ball rather than a cut-out, so the layer in
+    ../icon.json deliberately has no fill override (adding one would flatten
+    it back to a circle).
+  -->
+  <defs>
+    <radialGradient id="sunBall" cx="0.58" cy="0.58" r="0.75">
+      <stop offset="0" stop-color="#FFFBEA"/>
+      <stop offset="0.45" stop-color="#FFE08A"/>
+      <stop offset="0.85" stop-color="#FFC252"/>
+      <stop offset="1" stop-color="#F5A93B"/>
+    </radialGradient>
+  </defs>
+  <circle cx="140" cy="260" r="100" fill="url(#sunBall)"/>
+</svg>

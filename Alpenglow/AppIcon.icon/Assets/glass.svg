@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    The glass prism: the lit west face of the main summit in range.svg,
+    rendered as transparent glass. Topmost group in ../icon.json ("Prism"),
+    where `refractivity`, `blur-material`, `translucency` and `specular` do
+    the optical work — the group sits in front of the light layer so the
+    system genuinely bends and blurs the beam and the in-glass ray behind
+    it, which is the icon's demonstration of FR-8.6's "light bending and
+    blurring as it passes through the glass".
+
+    Only the main face lives here. The shoulder summit's matching face is in
+    shoulder.svg, layered inside the Ridge group instead, because the two
+    sit at different depths: the shoulder peak is beyond the saddle, so the
+    spectrum fan — travelling toward the viewer across the east flank — must
+    pass in front of its glass, while the main face must stay in front of
+    the light it refracts. One group cannot be on both sides of the Light
+    group, so the faces split.
+
+    The triangle is bounded above by the summit's left edge, on the right by
+    the ridge line falling from its apex, and cut off flat below — the same
+    cuts the old warm "alpenglow" face used, because a lit face reaching the
+    ground reads as a two-tone pyramid, not as a cap of glass on a summit.
+
+    Apex (400,235) down the left edge to (190,650), back up the ridge at
+    x=400 — cut against range.svg's vertices and strictly inside it. This is
+    the face that disperses: light.svg's beam enters the left edge and the
+    spectrum exits on the ridge line, so the apex angle (~27°, between the
+    left edge and the vertical) is a physical input to light.svg's fan
+    geometry — the files move together.
+
+    White fill: the near-white glass tint lives on the layer's fill in
+    ../icon.json, like every other layer's colour.
+  -->
+  <path d="M 400,235 L 190,650 L 400,650 Z" fill="#FFFFFF"/>
+</svg>

@@ -1,12 +1,19 @@
 import Photos
 import Observation
 import os
+#if !os(macOS)
+import UIKit
+#endif
 
 /// Observable wrapper around the app's Photos authorization status.
 ///
-/// The app is read-only: it never writes to the library. PhotoKit, however,
-/// only exposes a read/write access level, so we request `.readWrite`; the
-/// read-only guarantee is enforced by simply never calling any write APIs.
+/// `.readWrite` is the level the app actually needs, not an over-ask forced by
+/// a coarse API: FR-1.4 sanctions exactly one kind of write, and
+/// `WallpaperAlbumSync` performs it — creating the wallpaper album and setting
+/// its membership. The user's photos themselves are never edited or deleted,
+/// which is a discipline of the code (that one file is the only write path)
+/// rather than something PhotoKit can enforce, since it offers no
+/// album-membership-only access level to ask for.
 @MainActor
 @Observable
 final class PhotoLibraryAuthorization {
@@ -38,5 +45,25 @@ final class PhotoLibraryAuthorization {
     /// Whether the app can read assets (full or limited selection).
     var isAuthorized: Bool {
         status == .authorized || status == .limited
+    }
+
+    /// The platform's own privacy settings for this app (FR-1.2, FR-1.8).
+    ///
+    /// macOS has a system-wide Photos privacy pane listing every app; iOS puts
+    /// each app's permissions on its own Settings page, which
+    /// `openSettingsURLString` addresses. Shared rather than duplicated
+    /// because two tabs need it: the Library tab's access states, and the
+    /// Export tab's limited-access notice.
+    ///
+    /// On iPhone and iPad this is also the *only* way to move from limited to
+    /// full access (FR-1.8). There is no API for it: `requestAuthorization`
+    /// never re-prompts once the status is determined, and
+    /// `presentLimitedLibraryPicker` only edits which photos are selected.
+    nonisolated static var settingsURL: URL? {
+        #if os(macOS)
+        URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Photos")
+        #else
+        URL(string: UIApplication.openSettingsURLString)
+        #endif
     }
 }

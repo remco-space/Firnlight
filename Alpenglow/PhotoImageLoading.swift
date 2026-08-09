@@ -1,5 +1,11 @@
-import AppKit
+import CoreGraphics
+import Foundation
 import Photos
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// Shared PHImageManager request, used by every image-loading call site
 /// (analysis bitmaps, grid thumbnails, duel cards). Cancels the underlying
@@ -49,7 +55,17 @@ nonisolated enum PhotoImageLoading {
                     contentMode: contentMode,
                     options: options
                 ) { image, _ in
+                    // The only place the app has to know which platform it is
+                    // on to load a photo: PhotoKit hands back the platform's
+                    // own image class (NSImage here, UIImage there) and offers
+                    // no CGImage-returning request at a target size, so the
+                    // unwrap differs even though everything downstream is
+                    // CGImage.
+                    #if os(macOS)
                     continuation.resume(returning: image?.cgImage(forProposedRect: nil, context: nil, hints: nil))
+                    #else
+                    continuation.resume(returning: image?.cgImage)
+                    #endif
                 }
                 requestBox.set(id)
             }

@@ -1,8 +1,53 @@
+import CoreGraphics
 import Foundation
 
 /// Every tunable magic number in the app lives here.
 /// `nonisolated`: plain constants, readable from any actor (the analysis pipeline runs off-main).
 nonisolated enum Thresholds {
+    // MARK: The desktop shape (FR-5.1)
+
+    /// Aspect ratio (width / height) of the wallpaper crop the app judges every
+    /// photo through: the analysis bitmap is cut to it, the duel cards show it,
+    /// and the grid tiles are drawn at it — so what the ranker learns, what the
+    /// user compared, and what the grid displays are all the same rectangle.
+    ///
+    /// Deliberately one fixed shape rather than the running display's. Until
+    /// 2026-07-25 this was read live from the main display (`NSScreen.main` in
+    /// the duel, `CGDisplayBounds` in analysis), which FR-5.1 no longer allows:
+    /// a choice made on an iPhone has to mean exactly what the same choice made
+    /// on the Mac means, and both devices score the same photo into one shared
+    /// ranking — a per-display crop would have them disagreeing about it. It
+    /// also made the Mac disagree with *itself* when the user moved the window
+    /// between a 16:9 external display and the built-in one.
+    ///
+    /// 16:10 because that is the shape of the built-in display on every Mac
+    /// Apple currently ships, which is where the wallpaper actually lands; it
+    /// was already this app's fallback whenever the display bounds couldn't be
+    /// read, and it sits between the 16:9 of most external displays and the
+    /// squarer 3:2-ish panels, so neither is badly misjudged.
+    static let desktopAspectRatio: CGFloat = 16.0 / 10.0
+
+    // MARK: The interface holding still (FR-8.7)
+
+    /// How long work has to run before the interface admits to waiting on it.
+    /// Anything that finishes sooner finishes silently — see the
+    /// `shownWhileWaiting` modifier, which every spinner in the app goes
+    /// through.
+    ///
+    /// Almost all of this app's waits are either far under this (a SwiftData
+    /// count, a cached thumbnail, recording one duel choice) or far over it (a
+    /// library scan, a Vision run, an iCloud download), so the exact value only
+    /// has to separate the two populations, not sit at a perceptual boundary.
+    /// 0.4 s is Apple's own long-standing spacing for this — it is what
+    /// `NSProgressIndicator`'s `usesThreadedAnimation` era shipped as the
+    /// delay before a spinner appears, and roughly what UIKit's refresh
+    /// controls settle at — and it is comfortably longer than a warm fetch
+    /// while still short enough that a real wait never feels unacknowledged.
+    ///
+    /// Erring low is the cheaper mistake here: showing a spinner slightly too
+    /// eagerly costs a flicker, whereas a long silent wait reads as a hang.
+    static let noticeableWaitDelay: Duration = .milliseconds(400)
+
     // MARK: Scan (Phase 2)
 
     /// Minimum pixel width for a wallpaper candidate. 3264 admits iPhone 5s-era
@@ -21,16 +66,50 @@ nonisolated enum Thresholds {
     /// Assets examined between progress updates and cooperative yields during a scan.
     static let scanProgressStride = 256
 
+    /// Photos per `cloudIdentifierMappings(forLocalIdentifiers:)` call when
+    /// resolving device-independent identifiers (FR-9.1).
+    ///
+    /// PhotoKit's header is blunt about the cost — "This method can be very
+    /// expensive so they should be used sparingly for batch lookup of all
+    /// needed identifiers" — so the call is made per chunk, never per photo.
+    /// It is also synchronous and blocking, which is why it runs off the main
+    /// actor. 500 balances the two failure modes: chunks too small pay the
+    /// per-call overhead repeatedly, while one unbounded call over a library
+    /// this size would block for an unpredictable stretch with no chance to
+    /// save partway. Chunking also lets each batch be persisted as it lands,
+    /// matching how the scan and analysis already checkpoint.
+    static let cloudIdentifierBatchSize = 500
+
     // MARK: Vision analysis (Phase 3)
 
     /// Bump when analysis logic changes; records with an older version are re-analyzed.
-    static let currentAnalysisVersion = 2 // v2 analyzes the display-aspect center crop
+    /// v3 is required: v2 cut its analysis bitmap to whatever the main display
+    /// happened to be, so records analyzed on a 16:9 display measured a
+    /// different rectangle than the fixed `desktopAspectRatio` crop the ranker
+    /// now assumes — and than the same photo would measure on another device.
+    static let currentAnalysisVersion = 3 // v3 analyzes the fixed desktopAspectRatio center crop
 
     /// Records analyzed and saved per batch; a killed app loses at most one batch.
     static let analysisBatchSize = 32
 
     /// Concurrent Vision pipelines within a batch.
     static let analysisConcurrency = max(1, min(4, ProcessInfo.processInfo.activeProcessorCount / 2))
+
+    /// How long a paused analysis run waits before re-testing the condition
+    /// that paused it — device heat, Low Power Mode, or a network the user's
+    /// settings don't allow downloads over (FR-3.6, FR-3.7).
+    ///
+    /// Polling rather than observing `thermalStateDidChangeNotification` /
+    /// `NSProcessInfoPowerStateDidChange` / `NWPathMonitor.pathUpdateHandler`:
+    /// the loop already has a natural checkpoint between batches, so a poll is
+    /// a `guard` there instead of three observers, their registrations, and the
+    /// actor hops to deliver them. 20s because none of these conditions clear
+    /// quickly — a hot device needs tens of seconds of reduced load to cool,
+    /// and Low Power Mode and network policy are user actions — so a shorter
+    /// interval would only burn wakeups restating the same answer, while a
+    /// longer one would leave the user staring at "waiting" well after the
+    /// cause cleared.
+    static let analysisPauseRecheckInterval: Duration = .seconds(20)
 
     /// Long-edge size of the analysis bitmap requested from PHImageManager. Never analyze full-res.
     static let analysisPixelSize = 1024
@@ -183,6 +262,104 @@ nonisolated enum Thresholds {
     /// Album ordering maximizes the minimum feature-print distance to this
     /// many previously placed photos, so consecutive wallpapers look different.
     static let albumDiversityWindow = 5
+
+    // MARK: The album-size scale (FR-6.3)
+
+    /// The smallest album the size slider offers — FR-6.3's "a handful of
+    /// photos". Ten is roughly a fortnight of daily desktops, below which the
+    /// album stops being a rotation at all; and the difference between three
+    /// and four is not worth track that has to reach the other end of a
+    /// library measured in thousands. The number field is held to the same
+    /// floor, so the two halves of the control cannot disagree about what the
+    /// smallest album is.
+    static let minimumWallpaperCount = 10
+
+    /// Leading digits of the round counts the slider marks: 10, 20, 50, 100,
+    /// 200, 500 … A 1-2-5 ladder is the standard round-number series for a
+    /// logarithmic axis, because its steps are near-evenly spaced in log space
+    /// (×2, ×2.5, ×2) — the marks land at even intervals along the track while
+    /// every label stays a number a person would say out loud. A 1-3 ladder
+    /// spaces more evenly still and reads worse; plain decades leave a gap of
+    /// a whole ×10 between marks, which is what `albumSizeMarkLimit` falls
+    /// back to only when the ladder gets crowded.
+    static let albumSizeMarkMantissas = [1, 2, 5]
+
+    /// How many round marks the slider may carry before it thins them to plain
+    /// decades. FR-6.3 asks for "a few labeled marks"; past six, their labels
+    /// start to touch in a narrow window, and a mark whose label is unreadable
+    /// is worse than no mark.
+    static let albumSizeMarkLimit = 6
+
+    /// Distance from the end of a slider's track to the centre of its thumb
+    /// when the thumb is parked there — the inset the app has to reproduce
+    /// both to line its own mark labels up with the ticks the system draws
+    /// (iPhone and iPad) and to know where any label will land when deciding
+    /// which ones fit (FR-8.11, both platforms).
+    ///
+    /// There is no API that reports it, so it is measured. iOS 27 simulator: a
+    /// 340pt track put its 0.0 and 1.0 ticks 17.5pt in from each end, which is
+    /// half the width of the thumb; verified by putting a label row under a
+    /// ticked slider and checking every label sat under its dot. macOS 27: the
+    /// same measurement off the Export card's own slider gives about 6pt, its
+    /// thumb being much the smaller. If a future thumb changes size these move
+    /// with it, and the symptom is labels drifting off their marks toward the
+    /// ends.
+    static let sliderTrackInset: CGFloat = {
+        #if os(macOS)
+        6
+        #else
+        17.5
+        #endif
+    }()
+
+    /// How much one VoiceOver or Full Keyboard Access step changes the album
+    /// size, as a multiple of the current count.
+    ///
+    /// A tenth, matching the proportional nudge FR-6.3 asks of the thumb: the
+    /// same press moves 20 to 22 and 2,000 to 2,200. A slider left to its own
+    /// devices steps by a tenth of its *range*, which on a logarithmic scale
+    /// is nearly a doubling — eleven or so counts reachable across a whole
+    /// library, which is no way to pick a number.
+    static let albumSizeAssistiveStep = 1.1
+
+    /// Diameter of the dots drawn under the size slider's track on iPhone and
+    /// iPad, where the app draws its own scale (see `ExportView.markScale`).
+    ///
+    /// Matched by eye to the ticks the system used to draw there, so the scale
+    /// reads the same as before the ticks had to go: small enough to be a mark
+    /// rather than a control, large enough to survive a Retina downscale.
+    static let albumSizeMarkDotSize: CGFloat = 3
+
+    /// Clear space demanded between two mark labels on the size slider before
+    /// they count as fitting side by side (FR-8.11).
+    ///
+    /// Six points is about the width of a space at these sizes: enough that
+    /// two labels read as two, and small enough that it costs no mark that
+    /// would genuinely have fitted. It is deliberately a length and not a
+    /// fraction of the track — the mistake that let "Suggested" print over
+    /// "1,000" on the iPad was measuring a collision in units that stretch
+    /// while the text does not.
+    static let albumSizeLabelGap: CGFloat = 6
+
+    /// How close to the suggestion's mark the thumb has to come, **in points
+    /// on screen**, before the mark catches it (FR-6.3's one exception; see
+    /// `AlbumSizeScale.detented`).
+    ///
+    /// A distance, not a share of the track, because what has to come within
+    /// reach is a fingertip or a pointer and neither grows with the window: a
+    /// share that catches nicely on a wide Mac is a couple of points on a
+    /// narrow iPhone, which no finger can hit.
+    ///
+    /// 12pt is a little under half Apple's 44pt minimum touch target — close
+    /// enough that a finger aiming at the mark lands inside it, and far enough
+    /// from the neighbouring round marks (which the scale never places nearer
+    /// than the width of their own labels) that nothing else is swallowed.
+    /// Erring large is the cheaper mistake: the exact count either side is a
+    /// keystroke away in the number field, while a catch too small to feel
+    /// leaves FR-6.4's "adopting it is moving the thumb onto the mark"
+    /// impossible to actually do.
+    static let albumSizeDetentReach: CGFloat = 12
+
 
     /// A photo is "nature" if any label in this allowlist meets the confidence threshold.
     /// Every entry is verified to exist in ClassifyImageRequest().supportedIdentifiers

@@ -45,6 +45,34 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
+# IconServices caches a rendered icon per bundle path and that cache goes stale:
+# the Dock keeps drawing the previous artwork (or the empty placeholder grid) for
+# a bundle whose icon has since changed. Rebuilding does not shift it, and
+# neither does `lsregister -f -R -trusted`; only deleting the icon store and
+# restarting its agent does. That deletion is machine-wide and the Dock restart
+# blinks every tile, so it is gated on the icon inputs actually having changed —
+# a hash of AppIcon.icon against a stamp kept beside the built product. The stamp
+# living in DerivedData is deliberate: wiping DerivedData yields a new bundle
+# path, which needs the clear anyway.
+ICON_SRC="Alpenglow/AppIcon.icon"
+ICON_STAMP="$(dirname "$APP_PATH")/.alpenglow-icon-hash"
+icon_hash() {
+  # -print0/sort -z keeps the order stable regardless of directory traversal;
+  # hashing the per-file digests folds names and contents into one value.
+  find "$ICON_SRC" -type f -print0 | LC_ALL=C sort -z \
+    | xargs -0 shasum -a 256 | shasum -a 256 | awk '{print $1}'
+}
+ICON_HASH="$(icon_hash)"
+if [[ "$ICON_HASH" != "$(cat "$ICON_STAMP" 2>/dev/null || true)" ]]; then
+  echo "==> icon changed — clearing IconServices cache (Dock will restart)"
+  CACHE_DIR="$(getconf DARWIN_USER_CACHE_DIR)"
+  CACHE_DIR="${CACHE_DIR%/}"
+  rm -rf "$CACHE_DIR"/com.apple.iconservicesagent* "$CACHE_DIR"/com.apple.iconservices
+  killall iconservicesagent 2>/dev/null || true
+  killall Dock 2>/dev/null || true
+  printf '%s\n' "$ICON_HASH" >"$ICON_STAMP"
+fi
+
 echo "==> Quitting running $APP_NAME (if any)…"
 osascript -e "tell application \"$APP_NAME\" to quit" 2>/dev/null || true
 # Fall back to a hard kill for anything the graceful quit didn't catch, then

@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    The light: one straight beam from the sun into the main summit's glass
+    face, the ray crossing inside the glass, and the spectrum it disperses
+    into on the far side. Second group from the front in ../icon.json
+    ("Light"), drawn with `plus-lighter` so everything here adds light over
+    what is behind it instead of painting on it, and sitting *behind* the
+    glass group so the prism's `refractivity` bends and blurs the in-glass
+    stretch for real.
+
+    Straight, not curved — the reverse of the old ribbon's ruling. Straight
+    rays from a point read as a sunburst (emission), but these rays do not
+    radiate from the sun: one beam goes in, a fan comes out of a visible
+    prism, and that before/after is exactly what reads as refraction.
+
+    Faux physics, kept honest: the main face's apex angle is fixed by
+    glass.svg at A≈27° (left edge (400,235)–(190,650) against the vertical
+    ridge line). For crown glass, n=1.5, minimum deviation is
+    δ = 2·asin(n·sin(A/2)) − A ≈ 14°, so the beam arrives at 25° below
+    horizontal and the fan's centreline leaves at 39°. Real dispersion would
+    open the fan only 1–2°, invisible at icon size, so dispersion alone is
+    exaggerated ~×15 to a 28° opening (27°…55°); the mean stays true to
+    n=1.5. Red deviates least (top of fan), violet most (bottom).
+
+    The beam is three nested quads on one centreline — soft halo, mid, and a
+    bright core — because a single solid bar reads as a stick, not a glint:
+    the stepped opacities under `plus-lighter` fake the luminous falloff a
+    real shaft of light has. It runs from just inside the sun's lower-right
+    edge (disc (140,260) r=100 in sun.svg) at 25° to the entry point
+    (340,354) on the glass left edge. There the in-glass wedge takes over,
+    crossing the prism from the entry footprint to the exit segment x=400,
+    y=378–422 on the ridge line; it overlaps the beam's end, and the
+    `plus-lighter` sum of the two is the bright glint at the entry face. The
+    wedge is drawn behind the glass, so the face's refractivity and blur act
+    on it — the light is visibly *inside* the prism.
+
+    All six bands share that full exit segment and diverge from it, so near
+    the prism they overlap — which `plus-lighter` sums back toward white,
+    exactly as an unseparated spectrum should — and only apart do they
+    resolve into colours. Bands touch rather than sit apart for the same
+    16pt reason as ever: separated bands smear into noise small, one
+    contiguous fan still reads as a single shape.
+
+    Six colours, ROYGBV: Newton's seven minus indigo, which nothing at icon
+    size can distinguish. The old five-band palette had no green and read as
+    warm tints, not a spectrum; a prism demands green. Colours live here
+    rather than in a layer fill because a layer takes one fill and this needs
+    many. They run warm to cool down the fan, so the luminance ramp alone
+    still reads as light in the tinted and clear appearances.
+  -->
+  <path d="M 235,269 L 354,325 L 327,383 L 208,327 Z" fill="#FFF0C4" fill-opacity="0.22"/>
+  <path d="M 230,278 L 349,334 L 331,374 L 212,318 Z" fill="#FFF0C4" fill-opacity="0.45"/>
+  <path d="M 226,288 L 345,344 L 335,364 L 216,308 Z" fill="#FFF7DE" fill-opacity="0.9"/>
+  <path d="M 353,329 L 400,378 L 400,422 L 327,379 Z" fill="#FFF3D6" fill-opacity="0.9"/>
+  <path d="M 400,378 L 1202,787 L 1166,894 L 400,422 Z" fill="#FF5A52" fill-opacity="0.65"/>
+  <path d="M 400,378 L 1166,850 L 1125,955 L 400,422 Z" fill="#FF9E4D" fill-opacity="0.65"/>
+  <path d="M 400,378 L 1125,911 L 1079,1012 L 400,422 Z" fill="#FFD54F" fill-opacity="0.65"/>
+  <path d="M 400,378 L 1079,968 L 1029,1066 L 400,422 Z" fill="#6EDC85" fill-opacity="0.65"/>
+  <path d="M 400,378 L 1029,1022 L 974,1115 L 400,422 Z" fill="#5FAEF0" fill-opacity="0.65"/>
+  <path d="M 400,378 L 974,1071 L 916,1159 L 400,422 Z" fill="#A97FE8" fill-opacity="0.65"/>
+</svg>
