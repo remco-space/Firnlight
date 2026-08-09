@@ -52,6 +52,12 @@ __pycache__/
 .claude/settings.local.json
 .claude/**/*.local.json
 
+# ---- Claude Code skills obtained, not vendored (FR-10.5) ----
+# Regenerated from the local Xcode toolchain by
+# .claude/hooks/apple-skills-export.sh — see .claude/skills/README.md.
+.claude/skills/swiftui-specialist/
+.claude/skills/swiftui-whats-new-27/
+
 # ---- Editor / misc ----
 *.swp
 *~

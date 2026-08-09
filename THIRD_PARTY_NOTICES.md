@@ -1,14 +1,19 @@
 # Third-party notices
 
-This repository vendors a small number of Claude Code skill files under
-`.claude/skills/`. Their provenance and license are tracked in
-[`.claude/skills/README.md`](.claude/skills/README.md); this file carries the
-copyright notices their licenses require to travel with the copy.
+This repository does not vendor third-party skill content (FR-10.5): every
+skill under `.claude/skills/` that isn't first-party is a symlink into a git
+submodule, or generated locally from the developer's own Xcode install —
+see [`.claude/skills/README.md`](.claude/skills/README.md) for the mechanism
+and provenance table. Nothing there is redistributed by this repository's
+own git history. This file exists because MIT still requires its copyright
+notice to travel with anyone who ends up with a copy of the code — including
+a submodule checkout most contributors won't open by hand.
 
 ## `ui-review-tahoe`, `liquid-glass`
 
 Source: [rshankras/claude-code-apple-skills](https://github.com/rshankras/claude-code-apple-skills),
-vendored as a point-in-time copy.
+obtained via the `.claude/skills-src/claude-code-apple-skills` git submodule
+(pinned to its `pre-overhaul-2026-07` tag), not copied into this repository.
 
 ```
 MIT License
@@ -39,9 +44,9 @@ SOFTWARE.
 ## `ios-localization`, `swift-concurrency`, `app-store-review`
 
 Source: [dpearson2699/swift-ios-skills](https://github.com/dpearson2699/swift-ios-skills),
-pulled in as the `.claude/skills-src/swift-ios-skills` git submodule (not
-vendored — cloning this repository with submodules fetches that upstream
-repository directly, under its own license).
+obtained via the `.claude/skills-src/swift-ios-skills` git submodule — not
+vendored, so cloning this repository with submodules fetches that upstream
+repository directly, under its own license.
 
 ```
 Required Notice: Copyright (c) 2025 dpearson2699 (https://github.com/dpearson2699)
@@ -56,8 +61,13 @@ a Claude Code skills collection, so this applies without restriction here.
 
 ## `swiftui-specialist`, `swiftui-whats-new-27`
 
-Source: Apple, exported from Xcode 27 via `xcrun agent skills export`, per
-[`.claude/skills/README.md`](.claude/skills/README.md). No license or
-redistribution terms accompanied this export. **This has not been cleared
-for redistribution** — see the open item in the project's compliance
-tracking before treating this repository as fully public-safe.
+Source: Apple, generated locally on each developer's own machine by
+`.claude/hooks/apple-skills-export.sh` running `xcrun agent skills export`
+against their own licensed Xcode 27 install. These directories are
+gitignored and never enter this repository's git history — the previous
+version of this project vendored a point-in-time copy of Apple's export
+output, which was a redistribution-rights question with no clear answer;
+switching to generating it fresh, locally, from tooling every contributor
+building this project already has removes the question rather than
+answering it. There is nothing to attribute here because nothing from Apple
+is ever committed.

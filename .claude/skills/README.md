@@ -4,32 +4,40 @@ These skills apply only to Alpenglow. Claude Code discovers them at startup —
 after adding or changing skills here, restart Claude Code (or `/clear`) to pick
 them up.
 
-Two provenance styles are in use, deliberately:
+Nothing here is vendored (FR-10.5): no third-party skill content is tracked
+in this repository, whatever its license. Every skill under `.claude/skills/`
+is either first-party (written for this project) or a symlink obtained at
+session start from wherever its author publishes it. Two provenance styles
+cover the obtained ones:
 
-- **Vendored** (plain directories, checked in as-is): a point-in-time copy,
-  refreshed by hand when its upstream changes. Used where "auto-update" would
-  mean silently swapping in content that hasn't been reviewed (Apple's own
-  exports, or a skill whose exact wording this project depends on).
-- **Live symlink into a submodule** (`swift-ios-skills-*` rows below): the
-  target lives in the `.claude/skills-src/swift-ios-skills` git submodule,
-  which `.claude/hooks/skills-submodule-update.sh` advances to upstream's
+- **Live symlink into a submodule** (`swift-ios-skills` and
+  `claude-code-apple-skills` rows below): the target lives in a
+  `.claude/skills-src/*` git submodule, which
+  `.claude/hooks/skills-submodule-update.sh` advances to that submodule's
   latest **tagged release** (not the branch tip) on every `SessionStart`
   (wired via the committed `.claude/settings.json`). SKILL.md content loads
   straight into the assistant's context as instructions, so the hook bounds
   exposure to named releases the upstream maintainer stood behind rather than
   arbitrary commits. These stay current with no manual refresh step; if a
-  release ever regresses, `git -C .claude/skills-src/swift-ios-skills log
-  --oneline` shows what changed and `git checkout <tag>` in that submodule
-  pins it back.
+  release ever regresses, `git -C .claude/skills-src/<name> log --oneline`
+  shows what changed and `git checkout <tag>` in that submodule pins it back.
+- **Exported fresh from the local Xcode toolchain** (`swiftui-specialist`,
+  `swiftui-whats-new-27`): Apple's own content, published only via
+  `xcrun agent skills export`, not a repository — there's nothing to point a
+  submodule at. `.claude/hooks/apple-skills-export.sh` runs that command on
+  `SessionStart` whenever the two directories are missing (a fresh clone, or
+  after switching Xcode versions) and copies its output into place. Both
+  directories are gitignored, so what's on disk always came from *this*
+  machine's own licensed Xcode install, never from git.
 
 ## Provenance
 
 | Skill | Source | License | Notes |
 |-------|--------|---------|-------|
-| `swiftui-specialist` | Apple, exported from Xcode 27 (`xcrun agent skills export`) | Apple toolchain | Authoritative SwiftUI patterns/perf. Vendored. |
-| `swiftui-whats-new-27` | Apple, exported from Xcode 27 | Apple toolchain | SDK 27 SwiftUI changes (e.g. `@State` → macro). Vendored. |
-| `ui-review-tahoe` | [rshankras/claude-code-apple-skills](https://github.com/rshankras/claude-code-apple-skills) | MIT | macOS UI/UX + HIG-compliance review. Vendored. |
-| `liquid-glass` | [rshankras/claude-code-apple-skills](https://github.com/rshankras/claude-code-apple-skills) | MIT | `.glassEffect()` design language, macOS 27. Vendored. |
+| `swiftui-specialist` | Apple, exported from Xcode 27 (`xcrun agent skills export`) | Apple toolchain | Authoritative SwiftUI patterns/perf. Obtained at session start, gitignored. |
+| `swiftui-whats-new-27` | Apple, exported from Xcode 27 | Apple toolchain | SDK 27 SwiftUI changes (e.g. `@State` → macro). Obtained at session start, gitignored. |
+| `ui-review-tahoe` | [rshankras/claude-code-apple-skills](https://github.com/rshankras/claude-code-apple-skills), `skills/macos/ui-review-tahoe` | MIT | macOS UI/UX + HIG-compliance review. Submodule symlink, auto-updates. |
+| `liquid-glass` | [rshankras/claude-code-apple-skills](https://github.com/rshankras/claude-code-apple-skills), `skills/design/liquid-glass` | MIT | `.glassEffect()` design language, macOS 27. Submodule symlink, auto-updates. |
 | `photokit` | [dpearson2699/swift-ios-skills](https://github.com/dpearson2699/swift-ios-skills) | see upstream repo | PhotosPicker/PHPhotoLibrary/media permissions — core to the scan/pick pipeline. Auto-updates. |
 | `vision-framework` | dpearson2699/swift-ios-skills | see upstream repo | Modern Vision API, relevant to `ImageAnalyzer`. Auto-updates. |
 | `swiftdata` | dpearson2699/swift-ios-skills | see upstream repo | `@Model`/`@Query`/migrations. Auto-updates. |
@@ -41,7 +49,13 @@ Two provenance styles are in use, deliberately:
 | `swift-concurrency` | dpearson2699/swift-ios-skills | see upstream repo | Sendable/actor isolation, Swift 6 strict concurrency. Auto-updates. |
 | `app-store-review` | dpearson2699/swift-ios-skills | see upstream repo | Submission readiness, privacy manifest — relevant once FR-10's manual release process gives way to distribution. Auto-updates. |
 
-To refresh the Apple/HIG-derived vendored skills after an Xcode or upstream
-update, re-run `xcrun agent skills export` (Apple) or re-copy from source
-(rshankras) over these folders by hand. The `swift-ios-skills`-sourced skills
-need no manual step — see the submodule note above.
+`ui-review-tahoe` and `liquid-glass` are pinned to `claude-code-apple-skills`'
+`pre-overhaul-2026-07` tag — its only other tag (`wwdc25-era-final`) predates
+it; there is no numbered-release scheme on that repo yet, so
+`skills-submodule-update.sh` ranks tags by creation date rather than parsing
+them as semver (unlike the `v*`-tagged `swift-ios-skills`).
+
+License notices this vendoring-free setup still owes their authors —
+`ui-review-tahoe` and `liquid-glass` are MIT, which requires the notice to
+travel with copies even when the "copy" is a submodule most users won't open
+— live in [`../../THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md).
