@@ -115,14 +115,17 @@ final class ContinuedAnalysisTask {
             // runner's Xcode 26.6 reports it as "renamed to submit(_:),
             // obsoleted in Swift 3" — an apinotes rename diagnostic landing
             // on an unresolved name, not a real Swift-3-era API). `#if
-            // compiler(>=6.3)` gates the whole runtime-branching statement at
-            // the toolchain boundary — Xcode 26.6 ships Swift 6.2, Xcode 27
-            // ships Swift 6.4 — so it's only even parsed when compiling with
-            // a toolchain new enough to declare the symbol; the 26-toolchain
-            // build (every release build until the project's floor moves to
-            // 27) falls straight to submit(_:), same as the runtime fallback
-            // above already did for pre-27 devices.
-            #if compiler(>=6.3)
+            // compiler(>=6.4)` gates the whole runtime-branching statement at
+            // the toolchain boundary — Xcode 27 ships exactly Swift 6.4
+            // (confirmed locally); an earlier attempt at `>=6.3` still
+            // matched Xcode 26.6's compiler and had to be raised, so 6.4 is
+            // the verified floor, not merely a plausible one — it's only even
+            // parsed when compiling with a toolchain new enough to declare
+            // the symbol; the 26-toolchain build (every release build until
+            // the project's floor moves to 27) falls straight to submit(_:),
+            // same as the runtime fallback above already did for pre-27
+            // devices.
+            #if compiler(>=6.4)
             if #available(iOS 27, *) {
                 try await BGTaskScheduler.shared.submitTaskRequest(request)
             } else {

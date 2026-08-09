@@ -104,9 +104,11 @@ enum RunConditions {
     /// `#available` guard — it isn't declared at all in the iOS 26 SDK
     /// (`API_AVAILABLE(ios(27.0)...)`), so a compiler built against that SDK
     /// can't resolve the symbol regardless of the runtime check. `#if
-    /// compiler(>=6.3)` gates it at the toolchain, not the OS, boundary:
-    /// Xcode 26.6 (the CI release runner today) ships Swift 6.2, Xcode 27
-    /// ships Swift 6.4, so 6.3 sits cleanly between them. A build made with
+    /// compiler(>=6.4)` gates it at the toolchain, not the OS, boundary:
+    /// Xcode 27 ships exactly Swift 6.4 (confirmed locally), and 6.4 is high
+    /// enough to exclude Xcode 26.6 (the CI release runner as of this
+    /// writing) regardless of its precise point version — an earlier attempt
+    /// at `>=6.3` still matched 26.6 and had to be raised. A build made with
     /// the 26 toolchain — every release build until the project's floor
     /// moves to 27 — simply omits the bonus check; FR-3.6's actual
     /// requirements (thermal state, Low Power Mode) are unconditional below
@@ -114,7 +116,7 @@ enum RunConditions {
     /// toolchain moves to 27.
     static func pauseReason() -> AnalysisWait? {
         #if os(iOS)
-        #if compiler(>=6.3)
+        #if compiler(>=6.4)
         if #available(iOS 27, *), UIApplication.shared.systemPrefersReducedResourceUsage {
             return .systemBusy
         }
