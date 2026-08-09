@@ -113,13 +113,13 @@ right-click → Open, or `xattr -cr Alpenglow.app`.
 CI: the app targets the 26-era OS releases (see the brief's opening), which
 GitHub-hosted `macos-26` runners (Xcode 26.x, GA since Feb 2026) can build.
 Release builds come from GitHub Actions on that image, so what ships is
-built against the same SDK generation users run — not from this Mac, which
-is on the macOS 27 beta and can only run the Xcode 27 beta (a newer macOS
-refuses to launch older Xcodes, IDE and `xcodebuild` alike; local
-development here therefore stays on Xcode 27, building *for* 26). A CI run
-on that runner image is also the authoritative check that the project
-really builds with Xcode 26 — local builds on this machine cannot prove
-that.
+built against the same SDK generation users run — not from a development
+machine that has moved on to a newer macOS/Xcode beta, since a newer macOS
+refuses to launch older Xcodes (IDE and `xcodebuild` alike); local
+development on such a machine therefore stays on the newer Xcode, building
+*for* 26. A CI run on that runner image is also the authoritative check
+that the project really builds with Xcode 26 — a beta-pinned local machine
+cannot prove that.
 
 File formats to use, once built: `LICENSE` follows
 [choosealicense.com/licenses/mit](https://choosealicense.com/licenses/mit/);
@@ -187,9 +187,10 @@ open Alpenglow.xcodeproj
 
 Requires the full **Xcode 27+** toolchain, not the Command Line Tools. If
 `xcodebuild` errors with *"requires Xcode, but active developer directory …
-is a command line tools instance"*, the CLT are selected. This machine manages
-Xcode via the Xcodes app, so the exact path varies — select the full Xcode
-permanently with `sudo xcode-select -s /Applications/Xcode<version>.app/Contents/Developer`,
+is a command line tools instance"*, the CLT are selected. The exact install
+path depends on how Xcode is managed on the machine (Xcodes app, direct
+download, App Store) — select the full Xcode permanently with
+`sudo xcode-select -s /Applications/Xcode<version>.app/Contents/Developer`,
 or override for one command without sudo via
 `DEVELOPER_DIR=/Applications/Xcode<version>.app/Contents/Developer xcodebuild …`.
 
@@ -311,7 +312,7 @@ killall iconservicesagent; killall Dock
 
 Validate and preview from the command line — there is no need to open the GUI:
 ```bash
-ICT="/Applications/Xcode-27.0.0-Beta.4.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool"
+ICT="/Applications/Xcode<version>.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool"
 # Diagnostics (empty array == valid):
 "$ICT" Alpenglow/AppIcon.icon --export-intermediate-representation --output-directory /tmp/ir --platform macOS
 # Render one of Default/Dark/ClearLight/ClearDark/TintedLight/TintedDark:
