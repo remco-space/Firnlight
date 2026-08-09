@@ -110,12 +110,16 @@ signed enough to run, but Gatekeeper still blocks first launch as "Apple
 cannot check it for malicious software" (FR-10.2); the fix users need is
 right-click → Open, or `xattr -cr Alpenglow.app`.
 
-CI is currently blocked, not absent by choice: GitHub-hosted macOS runners
-are on the `macos-26` image (Xcode 26.0–26.3 as of its Aug 2026 GA) and don't
-carry the Xcode 27 beta this project requires, so a GitHub Actions build
-would fail today. Releases are built manually from this Mac's Xcode 27
-install until `actions/runner-images` ships Xcode 27 GA — revisit
-Actions-based automation then.
+CI: the app targets the 26-era OS releases (see the brief's opening), which
+GitHub-hosted `macos-26` runners (Xcode 26.x, GA since Feb 2026) can build.
+Release builds come from GitHub Actions on that image, so what ships is
+built against the same SDK generation users run — not from this Mac, which
+is on the macOS 27 beta and can only run the Xcode 27 beta (a newer macOS
+refuses to launch older Xcodes, IDE and `xcodebuild` alike; local
+development here therefore stays on Xcode 27, building *for* 26). A CI run
+on that runner image is also the authoritative check that the project
+really builds with Xcode 26 — local builds on this machine cannot prove
+that.
 
 File formats to use, once built: `LICENSE` follows
 [choosealicense.com/licenses/mit](https://choosealicense.com/licenses/mit/);
