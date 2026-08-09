@@ -92,13 +92,18 @@ enum RunConditions {
     ///
     /// iOS only, because the requirement is: a Mac pausing its own analysis
     /// because it is warm would be surprising behaviour no requirement asks
-    /// for. `systemPrefersReducedResourceUsage` (new in 27) is checked first
-    /// as the system's own aggregate judgement; thermal state and Low Power
-    /// Mode are the specific conditions FR-3.6 names, kept because the
-    /// aggregate signal is not documented to cover both.
+    /// for. `systemPrefersReducedResourceUsage` (new in 27) is checked first,
+    /// where available, as the system's own aggregate judgement; thermal
+    /// state and Low Power Mode are the specific conditions FR-3.6 names,
+    /// checked unconditionally on every supported iOS version because the
+    /// aggregate signal is not documented to cover both — the deployment
+    /// target is 26 (REQUIREMENTS.md's opening), so the 27-only signal is a
+    /// bonus on newer devices, not something FR-3.6 depends on.
     static func pauseReason() -> AnalysisWait? {
         #if os(iOS)
-        if UIApplication.shared.systemPrefersReducedResourceUsage { return .systemBusy }
+        if #available(iOS 27, *), UIApplication.shared.systemPrefersReducedResourceUsage {
+            return .systemBusy
+        }
         switch ProcessInfo.processInfo.thermalState {
         case .serious, .critical: return .deviceHot
         default: break

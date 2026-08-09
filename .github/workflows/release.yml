@@ -1,0 +1,124 @@
+name: Release
+
+# Builds the distributable, ad-hoc-signed app (FR-10.2) on the macos-26
+# runner image — the same SDK generation the brief promises users (macOS/iOS
+# 26+) — and publishes it to GitHub Releases (FR-10.1), never gated behind a
+# build step the user has to run themselves.
+#
+# Ad-hoc signing (CODE_SIGN_IDENTITY=-, no team) is deliberate, not a
+# shortcut: this project has no Developer ID and no notarization (see
+# CLAUDE.md's Release process), so nothing here needs the maintainer's own
+# signing certificate as a repository secret — a plain ad-hoc signature is
+# exactly what a downloaded build already ships with today. Gatekeeper still
+# blocks first launch either way (FR-10.2); that instruction is in the
+# release body below, not worked around here.
+#
+# Triggered by pushing a tag of the form vMAJOR.MINOR.PATCH, matching
+# MARKETING_VERSION (FR-8.9) — never released ahead of or behind what that
+# build setting says (FR-10.3).
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  release:
+    runs-on: macos-26
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode 26
+        run: |
+          XCODE_PATH="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)"
+          if [ -z "$XCODE_PATH" ]; then
+            echo "::error::No Xcode 26.x found on this runner image (checked /Applications/Xcode_26*.app)"
+            find /Applications -maxdepth 1 -iname "*xcode*"
+            exit 1
+          fi
+          echo "Selecting $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+
+      - name: Verify tag matches MARKETING_VERSION
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          # Belt-and-braces for FR-10.3: refuse to publish a release whose
+          # tag disagrees with the version the built app will actually
+          # report (Alpenglow-Info.plist / About.swift read MARKETING_VERSION
+          # back at runtime — see CLAUDE.md's versioning section).
+          PROJECT_VERSION="$(xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow \
+            -configuration Release -showBuildSettings 2>/dev/null \
+            | awk -F' = ' '/ MARKETING_VERSION / { print $2; exit }')"
+          EXPECTED_TAG="v${PROJECT_VERSION}"
+          if [ "$TAG_NAME" != "$EXPECTED_TAG" ]; then
+            echo "::error::Tag $TAG_NAME does not match MARKETING_VERSION $PROJECT_VERSION (expected tag $EXPECTED_TAG)"
+            exit 1
+          fi
+
+      - name: Build (ad-hoc signed)
+        run: |
+          xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow \
+            -configuration Release -destination "platform=macOS" \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM= \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            build
+
+      - name: Package
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          APP_PATH="$(
+            xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow -configuration Release \
+              -showBuildSettings 2>/dev/null \
+            | awk -F' = ' '
+                / BUILT_PRODUCTS_DIR / { dir = $2 }
+                / FULL_PRODUCT_NAME /   { name = $2 }
+                END { if (dir && name) print dir "/" name }
+            '
+          )"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::Built app not found at $APP_PATH"
+            exit 1
+          fi
+          ZIP_NAME="Alpenglow-${TAG_NAME}.zip"
+          # ditto, not zip: preserves the app bundle's resource forks and
+          # extended attributes the way Finder's "Compress" does.
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_NAME"
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+
+      - name: Extract changelog entry for this version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          # Pull the section between this version's heading and the next
+          # "## [" heading out of CHANGELOG.md (FR-10.3: every release
+          # carries a changelog entry the user can read before updating).
+          awk -v ver="## [$VERSION]" '
+            $0 == ver { found=1; print; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::No CHANGELOG.md entry found for version $VERSION (expected a '## [$VERSION]' heading)"
+            exit 1
+          fi
+
+      - name: Publish release
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: ${{ env.TAG_NAME }}
+          body_path: release-notes.md
+          files: ${{ env.ZIP_NAME }}

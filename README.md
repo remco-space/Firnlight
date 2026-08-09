@@ -5,7 +5,7 @@ high-resolution nature photos without people, learns your taste from quick
 pairwise duels, and maintains a Photos album — "Alpenglow" — that System
 Settings can rotate as your wallpaper. Everything runs on-device.
 
-It runs on macOS 27 and, as a companion, on iPhone and iPad on iOS 27. The Mac
+It runs on macOS 26+ and, as a companion, on iPhone and iPad on iOS 26+. The Mac
 is the only place wallpaper actually gets set; on iPhone and iPad, Alpenglow
 finds, learns, and curates into the same album, which syncs to the Mac.
 
@@ -47,7 +47,10 @@ the pipeline:
 
 ## Building from source
 
-Requires the full Xcode 27+ toolchain (not just the Command Line Tools):
+Requires the full Xcode 26+ toolchain (not just the Command Line Tools) —
+Xcode 26 is what CI builds against, matching the app's macOS/iOS 26+ target;
+see [CLAUDE.md](CLAUDE.md) for why this project's own development machine
+runs a newer beta instead:
 
 ```bash
 git clone --recurse-submodules <this-repo-url>

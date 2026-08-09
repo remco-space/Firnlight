@@ -11,3 +11,11 @@ not written retroactively from git history — and moved under a version
 heading when that version is released (FR-10.3).
 
 ## [Unreleased]
+
+### Changed
+
+- Lowered the supported platforms to macOS 26+ and iOS 26+ (was 27+), so the
+  app runs on the currently released system rather than only pre-release
+  seeds. Release builds now come from GitHub Actions on the matching
+  `macos-26` runner image instead of a local machine, so what ships is
+  built against the same SDK generation it targets.

@@ -102,7 +102,17 @@ final class ContinuedAnalysisTask {
         request.strategy = .queue
 
         do {
-            try await BGTaskScheduler.shared.submitTaskRequest(request)
+            // The async, completion-handler-backed submitTaskRequest(_:) is
+            // iOS 27+ only; the deployment target is 26 (REQUIREMENTS.md's
+            // opening), so submit(_:) — the same request type, still present
+            // though deprecated as of 27 in favor of the async one — is the
+            // fallback down to 26. Both report failure the same way to this
+            // call site: a thrown error, handled identically below.
+            if #available(iOS 27, *) {
+                try await BGTaskScheduler.shared.submitTaskRequest(request)
+            } else {
+                try BGTaskScheduler.shared.submit(request)
+            }
         } catch {
             Self.log.error("Background analysis not started (\(error.localizedDescription, privacy: .public)); continuing in the foreground only")
         }
