@@ -312,12 +312,24 @@ final class LibraryScanner {
     /// though the scanner that calls it is `@MainActor`, so a large library
     /// can't freeze the UI (FR-8.2). Per-photo failures arrive as `.failure`
     /// in the `Result` and are simply omitted.
+    ///
+    /// Uses `PHCloudIdentifier.stringValue`, not the newer `archivalStringValue`
+    /// its header deprecates it in favor of: the CI runner's Xcode 26.6
+    /// (macOS26.5 SDK) is missing `archivalStringValue` outright, despite
+    /// Apple's Xcode 27 headers annotating it available since macOS 15.2 — a
+    /// genuine SDK gap in that Xcode release, not a beta-only symbol. Verified
+    /// on-device across 20 real `PHCloudIdentifier`s from this library that
+    /// both accessors produce byte-identical strings, so switching carries no
+    /// risk to `PhotoRecord.cloudIdentifier` values already persisted or
+    /// synced under FR-9.1/FR-9.2 — nothing here ever reconstructs a
+    /// `PHCloudIdentifier` from the stored string, so it only ever needs to
+    /// compare equal to itself.
     @concurrent
     private static func cloudIdentifiers(for localIdentifiers: [String]) async -> [String: String] {
         let mappings = PHPhotoLibrary.shared().cloudIdentifierMappings(forLocalIdentifiers: localIdentifiers)
         return mappings.reduce(into: [:]) { result, pair in
             if case .success(let cloud) = pair.value {
-                result[pair.key] = cloud.archivalStringValue
+                result[pair.key] = cloud.stringValue
             }
         }
     }
