@@ -5,7 +5,9 @@ finds high-resolution nature photos without people, learns the user's personal
 taste from quick pairwise comparisons, and maintains a Photos album that System
 Settings can rotate as wallpaper.
 
-It runs on macOS 27, and on iPhone and iPad on iOS 27; nothing earlier. The Mac
+It runs on macOS 26 and later, and on iPhone and iPad on iOS 26 and later;
+nothing earlier — a user on the current released system, not just on
+pre-release seeds, can run it. The Mac
 is where wallpaper happens: only there does the album become
 the desktop. On iPhone and iPad Alpenglow is a companion — the same finding,
 learning and curating, feeding the same album — but it never sets wallpaper.
