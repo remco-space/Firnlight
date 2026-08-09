@@ -45,30 +45,47 @@ the **`ui-review-tahoe`** checklist and against section 8 of `REQUIREMENTS.md`
 complete, and when a native-feel defect slips through anyway, add the missing
 class of rule to section 8 as part of the fix (that is how FR-8.7 came to be).
 
-## Framework skills (project-scoped, some auto-updating)
+## Framework skills (project-scoped, none tracked in git — FR-10.5)
 
-`.claude/skills/` carries, alongside the UI skills above, ten framework skills
-vendored via a live symlink into the `.claude/skills-src/swift-ios-skills` git
-submodule ([dpearson2699/swift-ios-skills](https://github.com/dpearson2699/swift-ios-skills)):
-`photokit`, `vision-framework`, `swiftdata`, `swiftui-patterns`,
-`swiftui-uikit-interop`, `background-processing`, `ios-accessibility`,
-`ios-localization`, `swift-concurrency`, `app-store-review`. A `SessionStart`
-hook (`.claude/hooks/skills-submodule-update.sh`) advances that submodule to
-upstream's latest **tagged release** every session — not the branch tip,
-since SKILL.md content loads straight into context as instructions and a
-release tag is a bounded, named point rather than an arbitrary unreviewed
-commit. These stay current with no manual step — see `.claude/skills/README.md`
-for the full provenance table and how to pin a revision if a release ever
-regresses.
+`.claude/skills/` carries, alongside first-party skills, a set of
+third-party ones — none of them committed to this repository, whatever
+their license. Two mechanisms obtain them fresh instead:
 
-That upstream repo has ~86 skills, one per Apple framework/topic; only the
-ones this app actually touches were added, deliberately, not the whole set.
-**When a change adds a new framework or platform capability** (a new
-`import`, a new App Store surface, a new Apple framework), check that repo's
-skill list for a matching one before writing the feature from scratch, and if
-it fits, add it the same way: symlink `.claude/skills-src/swift-ios-skills/skills/<name>`
-into `.claude/skills/<name>`, and add its row to the provenance table. Don't
-add speculative skills for frameworks the app doesn't use yet.
+- Ten framework skills are live symlinks into the
+  `.claude/skills-src/swift-ios-skills` git submodule
+  ([dpearson2699/swift-ios-skills](https://github.com/dpearson2699/swift-ios-skills)):
+  `photokit`, `vision-framework`, `swiftdata`, `swiftui-patterns`,
+  `swiftui-uikit-interop`, `background-processing`, `ios-accessibility`,
+  `ios-localization`, `swift-concurrency`, `app-store-review`. Two UI skills,
+  `liquid-glass` and `ui-review-tahoe`, are the same kind of symlink into a
+  second submodule, `.claude/skills-src/claude-code-apple-skills`
+  ([rshankras/claude-code-apple-skills](https://github.com/rshankras/claude-code-apple-skills)).
+  A `SessionStart` hook (`.claude/hooks/skills-submodule-update.sh`) advances
+  both submodules to each one's latest **tagged release** every session —
+  not the branch tip, since SKILL.md content loads straight into context as
+  instructions and a release tag is a bounded, named point rather than an
+  arbitrary unreviewed commit.
+- Two more, `swiftui-specialist` and `swiftui-whats-new-27`, are Apple's own
+  content, published only via the local Xcode toolchain
+  (`xcrun agent skills export`) rather than any repository — there is
+  nothing to point a submodule at. `.claude/hooks/apple-skills-export.sh`
+  runs that export on `SessionStart` whenever they're missing and copies the
+  two into place; both directories are gitignored.
+
+All of the above stay current with no manual step. See
+`.claude/skills/README.md` for the full provenance table, how to pin a
+revision if a release ever regresses, and `THIRD_PARTY_NOTICES.md` for the
+license notices the submodule-sourced ones still owe their authors.
+
+The `swift-ios-skills` upstream repo has ~86 skills, one per Apple
+framework/topic; only the ones this app actually touches were added,
+deliberately, not the whole set. **When a change adds a new framework or
+platform capability** (a new `import`, a new App Store surface, a new Apple
+framework), check that repo's skill list for a matching one before writing
+the feature from scratch, and if it fits, add it the same way: symlink
+`.claude/skills-src/swift-ios-skills/skills/<name>` into
+`.claude/skills/<name>`, and add its row to the provenance table. Don't add
+speculative skills for frameworks the app doesn't use yet.
 
 ## Versioning (FR-8.9)
 
