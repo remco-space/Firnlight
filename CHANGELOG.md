@@ -12,6 +12,8 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-09
+
 ### Changed
 
 - Lowered the supported platforms to macOS 26+ and iOS 26+ (was 27+), so the
