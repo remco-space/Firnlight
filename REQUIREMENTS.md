@@ -402,6 +402,26 @@ The app has three tabs matching the three stages of the journey:
   forgotten. *(Why: a public repo is written once and read forever; a
   personal detail committed today is exposed the moment it's public, however
   long ago it was written.)*
+- **FR-10.5** The public repository publishes only work that is the
+  project's own to publish. Material authored by others — code, tooling
+  content, documentation, development aids — is never redistributed inside
+  it, whatever license it carries; the repository instead carries the means
+  to obtain such material from where its authors chose to publish it. A
+  fresh clone, after following the repository's own setup instructions,
+  builds and is developed the same way — with the same tooling and the same
+  working practices — as on the machine the project grew on. *(Why:
+  the right to publish someone's work belongs to its author, and a
+  repository that only works where it was born is not meaningfully
+  public.)*
+- **FR-10.6** Change reaches the public repository the way the wider
+  open-source world expects: one stable default branch that always holds
+  the current working state, with each body of work developed on a branch
+  of its own and merged whole once verified. Someone familiar with common
+  open-source practice can tell at a glance where the current state lives
+  and how change arrives — nothing about the branch structure needs
+  explaining. *(Why: for a public project, the development process is part
+  of the interface; a bespoke process taxes every contributor after the
+  first.)*
 
 ## Parked (deferred, or not currently possible)
 

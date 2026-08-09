@@ -108,6 +108,16 @@ not written retroactively from git history; `README.md` follows
 [makeareadme.com](https://www.makeareadme.com/), trimmed to what a small app
 (not a library) needs.
 
+First-party-only tree (FR-10.5): nothing authored by a third party is
+tracked in this repository, whatever license it carries — that includes
+code, assets, and development aids such as skill content. Anything the
+project's build or working practice needs from elsewhere is *obtained*, not
+copied: a pointer plus a documented, ideally automatic, fetch step that a
+fresh clone can run, so the setup reproduces itself away from this machine.
+Where those fetch mechanisms live and how they work is, as with all
+technical detail, documented at the site (`.claude/skills/README.md` for
+skills).
+
 Pre-publish check (FR-10.4): before the first push and before every push
 after, diff what's about to be pushed against the developer's own home
 directory path and against common secret/token patterns — a standing check,
@@ -129,6 +139,18 @@ edits sharing the working tree (coordinate a commit order instead — every
 commit must describe a state that actually compiled and ran), and work the
 user explicitly asked to hold. An unverified change stays uncommitted, and
 saying so beats committing it with a hopeful message.
+
+## Branching & merging (FR-10.6)
+
+`main` is the stable default branch: it always builds and always describes
+the current working state of the app — never a half-landed experiment.
+Each body of work lives on a short-lived branch of its own, named for the
+work (`fix-duel-flicker`, not `wip2`), branched from `main` and merged back
+whole once verified per the committing rules above; delete the branch after
+the merge. Merges into `main` use a merge commit (`--no-ff`), so each body
+of work stays legible as one unit in history. This is plain
+GitHub-flow-style trunk development — if a branch structure needs
+explaining, it's wrong (FR-10.6).
 
 ## Build & run
 
