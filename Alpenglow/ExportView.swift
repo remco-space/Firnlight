@@ -190,7 +190,15 @@ final class ExportModel {
     /// user's devices, but this is a preference about it, not part of it.
     /// `double(forKey:)` reads 0 for a key that was never written, and 0 is
     /// not a ratio any choice can produce, so it doubles as "never set".
-    private static let strictnessDefaultsKey = "WallpaperAlbum.sizeStrictness"
+    ///
+    /// Not `private`, and `nonisolated`: `JudgmentArchive` reads and writes
+    /// this same key directly (FR-7.4, FR-6.12) so a copy of the judgments
+    /// carries the standard too, and restoring one merges it back, from
+    /// `@concurrent` code that cannot touch this `@MainActor` class's
+    /// isolated members. A `String` literal is immutable and `Sendable`, so
+    /// opting it out of isolation is safe. One key literal, named once, is
+    /// what keeps the two from silently drifting apart.
+    nonisolated static let strictnessDefaultsKey = "WallpaperAlbum.sizeStrictness"
 
     private var strictness: Double = {
         let stored = UserDefaults.standard.double(forKey: ExportModel.strictnessDefaultsKey)
@@ -310,10 +318,28 @@ final class ExportModel {
     func refreshSuggestion(container: ModelContainer) async {
         do {
             suggestion = try await featureStore(container).suggestedAlbumSize()
+            reloadStrictnessIfChanged()
             refreshSizeScale()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Picks up a standard `JudgmentArchive.restore` may just have adopted
+    /// (FR-6.12, FR-7.4). A restore writes `UserDefaults` directly rather
+    /// than through this model — it runs `@concurrent`, off this
+    /// `@MainActor` instance, and may run before the instance even exists —
+    /// so an already-open Export tab would otherwise keep showing the
+    /// standard it launched with until relaunch. Piggybacking on this
+    /// refresh, rather than adding a second notification path for one value,
+    /// works because `SettingsView.restoreJudgments` already calls
+    /// `RankingClock.shared.bump()`, which is what re-invokes
+    /// `refreshSuggestion` here. Re-reading is always safe: when this device
+    /// already had its own standard, `JudgmentArchive.restore` never touched
+    /// the key, so the value on disk is simply the value already in memory.
+    private func reloadStrictnessIfChanged() {
+        let stored = UserDefaults.standard.double(forKey: Self.strictnessDefaultsKey)
+        if stored > 0 { strictness = stored }
     }
 
     /// The preview shows exactly what a sync would put in the album, in the

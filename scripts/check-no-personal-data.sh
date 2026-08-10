@@ -4,13 +4,18 @@
 # account.
 #
 # The requirement is not "remember to look" — it is that the repository runs
-# the check itself and a failing push does not go through. Three things run
-# this, and they are the same script so they cannot disagree:
+# the check itself, on every push, wherever it comes from, and never claims
+# an enforcement it does not have. Three things run this, and they are the
+# same script so they cannot disagree:
 #
 #   - .githooks/pre-push, which blocks the push on the developer's own
 #     machine (see README for the one-line opt-in a fresh clone needs);
-#   - the Build workflow, which blocks the branch server-side for anyone who
-#     hasn't run that line;
+#   - the "Personal data check" GitHub Actions workflow
+#     (.github/workflows/check-no-personal-data.yml), which runs this script
+#     server-side on every push to every branch and every pull request —
+#     the actual enforcement, since it needs nothing configured on the
+#     pushing machine first and so also covers a fresh clone that skipped
+#     the hook opt-in;
 #   - a person, by running it directly.
 #
 # What counts as personal is anything that identifies the developer's machine

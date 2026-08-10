@@ -49,6 +49,15 @@ nonisolated enum JudgmentArchive {
     /// meets a version it doesn't know refuses the file and says so rather
     /// than importing half of it (FR-8.12) — the same rule FR-7.3 sets for the
     /// store itself.
+    ///
+    /// Adding `Archive.standard` did not earn a bump: it is an optional field,
+    /// so `JSONDecoder` leaves it `nil` when reading an archive written before
+    /// it existed, and ignores it (as it does any unknown key) when an older
+    /// build reads an archive that carries one. Neither direction misreads
+    /// what the other wrote — the file just says less than it might. A bump
+    /// is for a change where that stops being true: a renamed or repurposed
+    /// key that an older or newer reader would misinterpret rather than
+    /// simply not see.
     static let currentFormatVersion = 1
 
     struct Archive: Codable {
@@ -57,6 +66,15 @@ nonisolated enum JudgmentArchive {
         var choices: [Choice] = []
         var verdicts: [Verdict] = []
         var ignores: [Ignore] = []
+        /// FR-6.12's album-size standard, held the same way `ExportModel`
+        /// holds it: a ratio against the suggestion, not a photo count, so it
+        /// still means "half as many as you think" on a device whose
+        /// suggestion differs. `nil` only when reading an archive written
+        /// before this field existed — every export from this build writes
+        /// one, defaulting to `1.0` for a device that has never moved the
+        /// slider, which is exactly the ratio an untouched control already
+        /// behaves as (see `ExportModel.strictness`).
+        var standard: Double?
 
         struct Choice: Codable {
             var winnerKey: String
@@ -85,8 +103,12 @@ nonisolated enum JudgmentArchive {
         var verdicts = 0
         var ignores = 0
         var skipped = 0
+        /// Whether the archive's album-size standard (FR-6.12) was adopted —
+        /// only when this device had never set one of its own; see the merge
+        /// rule in `restore`.
+        var standardAdopted = false
 
-        var isEmpty: Bool { choices == 0 && verdicts == 0 && ignores == 0 }
+        var isEmpty: Bool { choices == 0 && verdicts == 0 && ignores == 0 && !standardAdopted }
     }
 
     enum ArchiveError: LocalizedError {
@@ -117,11 +139,28 @@ nonisolated enum JudgmentArchive {
         archive.ignores = try context.fetch(FetchDescriptor<IgnoreRecord>()).map {
             Archive.Ignore(photoKey: $0.photoKey, isIgnored: $0.isIgnored, timestamp: $0.timestamp)
         }
+        archive.standard = currentStandard()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        log.info("Exported \(archive.choices.count) choices, \(archive.verdicts.count) verdicts, \(archive.ignores.count) ignores")
+        log.info("Exported \(archive.choices.count) choices, \(archive.verdicts.count) verdicts, \(archive.ignores.count) ignores, standard \(archive.standard ?? 0)")
         return try encoder.encode(archive)
+    }
+
+    /// This device's album-size standard (FR-6.12), read the same way
+    /// `ExportModel.strictness` reads it: `UserDefaults.double(forKey:)`
+    /// returns `0` for a key never written, and `0` is not a ratio any
+    /// choice can produce, so it doubles as "never set" — in which case the
+    /// device is simply following the suggestion, the same as an explicit
+    /// ratio of `1`.
+    ///
+    /// Reads `UserDefaults` directly rather than going through an
+    /// `ExportModel` instance: the standard lives at the device level, not in
+    /// the SwiftData store the rest of this file walks, and `ExportModel` is
+    /// `@MainActor`-isolated while this function runs `@concurrent` off it.
+    private static func currentStandard() -> Double {
+        let stored = UserDefaults.standard.double(forKey: ExportModel.strictnessDefaultsKey)
+        return stored > 0 ? stored : 1
     }
 
     /// Merges an archive into this device's judgments (FR-7.4's other half).
@@ -166,8 +205,30 @@ nonisolated enum JudgmentArchive {
             context.insert(IgnoreRecord(photoKey: ignore.photoKey, isIgnored: ignore.isIgnored, timestamp: ignore.timestamp))
             summary.ignores += 1
         }
+
+        // FR-6.12 + FR-7.4: the standard travels too, but as a single scalar
+        // it has no "already here" row to skip against — the merge rule the
+        // rows above use (skip a duplicate, keep both otherwise) doesn't
+        // apply to one number. What "never silently rewinds" means for a
+        // scalar is instead: an import may only fill in a standard this
+        // device has never chosen for itself, never overwrite one it has.
+        // `0` is `ExportModel.strictness`'s own sentinel for "never set" —
+        // the device is still just following the suggestion (FR-6.4) — so
+        // only then does the archive's value take over, the same threshold
+        // FR-6.4 already uses to decide whether the suggestion still owns the
+        // count. Once this device has its own explicit standard, restoring
+        // an old archive must not quietly replace it, exactly as restoring
+        // never replaces a choice, verdict or ignore already here.
+        if let standard = archive.standard, standard > 0 {
+            let key = ExportModel.strictnessDefaultsKey
+            if UserDefaults.standard.double(forKey: key) == 0 {
+                UserDefaults.standard.set(standard, forKey: key)
+                summary.standardAdopted = true
+            }
+        }
+
         try context.save()
-        log.info("Restored \(summary.choices) choices, \(summary.verdicts) verdicts, \(summary.ignores) ignores (\(summary.skipped) already here)")
+        log.info("Restored \(summary.choices) choices, \(summary.verdicts) verdicts, \(summary.ignores) ignores (\(summary.skipped) already here), standard adopted: \(summary.standardAdopted)")
         return summary
     }
 
@@ -183,7 +244,13 @@ nonisolated enum JudgmentArchive {
     /// confirmation shows. Held here, beside the code that does it, so the two
     /// cannot come to describe different things.
     static let resetGoesAway = "Every duel choice, every “Both Are Great” and “Both Are Bad”, every “Not Wallpaper Material” verdict and every ignored photo, along with the ranking learned from them."
-    static let resetStays = "Your photos, the wallpaper album in Photos, and everything the app has scanned and analyzed. Alpenglow starts ranking from your Photos favorites again, as it did on the first launch."
+    /// The album-size standard (FR-6.12) belongs here, not in
+    /// `resetGoesAway`: it is the user's own strictness, held relative to
+    /// whatever the suggestion is, not a fact learned about any photo — a
+    /// fresh suggestion after reset still moves the size to match it, same as
+    /// always. `resetLearnedTaste` below leaves it untouched, which is what
+    /// makes this sentence true rather than aspirational.
+    static let resetStays = "Your photos, the wallpaper album in Photos, and everything the app has scanned and analyzed. Alpenglow starts ranking from your Photos favorites again, as it did on the first launch. The album size you’ve set, relative to the suggestion, carries over unchanged."
 
     /// Discards everything the app has learned about the user's taste.
     ///

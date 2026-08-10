@@ -76,7 +76,7 @@ struct SettingsView: View {
             } header: {
                 Text("Your Judgments")
             } footer: {
-                Text("Your duels, verdicts and ignored photos are the one thing Alpenglow can’t work out again. A copy restores here or on another device; restoring adds to what’s already here rather than replacing it.")
+                Text("Your duels, verdicts, ignored photos and album-size standard are the one thing Alpenglow can’t work out again. A copy restores here or on another device; restoring adds to what’s already here rather than replacing it.")
             }
 
             Section {
@@ -203,7 +203,8 @@ struct SettingsView: View {
                 judgmentFailed = false
                 judgmentStatus = summary.isEmpty
                     ? "Nothing new — every judgment in that file was already here."
-                    : "Restored \(summary.choices) choices, \(summary.verdicts) verdicts and \(summary.ignores) ignored photos."
+                    : "Restored \(summary.choices) choices, \(summary.verdicts) verdicts and \(summary.ignores) ignored photos"
+                        + (summary.standardAdopted ? ", and adopted its album-size standard." : ".")
                 // Restored judgments are judgments: the ranking, the grid, the
                 // duel pool and the album suggestion all rest on them (FR-4.5).
                 // `JudgmentArchive.restore` only inserts the raw rows — it has
@@ -218,8 +219,14 @@ struct SettingsView: View {
                 // notices the judgment count restore just changed, and
                 // rebuilds and re-caches scores exactly as a foreign write from
                 // another view would (skipped harmlessly when the file added
-                // nothing new).
-                if !summary.isEmpty {
+                // nothing new). Gated on the rows specifically, not
+                // `summary.isEmpty`: an archive that only carried an adopted
+                // album-size standard (FR-6.12) changed no judgment for
+                // `prepare()` to retrain against — `RankingClock.bump()` below
+                // still fires unconditionally, which is what
+                // `ExportModel.refreshSuggestion` needs to pick the standard
+                // up (see its `reloadStrictnessIfChanged`).
+                if summary.choices + summary.verdicts + summary.ignores > 0 {
                     try await PreferenceRanker(modelContainer: modelContext.container).prepare()
                 }
                 RankingClock.shared.bump()

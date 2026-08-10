@@ -12,9 +12,14 @@
 #
 # That line is also set automatically at the start of every Claude Code
 # session (.claude/hooks/git-hooks-install.sh), so the machine this project
-# grew on cannot silently lose it. The Build workflow runs the same script
-# server-side, which is the backstop for a clone that opted out: a push that
-# slips past the hook still fails the branch.
+# grew on cannot silently lose it. This hook is a courtesy, not the
+# guarantee: it catches a leak before it ever leaves this machine, but a
+# clone that never ran the opt-in line has no hook to skip. The "Personal
+# data check" GitHub Actions workflow
+# (.github/workflows/check-no-personal-data.yml) is the actual backstop — it
+# runs the identical script server-side on every push to every branch,
+# needs nothing configured first, and fails the push's branch even when this
+# hook never ran at all.
 set -euo pipefail
 
 exec "$(git rev-parse --show-toplevel)/scripts/check-no-personal-data.sh"

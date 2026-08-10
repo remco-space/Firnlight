@@ -70,9 +70,13 @@ personal to your machine or accounts (REQUIREMENTS.md FR-10.4):
 git config core.hooksPath .githooks
 ```
 
-Git never runs hooks straight out of a clone, so this line is the opt-in;
-`scripts/check-no-personal-data.sh` is the check itself, and CI runs the same
-script on every push regardless.
+Git never runs hooks straight out of a clone, so this line is the opt-in — a
+courtesy that catches a leak before it ever leaves your machine.
+`scripts/check-no-personal-data.sh` is the check itself, and the "Personal
+data check" GitHub Actions workflow is the actual guarantee: it runs that
+same script on every push to every branch, whether or not you set the line
+above, so nothing personal gets published even from a clone where it was
+never run.
 
 There is no test target — the app's thresholds are tuned by hand against a
 real Photos library, and most of its functionality requires interactive

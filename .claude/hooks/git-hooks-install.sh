@@ -8,9 +8,9 @@
 # hook would be arbitrary code running on `git clone`), so `core.hooksPath` is
 # a per-clone setting that something has to set. On this machine that
 # something is this hook; for anyone else it is the one line in the README.
-# Either way the check itself is tracked, and the Build workflow runs it
-# server-side regardless, so this only decides *when* a failure is found —
-# before the push, or after it.
+# Either way the check itself is tracked, and the "Personal data check"
+# GitHub Actions workflow runs it server-side regardless, so this only
+# decides *when* a failure is found — before the push, or after it.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
