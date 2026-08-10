@@ -104,6 +104,14 @@ detail, documented at the site.
 
 ## Release process (FR-10)
 
+Release steps are scripts, not prose: any step of producing or refreshing a
+release that a machine can run — building, rendering, capturing, checking —
+lives as a runnable script (in `scripts/`, or an existing one), invoked by
+name from the docs; prose is reserved for what genuinely needs a human. A
+recipe of copy-paste commands in documentation is a script that hasn't been
+written yet: it decays silently as the app changes, and every release re-pays
+the cost of following it by hand.
+
 Signing state: automatic signing under the free personal team (`VGZ5MZ2P8B`)
 only — no Developer ID, no notarization. A downloaded release is ad-hoc
 signed enough to run, but Gatekeeper still blocks first launch as "Apple
