@@ -200,7 +200,7 @@ struct DuelView: View {
                 ContentUnavailableView(
                     "Nothing to Compare",
                     systemImage: "rectangle.split.2x1",
-                    description: Text("Scan and analyze your library first — duels need at least two candidates.")
+                    description: Text("Alpenglow is still working through your library — duels need at least two candidates.")
                 )
             }
         }
