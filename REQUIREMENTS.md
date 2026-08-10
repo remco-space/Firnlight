@@ -465,6 +465,24 @@ The app has three tabs matching the three stages of the journey:
   get it — only with their agreement, and reporting nothing about them or
   their library. *(Why: outside a store there is no other route from a
   published fix to the person it fixes something for.)*
+- **FR-10.9** Every public-facing document in the repository — the front
+  page, the changelog, the license, and any later addition of their kind —
+  follows a recognized, published standard for that kind of document, named
+  where the document is maintained, and follows it fully but no further: the
+  parts the standard recommends for a project of this shape are present,
+  each fact is said once — in the one document whose job it is, referenced
+  from the others — and nothing pads beyond what a reader deciding whether
+  to use the app needs. *(Why: a bespoke format taxes every reader the way a
+  bespoke process taxes every contributor (FR-10.6), and bulk taxes them
+  just as surely — a front page nobody finishes reading informs nobody.)*
+- **FR-10.10** Distributed outside a store, the repository's front page is
+  the app's store page: before downloading anything, a visitor sees the
+  app's icon — held to the same rule FR-8.8 sets for the icon anywhere the
+  app shows it — and the journey through the app in pictures: enough to
+  show that journey, few enough to skim, showing the release they accompany,
+  never a look the app no longer has. *(Why: a store page is where a user
+  judges whether an app is real, finished, and worth their download; words
+  cannot show that, and a stale or mocked-up picture is a false promise.)*
 
 ## Parked (deferred, or not currently possible)
 
