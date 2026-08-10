@@ -12,6 +12,13 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-08-10
+
+### Fixed
+
+- The exact-count field in the Export tab now follows the album-size slider
+  while dragging, instead of only the preview grid updating.
+
 ## [0.14.1] - 2026-08-10
 
 ### Fixed

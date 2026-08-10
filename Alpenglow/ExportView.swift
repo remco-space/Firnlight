@@ -852,10 +852,14 @@ struct ExportView: View {
         }
         // The count moves without the user touching it — a fresh suggestion
         // carries it (FR-6.12), and learning the pool's real size narrows it —
-        // so the number field follows it. Never while it has focus: that is
-        // someone mid-edit, and their half-typed number outranks ours.
+        // so the number field follows it. Never while there's an unsaved edit
+        // in progress: that half-typed number outranks ours. Gating on focus
+        // alone was wrong — the field can hold focus (tabbed or clicked into,
+        // or via dragging the slider without ever touching the field) with
+        // nothing typed, which isn't an edit and shouldn't freeze the field
+        // out of every update, including the slider's own.
         .onChange(of: model.count, initial: true) { _, newCount in
-            if !countFieldFocused { draftCount = newCount }
+            if !draftIsEdited { draftCount = newCount }
         }
         .task(id: "\(model.count)|\(model.isAdjustingSize)|\(RankingClock.shared.version)") {
             await model.refreshPreview(container: modelContext.container)
