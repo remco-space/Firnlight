@@ -234,13 +234,13 @@ The app has three tabs matching the three stages of the journey:
   handful of photos to every candidate the library holds. The scale is
   proportional — a nudge changes the count by a fraction of it, not a fixed
   amount — and carries a few labeled marks at round counts so the unusual
-  scale reads at a glance. The exact count is shown beside the slider and can
-  be edited directly as a number. The thumb moves freely, and equally freely
-  on every platform: the marks are a scale to read the track by, never stops
-  the thumb is confined to — every count is reachable by dragging, with one
-  deliberate exception: the suggestion's mark gently catches the passing
-  thumb (FR-6.4), so the one point that is easy to mean and hard to hit is
-  easy to hit too.
+  scale reads at a glance. The exact count is shown beside the slider, always
+  current until the user edits it, and can be edited directly as a number.
+  The thumb moves freely, and equally freely on every platform: the marks
+  are a scale to read the track by, never stops the thumb is confined to —
+  every count is reachable by dragging, with one deliberate exception: the
+  suggestion's mark gently catches the passing thumb (FR-6.4), so the one
+  point that is easy to mean and hard to hit is easy to hit too.
 - **FR-6.4** The app suggests a count — where quality drops off in the user's
   own ranking, informed by their Great/Bad verdicts — and marks it on the
   slider's scale. Adopting it is moving the thumb onto the mark; there is no
