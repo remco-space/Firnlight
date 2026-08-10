@@ -4,7 +4,7 @@ import SwiftData
 /// FR-8.3's menu bar and the focused-value plumbing that feeds it.
 ///
 /// The commands here act on state that already lives view-locally (the
-/// grid's `selection`, `LibraryTab`'s `scanner`/`analysisModel`,
+/// grid's `selection`, the Library tab's analysis model,
 /// `ExportView`'s sync model, and whichever photo currently has keyboard
 /// focus). `Commands` runs outside that view hierarchy, so the bridge is
 /// `FocusedValues`: each owning view publishes its state via
@@ -14,8 +14,8 @@ import SwiftData
 /// below sits inside an `if authorization.isAuthorized` branch (or, for the
 /// photo actions, inside a view that only exists once there's a photo to
 /// show), so there's nothing to publish when the precondition doesn't hold.
-/// A deliberate consequence: Scan, Sync Album, and the Library view switch
-/// are enabled only while their owning tab is mounted (a `focusedSceneValue`
+/// A deliberate consequence: stop/resume, Sync Album, and the Library view
+/// switch are enabled only while their owning tab is mounted (a `focusedSceneValue`
 /// publishes only from views in the hierarchy). That errs safe — a disabled
 /// item is never wrong, and the enabled state always reflects a target that
 /// really can act — at the cost of the commands being tab-scoped rather than
@@ -39,9 +39,9 @@ import SwiftData
 /// FR-8.4 is the iPhone and iPad counterpart, and it is answered in the views
 /// rather than here, because touch has no menu bar to hang commands off. Every
 /// command FR-8.3 lists already has a visible, named, touch-reachable control
-/// on those platforms: scan / re-scan is `ScanView`'s button, album sync is
-/// `ExportView`'s, and the Library view switch is the picker in the grid
-/// header. The three photo actions and the un-marking directions were the
+/// on those platforms: stopping and resuming a run is `AnalysisView`'s
+/// button, album sync is `ExportView`'s, and the Library view switch is the
+/// picker in the grid header. The three photo actions and the un-marking directions were the
 /// exception — reachable only by a long press — so `ThumbnailCell` and
 /// `DuelCard` grow a visible actions menu there, offering the same commands
 /// by the same names this menu bar does, and `ThumbnailCell` additionally
@@ -86,28 +86,28 @@ extension FocusedValues {
     }
 }
 
-// MARK: - Library commands (scan / re-scan)
+// MARK: - Library commands (stop / resume a run)
 
-/// What "Scan Library" / "Scan Again" needs: the scanner to drive, the
-/// analysis model whose run also has to be idle (scanning while analysis
-/// walks the same store would race), and a `ModelContext` to scan into.
-/// Published by `LibraryTab` only while Photos access is authorized.
+/// What FR-8.3's stop and resume items need: the analysis model whose run they
+/// act on, and a `ModelContext` for its container. Published by `LibraryTab`
+/// only while the whole library is available (FR-1.8), so both items are
+/// disabled for free when there is nothing the app could be running.
+///
+/// There is no scan command any more, and none is missing: FR-2.7 removed the
+/// control it would have driven — the app is always current, so a "Scan Again"
+/// item would name an action with nothing to find.
 struct LibraryCommandTarget {
-    let scanner: LibraryScanner
     let analysisModel: AnalysisModel
     let modelContext: ModelContext
 
-    var canScan: Bool { Self.canScan(scanner: scanner, analysisModel: analysisModel) }
+    /// The same two conditions the Library card's own control uses, so
+    /// FR-8.3's two routes to one action cannot drift apart.
+    var canStop: Bool { analysisModel.isRunning }
 
-    /// The one definition of when a scan may start, so FR-8.3's two routes to
-    /// the same action — this menu command and the Library card's own button —
-    /// cannot drift apart. They did: the card knew only about `isScanning` and
-    /// stayed clickable right through an analysis run that the menu item was
-    /// correctly greyed out for, which is both a parity break and the race the
-    /// type comment above warns about. `LibraryTab` owns both objects, so the
-    /// card can be handed the same pair the command target carries.
-    static func canScan(scanner: LibraryScanner, analysisModel: AnalysisModel) -> Bool {
-        !scanner.isScanning && !analysisModel.isRunning
+    var canResume: Bool {
+        guard !analysisModel.isRunning, analysisModel.isStoppedByUser else { return false }
+        guard let stats = analysisModel.stats else { return false }
+        return stats.pending + stats.skipped > 0
     }
 }
 
@@ -250,12 +250,23 @@ struct AppCommands: Commands {
         }
 
         CommandMenu("Library") {
-            Button(scanTitle) {
+            // FR-8.3's stop and resume (FR-3.5), as two items rather than one
+            // that renames itself: a menu item whose title changes as the app's
+            // own work starts and settles resizes while nobody is acting, which
+            // FR-8.7 does not allow. Each is disabled when it has nothing to
+            // act on, which is the state the requirement asks for anyway.
+            Button("Stop Analysis") {
+                libraryCommandTarget?.analysisModel.stop()
+            }
+            .keyboardShortcut(".", modifiers: [.command])
+            .disabled(libraryCommandTarget?.canStop != true)
+
+            Button("Resume Analysis") {
                 guard let libraryCommandTarget else { return }
-                Task { await libraryCommandTarget.scanner.scan(into: libraryCommandTarget.modelContext) }
+                libraryCommandTarget.analysisModel.start(container: libraryCommandTarget.modelContext.container)
             }
             .keyboardShortcut("r", modifiers: [.command])
-            .disabled(libraryCommandTarget == nil || libraryCommandTarget?.canScan == false)
+            .disabled(libraryCommandTarget?.canResume != true)
 
             Divider()
 
@@ -271,16 +282,6 @@ struct AppCommands: Commands {
             .keyboardShortcut("s", modifiers: [.command, .shift])
             .disabled(exportCommandTarget?.model.canSync != true)
         }
-    }
-
-    private var scanTitle: String {
-        // The scanner owns the wording (see `LibraryScanner.scanActionTitle`):
-        // it holds the title steady across a run, which the old
-        // `phase == .idle` test did not — that renamed the item mid-scan, and
-        // FR-8.7 does not allow the app's own work to resize a control.
-        // Defaults to "Scan Library" when no target is published (item
-        // disabled on other tabs) — "Scan Again" would misstate a first run.
-        libraryCommandTarget?.scanner.scanActionTitle ?? "Scan Library"
     }
 
     /// ⌘1/⌘2/⌘3 for the three Library views, in `LibraryView.allCases` order.

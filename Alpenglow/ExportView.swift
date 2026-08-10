@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import Photos
 #if os(macOS)
 import AppKit
 #else
@@ -45,35 +44,46 @@ final class ExportModel {
     /// grid's — the second half of taming the per-choice fan-out (FR-8.2).
     private var store: FeatureStore?
 
-    /// FR-1.8 *(iPhone and iPad)*: under limited access PhotoKit cannot create
-    /// or fetch user albums at all, so there is no album to maintain and no
-    /// way to find out there isn't — `performChanges` reports success and the
-    /// following fetch returns nothing. Blocking the sync up front is what
-    /// keeps the app from appearing to work.
-    ///
-    /// Read straight from PhotoKit rather than through
-    /// `PhotoLibraryAuthorization`: that observable is `ContentView`-owned
-    /// `@State` and isn't in the environment, and `authorizationStatus(for:)`
-    /// is a cached synchronous read, so threading it down here would be
-    /// plumbing for its own sake. `.limited` is `API_AVAILABLE(ios(14))` and
-    /// has no macOS counterpart, hence the platform split rather than a
-    /// status comparison that would always be false on the Mac.
-    ///
-    /// Stored and refreshed rather than computed on demand: `@Observable`
-    /// tracks stored properties, so a computed one reading PhotoKit would
-    /// never invalidate the view. Upgrading to full access is a trip to
-    /// Settings and back, and `isAuthorized` reads true both before and after
-    /// (limited counts as authorized), so nothing else in the app re-renders
-    /// this tab on that transition — without the refresh the notice would sit
-    /// there claiming the album is impossible after the user had just fixed it
-    /// (FR-1.3).
-    private(set) var isLimitedAccess = false
+    /// FR-1.9: the change waiting on the user's answer, if any. The sync that
+    /// asked is suspended until `answerPendingChange` resumes it — see
+    /// `PendingPhotosChange`.
+    private(set) var pendingChange: PendingPhotosChange?
 
     func refreshAccess() {
-        #if os(iOS)
-        isLimitedAccess = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited
-        #endif
         hasInterruptedSync = WallpaperAlbumSync.hasInterruptedSync
+    }
+
+    /// FR-1.9's ask, in the form the write path calls it: hand over the change
+    /// about to be made, get back whether it may happen. Returns `true`
+    /// immediately for a kind of change the user has told the app to stop
+    /// asking about — the switch in Settings is what turns asking back on.
+    ///
+    /// `@Sendable` and `nonisolated`-friendly by construction: it is passed to
+    /// `WallpaperAlbumSync`, which is not on the main actor, and awaiting a
+    /// main-actor method from there is the hop that gets the question onto the
+    /// screen.
+    func confirm(_ change: PhotosChange) async -> Bool {
+        guard PhotosChangeConsent.shouldAsk(change.kind) else { return true }
+        return await withCheckedContinuation { continuation in
+            pendingChange = PendingPhotosChange(change: change) { answer in
+                continuation.resume(returning: answer)
+            }
+        }
+    }
+
+    /// The alert's answer. `remember` is FR-1.9's "turn off asking for this
+    /// kind of change from the alert itself", and it only ever accompanies a
+    /// yes: there is no way to permanently decline, because a change nobody
+    /// wants is simply not asked for again.
+    func answerPendingChange(approve: Bool, remember: Bool = false) {
+        guard let pending = pendingChange else { return }
+        // Cleared before resuming, so the resumed sync can't observe a change
+        // that has already been answered.
+        pendingChange = nil
+        if approve && remember {
+            PhotosChangeConsent.setShouldAsk(pending.change.kind, false)
+        }
+        pending.resume(approve)
     }
 
     /// FR-6.8, on the user's say-so: put the album back the way the
@@ -85,7 +95,10 @@ final class ExportModel {
     func restoreInterruptedSync() {
         isRestoring = true
         Task {
-            await WallpaperAlbumSync.restoreInterruptedSync()
+            await WallpaperAlbumSync.restoreInterruptedSync(confirm: { [weak self] change in
+                guard let self else { return false }
+                return await self.confirm(change)
+            })
             hasInterruptedSync = WallpaperAlbumSync.hasInterruptedSync
             isRestoring = false
         }
@@ -93,12 +106,11 @@ final class ExportModel {
 
     /// Whether "Sync Album" (button or menu command) has anything to do
     /// right now. Also stands in for "not authorized" in the menu command's
-    /// disabled state: with no Photos access the candidate pool is always
-    /// empty, so `totalAccepted` never rises above 0 and this reads false
-    /// without needing its own authorization plumbing. Limited access is the
-    /// exception that proxy misses — the selected photos still scan, so the
-    /// pool is non-empty while the album remains impossible (FR-1.8).
-    var canSync: Bool { !isSyncing && !isLimitedAccess && (totalAccepted ?? 0) > 0 }
+    /// disabled state: without access to the whole library (FR-1.8) nothing is
+    /// scanned, so the candidate pool is empty, `totalAccepted` never rises
+    /// above 0 and this reads false without needing its own authorization
+    /// plumbing.
+    var canSync: Bool { !isSyncing && (totalAccepted ?? 0) > 0 }
 
     /// Whether the size control has both numbers it needs to mean anything:
     /// the app's suggestion (which the choice is held relative to) and the
@@ -301,9 +313,21 @@ final class ExportModel {
 
         Task {
             do {
-                outcome = try await WallpaperAlbumSync.sync(container: container, count: target)
-                errorMessage = nil
-                albumMissing = false
+                // A declined sync (FR-1.9) changes nothing on screen: the last
+                // true tally, error and notice all stand, because nothing the
+                // app knows has changed.
+                if let result = try await WallpaperAlbumSync.sync(
+                    container: container,
+                    count: target,
+                    confirm: { [weak self] change in
+                        guard let self else { return false }
+                        return await self.confirm(change)
+                    }
+                ) {
+                    outcome = result
+                    errorMessage = nil
+                    albumMissing = false
+                }
             } catch WallpaperAlbumSync.SyncError.albumNotVisible {
                 // FR-6.11: not an error to report, a state to wait in.
                 albumMissing = true
@@ -330,7 +354,12 @@ final class ExportModel {
     func createAlbum() {
         Task {
             do {
-                try await WallpaperAlbumSync.createAlbum()
+                guard try await WallpaperAlbumSync.createAlbum(
+                    confirm: { [weak self] change in
+                        guard let self else { return false }
+                        return await self.confirm(change)
+                    }
+                ) else { return }
                 albumMissing = false
                 // Cleared on success rather than on the click, so a failed
                 // attempt repeated does not blank the message and re-print it
@@ -618,7 +647,6 @@ struct AlbumSizeTicks: SliderTickContent {
 /// album, previewing exactly which photos will be in it.
 struct ExportView: View {
     @Environment(\.modelContext) private var modelContext
-    @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @State private var model = ExportModel()
     /// What the number field is showing. See `sizeControls` for why the field
@@ -639,6 +667,11 @@ struct ExportView: View {
     /// fixed height so the row cannot change size as the labels change (FR-8.7),
     /// and scaled so it still fits them at larger text sizes.
     @ScaledMetric private var markLabelHeight: CGFloat = 14
+    #if !os(macOS)
+    /// Whether the settings sheet is up. iPhone and iPad only — the Mac has
+    /// the standard Settings window.
+    @State private var isShowingSettings = false
+    #endif
 
     var body: some View {
         ScrollView {
@@ -662,6 +695,16 @@ struct ExportView: View {
                 }
 
                 #if !os(macOS)
+                // The way into the app's settings on a platform with no
+                // Settings window and no menu bar to put one behind (FR-8.4:
+                // every command reachable by touch, none of them only behind a
+                // gesture). It sits with the identity footer at the foot of
+                // the app's one bounded screen, for the same reason About does
+                // — see About.swift. On the Mac this is the standard Settings
+                // window instead (⌘,), so there is nothing here.
+                Button("Settings…") { isShowingSettings = true }
+                    .padding(.top, 24)
+
                 // FR-8.8's iPhone and iPad half: the app's identity at the
                 // foot of its last screen, where macOS has an About box
                 // instead. Static, so it never shifts anything above it
@@ -672,6 +715,57 @@ struct ExportView: View {
             .padding(24)
         }
         .frame(maxWidth: .infinity)
+        #if !os(macOS)
+        .sheet(isPresented: $isShowingSettings) {
+            NavigationStack {
+                SettingsView()
+                    .navigationTitle("Settings")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { isShowingSettings = false }
+                        }
+                    }
+            }
+        }
+        #endif
+        // FR-1.9: every change the app is about to make in Photos, named
+        // before it happens, with the way to stop being asked about that kind
+        // of change in the alert itself.
+        //
+        // It lives on this view because this view is where every write
+        // originates — the Sync button, the Create Album button, the restore,
+        // and the menu command that drives the same model. The sync is
+        // suspended while it stands, so answering it *is* the sync continuing
+        // or not happening at all.
+        .alert(
+            model.pendingChange?.change.title ?? "",
+            isPresented: Binding(
+                get: { model.pendingChange != nil },
+                // Only ever set by the buttons below, each of which answers
+                // first; this is the dismissal the system may perform itself.
+                set: { if !$0 && model.pendingChange != nil { model.answerPendingChange(approve: false) } }
+            ),
+            presenting: model.pendingChange
+        ) { pending in
+            Button("Cancel", role: .cancel) {
+                model.answerPendingChange(approve: false)
+            }
+            Button(pending.change.confirmTitle) {
+                model.answerPendingChange(approve: true)
+            }
+            Button("Always Allow") {
+                model.answerPendingChange(approve: true, remember: true)
+            }
+        } message: { pending in
+            Text(pending.change.message)
+        }
+        // A pending question with nobody to read it would leave the sync that
+        // asked it suspended for good. Nothing can dismiss this view while the
+        // alert is up on either platform, but the sync outliving the view is
+        // the one failure that could not be recovered from, so it is closed
+        // off rather than reasoned away.
+        .onDisappear { model.answerPendingChange(approve: false) }
         // FR-8.3: lets the menu bar's "Sync Album" trigger the same sync
         // this view's button does.
         .focusedSceneValue(\.exportCommandTarget, ExportCommandTarget(model: model, modelContext: modelContext))
@@ -788,10 +882,6 @@ struct ExportView: View {
                 // button dropped half a card's height away from the pointer
                 // that had just clicked it. Below, they push only the preview
                 // grid, which nothing is aiming at.
-                if model.isLimitedAccess {
-                    limitedAccessNotice
-                }
-
                 if model.albumMissing {
                     albumMissingNotice
                 }
@@ -1163,29 +1253,6 @@ struct ExportView: View {
         }
         model.count = draftCount
         draftCount = model.count
-    }
-
-    /// FR-1.8 *(iPhone and iPad)*: with limited access there is no album to
-    /// maintain, so say that plainly at the point the user would try to sync,
-    /// and offer the only route to full access there is.
-    private var limitedAccessNotice: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(
-                "Alpenglow can't maintain the album with limited photo access.",
-                systemImage: "exclamationmark.triangle"
-            )
-            .foregroundStyle(.orange)
-            Text("Photos only lets apps create and update albums with access to your whole library. Allow access to all photos to use the wallpaper album.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let url = PhotoLibraryAuthorization.settingsURL {
-                Button("Allow Access to All Photos…") { openURL(url) }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 
     /// FR-6.8: a previous sync died between removing the album's contents and

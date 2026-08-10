@@ -37,8 +37,9 @@ malicious software"). To clear that:
 Launch the app and grant Photos access when prompted. The three tabs mirror
 the pipeline:
 
-1. **Library** — scans your Photos library for wallpaper candidates and
-   ranks them.
+1. **Library** — keeps up with your Photos library on its own, finding
+   wallpaper candidates and ranking them. There is nothing to press: it
+   catches up when it opens and follows changes as they happen.
 2. **Duel** — shows you two photos at a time and learns your taste from
    which one you pick.
 3. **Export** — maintains the "Alpenglow" Photos album with your top-ranked
@@ -61,6 +62,17 @@ xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow -configuration Debug b
 or just `open Alpenglow.xcodeproj`. See [CLAUDE.md](CLAUDE.md) for the fuller
 build, run, and debugging notes (icon rendering, log filtering, simulator
 quirks, and so on).
+
+Then arm the repository's pre-push check, which refuses to push anything
+personal to your machine or accounts (REQUIREMENTS.md FR-10.4):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Git never runs hooks straight out of a clone, so this line is the opt-in;
+`scripts/check-no-personal-data.sh` is the check itself, and CI runs the same
+script on every push regardless.
 
 There is no test target — the app's thresholds are tuned by hand against a
 real Photos library, and most of its functionality requires interactive
