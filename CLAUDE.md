@@ -136,37 +136,21 @@ not written retroactively from git history; `README.md` follows
 The README's Screenshots section (FR-10.10) is `docs/store/`: `icon.png` and
 one PNG per tab (`library.png`, `duel.png`, `export.png`), referenced from
 `README.md` with the release they were captured for named alongside them.
-Regenerate all four whenever a release changes what any of the three tabs
-looks like — a stale screenshot is exactly what FR-10.10 forbids — and bump
-the named release in the same change. The icon comes from the `ictool
---export-image` command this file's App Icon section already documents; the
-three tab screenshots come from the real running app against a real Photos
-library (an empty or simulated one is also a "look the app doesn't really
-have" — see the iOS Simulator's Vision limitation above), captured without
-touching the pointer so the method stays safe to run on a machine doing other
-things at the same time:
-
-```bash
-# 1. Quit any running instance (single-instance launch) and pick the tab
-#    via the same UserDefaults key FR-8.1 restores it from, rather than a
-#    click — AppStorage("selectedTab"), one of "library"/"duel"/"export".
-osascript -e 'tell application "Alpenglow" to quit'
-defaults write space.remco.Alpenglow selectedTab -string library
-
-# 2. Launch the build and let it settle, then read back the real window
-#    frame (never assume one — it moves) rather than clicking to raise it.
-open path/to/Alpenglow.app
-osascript -e 'tell application "Alpenglow" to activate'
-osascript -e 'tell application "System Events" to tell process "Alpenglow" to get {position, size} of window 1'
-
-# 3. Capture exactly that rectangle — -R, not -w/-l, needs no window click —
-#    and confirm the PNG is actually the app (screencapture returns a silent
-#    solid-black file with no error if the Screen Recording grant is
-#    missing, so open and look, never trust the exit code).
-screencapture -x -R<x>,<y>,<w>,<h> docs/store/library.png
-```
-
-Repeat step 1 (quit, change the default, relaunch) for `duel` and `export`.
+`scripts/capture-store-screenshots.sh` regenerates all four and updates that
+caption to the current `MARKETING_VERSION` in one run — build, render,
+capture, and check are all steps a machine can do, so none of them is prose
+here (see the rule opening this section). Run it whenever a release changes
+what any of the three tabs looks like — a stale screenshot is exactly what
+FR-10.10 forbids. The tab screenshots need a Photos library the app is
+already authorized against with real analyzed candidates: an empty or
+simulated one is also a "look the app doesn't really have", which is why the
+script can't run in the iOS Simulator either (Vision doesn't analyze anything
+there — see that limitation above). The script itself documents the rest:
+why it drives the app through `AppStorage("selectedTab")` and a read-back
+window frame instead of the pointer (safe to run on a machine doing other
+things with the screen at the same time), and how it catches
+`screencapture`'s silent solid-black failure mode when the Screen Recording
+grant is missing.
 
 First-party-only tree (FR-10.5): nothing authored by a third party is
 tracked in this repository, whatever license it carries — that includes
