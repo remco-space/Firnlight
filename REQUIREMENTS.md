@@ -288,8 +288,10 @@ The app has three tabs matching the three stages of the journey:
   cannot read what an older one saved says so and leaves it intact, rather
   than starting empty or refusing to open.
 - **FR-7.4** The user can copy everything they have decided off the device, and
-  restore it — here or on another device. *(Why: until judgments travel on
-  their own (section 9), one lost container is a total loss.)*
+  restore it — here or on another device. "Everything they have decided" is
+  every decision section 9 gives cross-device meaning — the album-size
+  standard (FR-6.12) as much as any choice or verdict. *(Why: until judgments
+  travel on their own (section 9), one lost container is a total loss.)*
 - **FR-7.5** The user can discard what the app has learned and start their
   taste over, told first what goes and what stays. It never happens by
   accident.
@@ -424,9 +426,12 @@ The app has three tabs matching the three stages of the journey:
 - **FR-10.4** Nothing personal to the developer's own machine or accounts —
   file paths, credentials, tokens, or other data that identifies them or
   their setup rather than the project — is ever tracked in the public
-  repository. The repository runs this check itself and refuses a failing
-  push, rather than relying on anyone to remember — not fixed once and
-  forgotten. *(Why: a public repo is written once and read forever; a
+  repository. The repository enforces this check itself, on every push,
+  wherever the push comes from — including a fresh clone where nothing was
+  set up first: a failing push is refused, or failed by the repository's own
+  automation the moment it lands, rather than relying on anyone to remember —
+  not fixed once and forgotten. The repository never claims an enforcement it
+  does not have. *(Why: a public repo is written once and read forever; a
   personal detail committed today is exposed the moment it's public, however
   long ago it was written.)*
 - **FR-10.5** The public repository publishes only work that is the
