@@ -46,7 +46,10 @@ final class UpdateCheck {
 
     private(set) var availability: Availability = .unknown
     private(set) var lastError: String?
-    private(set) var isChecking = false
+    /// Guards against two checks at once. Nothing displays it: a check is a
+    /// single request that either answers or fails, and both outcomes are
+    /// shown as themselves rather than as a spinner (FR-8.7).
+    private var isChecking = false
 
     private let log = Logger(subsystem: "space.remco.Alpenglow", category: "UpdateCheck")
 

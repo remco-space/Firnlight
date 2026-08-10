@@ -59,7 +59,7 @@ struct SettingsView: View {
             } header: {
                 Text("Changes in Photos")
             } footer: {
-                Text(PhotosChangeKind.changeAlbum.settingsDescription)
+                Text("Creating the “\(Thresholds.wallpaperAlbumName)” album and setting what’s in it are the only changes Alpenglow ever makes in Photos — your photos themselves are never edited or deleted.")
             }
 
             Section {

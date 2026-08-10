@@ -31,15 +31,6 @@ nonisolated enum PhotosChangeKind: String, Sendable {
         }
     }
 
-    var settingsDescription: String {
-        switch self {
-        case .createAlbum:
-            "Alpenglow creates one album, named “\(Thresholds.wallpaperAlbumName)”, and only when you ask it to."
-        case .changeAlbum:
-            "Adding and removing photos in that album is the only change Alpenglow ever makes in Photos — your photos themselves are never edited or deleted."
-        }
-    }
-
     fileprivate var defaultsKey: String { "PhotosChangeConsent.ask.\(rawValue)" }
 }
 
