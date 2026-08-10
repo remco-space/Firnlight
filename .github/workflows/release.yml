@@ -116,6 +116,17 @@ jobs:
             echo "::error::No CHANGELOG.md entry found for version $VERSION (expected a '## [$VERSION]' heading)"
             exit 1
           fi
+          # FR-10.2: the release itself must carry the one instruction that
+          # clears Gatekeeper's "Apple cannot check it" block — a user who
+          # downloads the zip from this page never sees the README. (printf,
+          # not a heredoc: a heredoc body inside this YAML block scalar would
+          # keep its indentation and render as a markdown code block.)
+          printf '%s\n' \
+            '' \
+            '---' \
+            '' \
+            '**First launch:** macOS will say it "cannot check Firnlight for malicious software" — this build is not notarized. Right-click Firnlight.app and choose **Open** (once), or run `xattr -cr Firnlight.app`.' \
+            >> release-notes.md
 
       - name: Publish release
         env:
