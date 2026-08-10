@@ -49,6 +49,23 @@ final class ExportModel {
     /// `PendingPhotosChange`.
     private(set) var pendingChange: PendingPhotosChange?
 
+    /// Serializes `confirm` so `pendingChange` is never overwritten out from
+    /// under a caller still waiting on it.
+    ///
+    /// Sync, Restore and Create Album each run as their own `Task` and each
+    /// calls `confirm`, and nothing before this stopped two from being in
+    /// flight together — Create Album has no `.disabled` guard at all, and the
+    /// menu bar's "Sync Album" reads `canSync`, which never looked at
+    /// `isRestoring`. A second call used to overwrite `pendingChange` outright,
+    /// stranding the first caller's continuation forever: its `Task` never
+    /// resumed, so `isSyncing`/`isRestoring` for that operation never cleared
+    /// and its button stayed dead for the rest of the session. Queuing here
+    /// instead means a second question waits its turn — displayed the moment
+    /// the first is answered — so no caller can ever be left unresumed by
+    /// another one asking.
+    private var askers: [CheckedContinuation<Void, Never>] = []
+    private var isAsking = false
+
     func refreshAccess() {
         hasInterruptedSync = WallpaperAlbumSync.hasInterruptedSync
     }
@@ -64,11 +81,34 @@ final class ExportModel {
     /// screen.
     func confirm(_ change: PhotosChange) async -> Bool {
         guard PhotosChangeConsent.shouldAsk(change.kind) else { return true }
+        await claimTurn()
+        defer { releaseTurn() }
         return await withCheckedContinuation { continuation in
             pendingChange = PendingPhotosChange(change: change) { answer in
                 continuation.resume(returning: answer)
             }
         }
+    }
+
+    /// Waits until no other call owns `pendingChange`, then claims it.
+    private func claimTurn() async {
+        if !isAsking {
+            isAsking = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            askers.append(continuation)
+        }
+    }
+
+    /// Hands the turn to the next waiting call, if any — resuming it is what
+    /// puts its question on screen.
+    private func releaseTurn() {
+        guard !askers.isEmpty else {
+            isAsking = false
+            return
+        }
+        askers.removeFirst().resume()
     }
 
     /// The alert's answer. `remember` is FR-1.9's "turn off asking for this
@@ -110,7 +150,11 @@ final class ExportModel {
     /// scanned, so the candidate pool is empty, `totalAccepted` never rises
     /// above 0 and this reads false without needing its own authorization
     /// plumbing.
-    var canSync: Bool { !isSyncing && (totalAccepted ?? 0) > 0 }
+    ///
+    /// `!isRestoring` too: the menu command has no other way to see that a
+    /// restore's consent alert is up, and starting a sync underneath it would
+    /// be a second Photos-album write racing the first.
+    var canSync: Bool { !isSyncing && !isRestoring && (totalAccepted ?? 0) > 0 }
 
     /// Whether the size control has both numbers it needs to mean anything:
     /// the app's suggestion (which the choice is held relative to) and the
@@ -1309,7 +1353,13 @@ struct ExportView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            // Disabled while a sync or restore is already asking or writing —
+            // otherwise this was the one trigger with no guard at all, able to
+            // ask a second consent question while, say, a restore's was still
+            // up (`confirm` now queues rather than strands either caller, but
+            // running two album writes at once is still worth keeping off).
             Button("Create Album") { model.createAlbum() }
+                .disabled(model.isSyncing || model.isRestoring)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)

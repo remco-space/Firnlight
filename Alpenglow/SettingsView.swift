@@ -206,6 +206,22 @@ struct SettingsView: View {
                     : "Restored \(summary.choices) choices, \(summary.verdicts) verdicts and \(summary.ignores) ignored photos."
                 // Restored judgments are judgments: the ranking, the grid, the
                 // duel pool and the album suggestion all rest on them (FR-4.5).
+                // `JudgmentArchive.restore` only inserts the raw rows — it has
+                // no `PreferenceRanker` to train, unlike every other place a
+                // judgment is written (the duel flow, the grid's verdict
+                // actions — see `CandidateGridView`'s short-lived-ranker
+                // rationale). Without this, `RankingClock.shared.bump()` below
+                // would only ask every view to re-fetch, and they would all
+                // re-fetch the very `PhotoRecord.preferenceScore` this restore
+                // never touched — an unchanged ranking under a "Restored N
+                // choices…" banner. `prepare()` reads the weights file fresh,
+                // notices the judgment count restore just changed, and
+                // rebuilds and re-caches scores exactly as a foreign write from
+                // another view would (skipped harmlessly when the file added
+                // nothing new).
+                if !summary.isEmpty {
+                    try await PreferenceRanker(modelContainer: modelContext.container).prepare()
+                }
                 RankingClock.shared.bump()
             } catch {
                 judgmentFailed = true

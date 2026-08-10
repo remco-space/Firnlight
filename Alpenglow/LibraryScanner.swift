@@ -187,10 +187,23 @@ final class LibraryScanner {
             // alike — unattended, since catching up needs no click. That is the
             // concrete reason a selection counts as not granted rather than as
             // a narrower kind of access.
-            for (identifier, record) in recordsByIdentifier where !seenIdentifiers.contains(identifier) {
-                context.delete(record)
-                removed += 1
-                contentChanged = true
+            //
+            // The `total`/`assets` fetch above was taken when the scan started,
+            // and nothing in the loop above observes cancellation — a scan
+            // already running when access narrows to a selection runs to
+            // completion on that stale, now-partial fetch. `LibraryCatchUp.end()`
+            // only stops the *next* pass. So this is re-checked here, live,
+            // immediately before the one step that is unsound on anything less
+            // than the whole library, rather than trusted to have stayed true
+            // for as long as the scan above took to run.
+            if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized {
+                for (identifier, record) in recordsByIdentifier where !seenIdentifiers.contains(identifier) {
+                    context.delete(record)
+                    removed += 1
+                    contentChanged = true
+                }
+            } else {
+                log.info("Access narrowed mid-scan; skipping orphan cleanup so photos outside this fetch are not mistaken for deleted")
             }
 
             try context.save()

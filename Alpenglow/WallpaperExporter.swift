@@ -423,13 +423,26 @@ nonisolated enum WallpaperAlbumSync {
         let previous = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
         let stranded = PHAsset.fetchAssets(in: album, options: nil)
 
+        // FR-1.9 wants exactly what will be added or removed — not `previous`
+        // and `stranded` taken whole, which double-counts every photo present
+        // in both: sync() computes its counts as a set difference for the same
+        // reason, so restore's alert must match it rather than overstate both
+        // numbers in the common case (most of what's stranded is also what's
+        // being restored).
+        var previousIDs: Set<String> = []
+        previous.enumerateObjects { asset, _, _ in previousIDs.insert(asset.localIdentifier) }
+        var strandedIDs: Set<String> = []
+        stranded.enumerateObjects { asset, _, _ in strandedIDs.insert(asset.localIdentifier) }
+        let added = previousIDs.subtracting(strandedIDs).count
+        let removed = strandedIDs.subtracting(previousIDs).count
+
         // FR-1.9 again, and under the same switch as a sync: putting the album
         // back is the same kind of act — setting what is in it — done with a
         // different destination in mind.
         guard await confirm(PhotosChange(
             kind: .changeAlbum,
-            added: previous.count,
-            removed: stranded.count,
+            added: added,
+            removed: removed,
             total: previous.count
         )) else {
             log.info("Restore declined by the user; the record stays on offer")
