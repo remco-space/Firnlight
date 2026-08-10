@@ -12,6 +12,12 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-08-10
+
+### Fixed
+
+- "Open in Photos" no longer crashes the app on the Mac after Photos opens.
+
 ## [0.14.0] - 2026-08-10
 
 ### Added

@@ -631,16 +631,31 @@ enum CandidateActions {
     /// public way to reach a *particular* asset on iOS, so the app itself is
     /// the honest second choice. Both outcomes are logged, because the only
     /// other way to tell them apart is to watch the screen.
+    /// Both completion closures below are marked `@Sendable` on purpose, even
+    /// though this whole enum is `@MainActor`: under default MainActor
+    /// isolation (SE-0466) a closure literal written in `@MainActor` code
+    /// infers `@MainActor` isolation itself unless told otherwise, because
+    /// `OpenURLAction`'s completion parameter carries no isolation of its
+    /// own. On macOS that inferred isolation is a lie — `OpenURLAction`'s
+    /// default action hands the closure straight to `NSWorkspace`, which
+    /// LaunchServices invokes on its own `com.apple.launchservices.open-queue`,
+    /// never hopping back to the main actor. Calling a closure the runtime
+    /// believes is MainActor-isolated from a different queue trips Swift's
+    /// dynamic isolation check and crashes with `EXC_BREAKPOINT` in
+    /// `_swift_task_checkIsolatedSwift` — even when the open itself succeeded.
+    /// `@Sendable` opts the closures out of that inference, matching the
+    /// pattern `PhotoLibraryWatcher` already uses for PhotoKit's
+    /// similarly unpromised callback queue.
     static func openInPhotos(_ localIdentifier: String, using openURL: OpenURLAction) {
         let uuid = localIdentifier.components(separatedBy: "/").first ?? localIdentifier
         guard let asset = URL(string: "photos://asset?uuid=\(uuid)") else { return }
-        openURL(asset) { openedAsset in
+        openURL(asset) { @Sendable openedAsset in
             if openedAsset {
                 log.debug("Opened the photo in Photos")
                 return
             }
             guard let app = URL(string: "photos-redirect://") else { return }
-            openURL(app) { openedApp in
+            openURL(app) { @Sendable openedApp in
                 if openedApp {
                     log.notice("No handler for photos://asset — opened the Photos app instead")
                 } else {
