@@ -476,13 +476,16 @@ The app has three tabs matching the three stages of the journey:
   bespoke process taxes every contributor (FR-10.6), and bulk taxes them
   just as surely — a front page nobody finishes reading informs nobody.)*
 - **FR-10.10** Distributed outside a store, the repository's front page is
-  the app's store page: before downloading anything, a visitor sees the
-  app's icon — held to the same rule FR-8.8 sets for the icon anywhere the
-  app shows it — and the journey through the app in pictures: enough to
-  show that journey, few enough to skim, showing the release they accompany,
-  never a look the app no longer has. *(Why: a store page is where a user
-  judges whether an app is real, finished, and worth their download; words
-  cannot show that, and a stale or mocked-up picture is a false promise.)*
+  the app's store page, and it is judged as one: a stranger reading it top
+  to bottom — on whatever screen they arrive on — meets one story that
+  gives them a reason to want the app before it asks anything of them,
+  told with the app's icon (held to FR-8.8's rule) and the journey through
+  the app in pictures: each legible at the size that screen actually gives
+  it, enough to show the journey, few enough to skim, showing the release
+  they accompany, never a look the app no longer has. *(Why: a store page
+  is where a user judges whether an app is real, finished, and worth their
+  download; words cannot show that, a stale or mocked-up picture is a
+  false promise, and a picture too small to read shows nothing at all.)*
 
 ## Parked (deferred, or not currently possible)
 
