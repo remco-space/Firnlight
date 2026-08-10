@@ -257,8 +257,20 @@ final class AnalysisModel {
     /// and rewrites the very records the queue is analyzing — so a catch-up
     /// stands the run down first and starts it again afterwards. Nothing is
     /// lost: analysis is saved per batch and resumes where it stopped (FR-7.1).
+    ///
+    /// Gated on `runTask` alone, not `runTask, isRunning`: `isRunning` is
+    /// cleared *before* the tail-end rescore (`PreferenceRanker.prepare()` +
+    /// `RankingClock.bump()`, above) runs, so a caller arriving in that window
+    /// would see `isRunning == false` and return immediately — while the
+    /// outgoing run is still writing the weights file and the score cache from
+    /// its own `ModelContext`. That's precisely the overlap this function
+    /// exists to rule out. Awaiting `runTask.value` whenever one exists closes
+    /// the window: cancelling and awaiting an already-finished task is a
+    /// harmless no-op, so the only behavior change from the wider guard is
+    /// that this now genuinely waits out that tail whenever it's still
+    /// in flight.
     func standDownForCatchUp() async {
-        guard let runTask, isRunning else { return }
+        guard let runTask else { return }
         runTask.cancel()
         await runTask.value
     }

@@ -261,11 +261,23 @@ struct AppCommands: Commands {
             .keyboardShortcut(".", modifiers: [.command])
             .disabled(libraryCommandTarget?.canStop != true)
 
+            // No keyboard shortcut, deliberately, though FR-8.3 only requires
+            // the named item and this app has exactly one open shortcut key
+            // left in the natural family (⌘. is Stop, the system-standard
+            // cancel gesture, and correctly stays there). ⌘R is Reload/Refresh
+            // on every other Mac app, muscle memory strong enough that it fires
+            // without a glance at what it's bound to here — and FR-2.7
+            // deliberately gives this app no refresh concept to alias it to.
+            // Bound to Resume, a habitual ⌘R would silently un-pause a stopped
+            // run instead of the no-op the user expected, with no on-screen
+            // feedback pointing at what just happened. The item stays reachable
+            // by name in the Library menu; going unbound is the safer choice
+            // than reassigning it to a key with no established Resume meaning
+            // of its own.
             Button("Resume Analysis") {
                 guard let libraryCommandTarget else { return }
                 libraryCommandTarget.analysisModel.start(container: libraryCommandTarget.modelContext.container)
             }
-            .keyboardShortcut("r", modifiers: [.command])
             .disabled(libraryCommandTarget?.canResume != true)
 
             Divider()

@@ -138,6 +138,30 @@ nonisolated enum Thresholds {
     /// within a burst.
     static let libraryChangeSettleDelay: Duration = .seconds(2)
 
+    /// How often `LibraryCatchUp` re-reads Photos authorization on its own,
+    /// independent of `PhotoLibraryWatcher` (FR-1.8).
+    ///
+    /// The fast path for noticing a narrowing — full access cut down to a
+    /// selection while the app is open — is `photoLibraryDidChange`, and for
+    /// most of the app's life that is also the only path: a narrowing made
+    /// while backgrounded is caught by the `scenePhase` refresh in
+    /// `ContentView` when the app returns to the foreground. Neither covers a
+    /// session that stays foregrounded and idle the whole time: no scene-phase
+    /// transition fires, and — see the doc comment on
+    /// `PhotoLibraryWatcher.photoLibraryDidChange` — Apple documents the
+    /// change observer firing for edits to an already-limited selection, not
+    /// for the authorization-level transition itself, so relying on it alone
+    /// for that case is an assumption this project could not verify. This
+    /// timer is the fallback for exactly that gap, not the primary mechanism,
+    /// which is why it can afford to be slow: `PHPhotoLibrary
+    /// .authorizationStatus(for:)` is a local, synchronous read with no
+    /// PhotoKit round trip, so the cost of checking is negligible, but there
+    /// is nothing to gain from checking often — a narrowing is a deliberate
+    /// trip to Settings, not an event that needs catching within seconds.
+    /// Five minutes bounds how long the app could work on a library it no
+    /// longer fully sees without ever bothering the user with a busy loop.
+    static let authorizationNarrowingRecheckInterval: Duration = .seconds(300)
+
     /// Long-edge size of the analysis bitmap requested from PHImageManager. Never analyze full-res.
     static let analysisPixelSize = 1024
 

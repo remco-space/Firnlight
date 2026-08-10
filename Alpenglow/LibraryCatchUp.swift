@@ -27,6 +27,13 @@ import os
 ///   picks a run back up after the system ended one, without repeating the
 ///   library pass.
 ///
+/// A fourth thing stands a catch-up *down* without starting one:
+/// `authorizationNarrowingRecheckTask`, a slow timer that re-reads
+/// authorization on its own. It exists only because FR-1.8's "including when
+/// access is narrowed while the app is open" can't be proven to follow from
+/// the change notification alone — see `checkForNarrowedAccess` and
+/// `Thresholds.authorizationNarrowingRecheckInterval`.
+///
 /// Overlapping requests coalesce rather than queue: a request arriving while a
 /// catch-up runs is remembered and honoured once at the end, so a burst of
 /// changes costs one extra pass, not one per notification. On top of that a
@@ -51,6 +58,8 @@ final class LibraryCatchUp {
     private var watcher: PhotoLibraryWatcher?
     private var task: Task<Void, Never>?
     private var againRequested = false
+    /// The slow fallback recheck described on the type's own doc comment.
+    private var authorizationNarrowingRecheckTask: Task<Void, Never>?
 
     /// Starts watching the library and catches up with it now. Safe to call
     /// repeatedly — the watcher is registered once.
@@ -61,7 +70,16 @@ final class LibraryCatchUp {
             watcher = PhotoLibraryWatcher { [weak self] in
                 // Delivered on an arbitrary queue; everything this touches is
                 // main-actor state.
-                Task { @MainActor in self?.libraryDidChange() }
+                Task { @MainActor in await self?.libraryDidChange() }
+            }
+        }
+        if authorizationNarrowingRecheckTask == nil {
+            authorizationNarrowingRecheckTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: Thresholds.authorizationNarrowingRecheckInterval)
+                    guard !Task.isCancelled else { break }
+                    await self?.checkForNarrowedAccess()
+                }
             }
         }
         request(afterSettling: false)
@@ -70,11 +88,25 @@ final class LibraryCatchUp {
     /// Stops watching and stands the pipeline down — called when access is no
     /// longer full (FR-1.8), which is the only way the app goes from working
     /// to not working while it is open.
-    func end() {
+    ///
+    /// Async because standing down means more than stopping this
+    /// coordinator's own coalescing loop: FR-1.8 says the app "does nothing"
+    /// once access is narrowed, and `AnalysisModel`'s run task is Vision work
+    /// and iCloud downloads that keep going in the background regardless of
+    /// what this type's own `task` is doing — cancelling only the latter left
+    /// the pipeline visibly still working after the app had told the user it
+    /// could not. `standDownForCatchUp` is what `runOnce` already uses to get
+    /// the store to itself before a scan; reusing it here waits out the same
+    /// tail-end rescore rather than leaving it racing a `.task(id:)` that has
+    /// already unmounted the authorized UI.
+    func end() async {
         watcher = nil
+        authorizationNarrowingRecheckTask?.cancel()
+        authorizationNarrowingRecheckTask = nil
         task?.cancel()
         task = nil
         againRequested = false
+        await analysis.standDownForCatchUp()
     }
 
     /// Picks up a run the app should be making anyway, without a library pass:
@@ -87,17 +119,37 @@ final class LibraryCatchUp {
         analysis.startUnlessStopped(container: context.container)
     }
 
-    private func libraryDidChange() {
-        // A change notification is also how the app finds out its access was
-        // narrowed to a selection without ever leaving the screen — changing
-        // the selection *is* a library change (FR-1.8).
+    private func libraryDidChange() async {
+        // A change notification is expected to be how the app finds out its
+        // access was narrowed to a selection without ever leaving the screen
+        // — see `checkForNarrowedAccess` for how sure that expectation is,
+        // and `authorizationNarrowingRecheckTask` for the fallback that
+        // doesn't depend on it.
+        guard await checkForNarrowedAccess() else { return }
+        request(afterSettling: true)
+    }
+
+    /// Re-reads Photos authorization and stands the pipeline down if it no
+    /// longer covers the whole library (FR-1.8). Returns whether the caller
+    /// should proceed as still-authorized.
+    ///
+    /// Called from two places that don't trust each other to be sufficient
+    /// alone: `libraryDidChange`, on the assumption — undocumented by Apple
+    /// and unverified on a device here — that narrowing full access to a
+    /// selection fires `photoLibraryDidChange` the same way a change *within*
+    /// an existing selection does; and `authorizationNarrowingRecheckTask`,
+    /// the slow timer that catches the case a foregrounded, idle app would
+    /// otherwise miss if that assumption is wrong. See the type's own doc
+    /// comment and `PhotoLibraryWatcher.photoLibraryDidChange`.
+    @discardableResult
+    private func checkForNarrowedAccess() async -> Bool {
         authorization?.refresh()
         guard authorization?.isAuthorized == true else {
             log.info("Library access is no longer full; standing down")
-            end()
-            return
+            await end()
+            return false
         }
-        request(afterSettling: true)
+        return true
     }
 
     private func request(afterSettling: Bool) {

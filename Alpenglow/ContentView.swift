@@ -96,7 +96,7 @@ struct ContentView: View {
         // already counting up (FR-2.4, FR-4.11).
         .task(id: authorization.isAuthorized) {
             guard authorization.isAuthorized else {
-                catchUp.end()
+                await catchUp.end()
                 return
             }
             // Deliberately no album work here. Recovering an interrupted sync

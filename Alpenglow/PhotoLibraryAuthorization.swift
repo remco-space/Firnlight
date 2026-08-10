@@ -34,8 +34,17 @@ final class PhotoLibraryAuthorization {
 
     /// Re-reads the current status — call when the app becomes active so a
     /// grant made in System Settings is picked up without a relaunch (FR-1.3),
-    /// and whenever the library reports a change, which is how a *narrowing*
-    /// to a selection is noticed while the app is open (FR-1.8).
+    /// and whenever the library reports a change, on the expectation that a
+    /// *narrowing* to a selection is delivered as one of those (FR-1.8).
+    ///
+    /// That expectation is not a documented guarantee: Apple's docs cover a
+    /// change observer firing for edits to an already-limited selection, not
+    /// for the authorization-level transition from full to limited itself,
+    /// and this project has not been able to verify the transition's own
+    /// behavior on a device. `LibraryCatchUp` does not rely on this call site
+    /// alone for FR-1.8 as a result — see its
+    /// `authorizationNarrowingRecheckTask` for the fallback that covers a
+    /// foregrounded, idle app if the notification never arrives.
     func refresh() {
         let previous = status
         status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
