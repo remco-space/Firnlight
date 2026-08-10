@@ -46,7 +46,7 @@ final class LibraryCatchUp {
     let scanner = LibraryScanner()
     let analysis = AnalysisModel()
 
-    private let log = Logger(subsystem: "space.remco.Alpenglow", category: "LibraryCatchUp")
+    private let log = Logger(subsystem: "space.remco.Firnlight", category: "LibraryCatchUp")
 
     /// The main context to scan into, and the authorization to re-read when
     /// the library reports a change. Both are handed over by `begin` and held

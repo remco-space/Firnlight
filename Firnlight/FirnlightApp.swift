@@ -26,7 +26,7 @@ import AppKit
 /// app lifetime itself and has no second instance to hand off to and no window
 /// to close.
 @main
-struct AlpenglowApp: App {
+struct FirnlightApp: App {
     /// The two-store container, built once and shared by every scene — or the
     /// reason it could not be built (FR-7.3).
     ///
@@ -52,7 +52,7 @@ struct AlpenglowApp: App {
         Self.deferToExistingInstance()
         // A WindowGroup-style multi-window app gets automatic window tabbing
         // (View > Show Tab Bar, tabs merging ⌘N windows) from AppKit. Two
-        // "Alpenglow" tabs of the same single pipeline are a contradiction of
+        // "Firnlight" tabs of the same single pipeline are a contradiction of
         // FR-1.6/FR-1.7's single-window design, so opt out; this also removes
         // the system's Show/New Tab menu items.
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -66,7 +66,7 @@ struct AlpenglowApp: App {
         // (⌘N), and reopening the app just brings the one window forward.
         // `Window` is macOS/visionOS-only, which is fitting: the requirement
         // it implements is macOS-only too.
-        Window("Alpenglow", id: "main") {
+        Window("Firnlight", id: "main") {
             // Window sizing belongs to the window, not to ContentView — on
             // iPhone the system decides the size and a 720 pt floor would be
             // wider than the screen.
@@ -87,7 +87,7 @@ struct AlpenglowApp: App {
         // equivalent is FR-8.4.
         .commands {
             AppCommands()
-            // FR-8.8: replaces the stock "About Alpenglow" item so the
+            // FR-8.8: replaces the stock "About Firnlight" item so the
             // standard panel opens with the app's one-sentence description
             // in it. See About.swift.
             AboutCommand()
@@ -154,7 +154,7 @@ struct AlpenglowApp: App {
 /// FR-7.3: the app opened, its data did not, and nothing was touched.
 ///
 /// This is the whole of "says so and leaves it intact". The commonest way to
-/// get here is an update in either direction — a newer Alpenglow whose schema
+/// get here is an update in either direction — a newer Firnlight whose schema
 /// an older one cannot read, or the reverse after someone reinstalls an older
 /// release — and in both cases the user's duels, verdicts and analysis are
 /// sitting unharmed in a file this build cannot open. What must never happen
@@ -174,16 +174,16 @@ struct StoreUnavailableView: View {
                 .foregroundStyle(.orange)
                 .accessibilityHidden(true) // decorative — the text below carries the meaning (FR-4.13)
 
-            Text("Alpenglow Can’t Open Your Data")
+            Text("Firnlight Can’t Open Your Data")
                 .font(.title2.bold())
 
-            Text("Everything you’ve decided is still on this device, exactly as it was — nothing has been changed or deleted. This version of Alpenglow just can’t read it, which usually means it was written by a different version.")
+            Text("Everything you’ve decided is still on this device, exactly as it was — nothing has been changed or deleted. This version of Firnlight just can’t read it, which usually means it was written by a different version.")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 460)
 
-            Text("Installing the newest version of Alpenglow — \(AppIdentity.name) \(AppIdentity.version) is running now — is the way back in.")
+            Text("Installing the newest version of Firnlight — \(AppIdentity.name) \(AppIdentity.version) is running now — is the way back in.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -204,7 +204,7 @@ struct StoreUnavailableView: View {
 }
 
 #if os(macOS)
-/// Quit when the window closes (FR-1.7). Alpenglow is a single-window utility
+/// Quit when the window closes (FR-1.7). Firnlight is a single-window utility
 /// with no menu-bar presence or background duty — its pipeline work is driven
 /// entirely by the visible UI — so an invisible lingering process would only
 /// confuse ("why is it still in the Dock?") and hold Photos/SwiftData

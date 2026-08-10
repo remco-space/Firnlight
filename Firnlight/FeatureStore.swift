@@ -366,7 +366,7 @@ actor FeatureStore {
         return suggestion
     }
 
-    private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "FeatureStore")
+    private static let log = Logger(subsystem: "space.remco.Firnlight", category: "FeatureStore")
 
     /// `badVerdictKeys` is `latestBadVerdictKeys()`'s result, fetched once by
     /// the caller and passed through — never re-fetched here — so scoring a

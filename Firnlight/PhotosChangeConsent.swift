@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// The kinds of change Alpenglow can make in the user's library, and whether
+/// The kinds of change Firnlight can make in the user's library, and whether
 /// it still asks first (FR-1.9).
 ///
 /// There are exactly two, because `WallpaperAlbumSync` is the app's only write
@@ -57,7 +57,7 @@ nonisolated struct PhotosChange: Sendable, Equatable {
         let safety = "Your photos themselves aren’t changed, moved, or deleted."
         switch kind {
         case .createAlbum:
-            return "Alpenglow will create an album named “\(Thresholds.wallpaperAlbumName)” in Photos. \(safety)"
+            return "Firnlight will create an album named “\(Thresholds.wallpaperAlbumName)” in Photos. \(safety)"
         case .changeAlbum:
             var clauses: [String] = []
             if added > 0 { clauses.append("add \(added) \(photos(added))") }
@@ -67,9 +67,9 @@ nonisolated struct PhotosChange: Sendable, Equatable {
                 // album to impose the running order (FR-6.2). That is a change
                 // to the album, so it is still asked about — and named for
                 // what it actually is rather than as "add 0, remove 0".
-                return "Alpenglow will reorder the \(total) \(photos(total)) in the “\(Thresholds.wallpaperAlbumName)” album. \(safety)"
+                return "Firnlight will reorder the \(total) \(photos(total)) in the “\(Thresholds.wallpaperAlbumName)” album. \(safety)"
             }
-            return "Alpenglow will \(clauses.joined(separator: " and ")) in the “\(Thresholds.wallpaperAlbumName)” album, which will then hold \(total) \(photos(total)). \(safety)"
+            return "Firnlight will \(clauses.joined(separator: " and ")) in the “\(Thresholds.wallpaperAlbumName)” album, which will then hold \(total) \(photos(total)). \(safety)"
         }
     }
 

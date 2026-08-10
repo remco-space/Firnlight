@@ -15,7 +15,7 @@ import UniformTypeIdentifiers
 ///
 /// One view, two homes, because the platforms disagree about where settings
 /// live: on the Mac it is the standard Settings window behind ⌘, (see
-/// `AlpenglowApp`), and on iPhone and iPad a sheet from the foot of the Export
+/// `FirnlightApp`), and on iPhone and iPad a sheet from the foot of the Export
 /// tab (see `ExportView`) — iOS's own Settings app can only show static
 /// strings from a `Settings.bundle`, which could carry neither these switches
 /// nor a button.
@@ -59,7 +59,7 @@ struct SettingsView: View {
             } header: {
                 Text("Changes in Photos")
             } footer: {
-                Text("Creating the “\(Thresholds.wallpaperAlbumName)” album and setting what’s in it are the only changes Alpenglow ever makes in Photos — your photos themselves are never edited or deleted.")
+                Text("Creating the “\(Thresholds.wallpaperAlbumName)” album and setting what’s in it are the only changes Firnlight ever makes in Photos — your photos themselves are never edited or deleted.")
             }
 
             Section {
@@ -76,7 +76,7 @@ struct SettingsView: View {
             } header: {
                 Text("Your Judgments")
             } footer: {
-                Text("Your duels, verdicts, ignored photos and album-size standard are the one thing Alpenglow can’t work out again. A copy restores here or on another device; restoring adds to what’s already here rather than replacing it.")
+                Text("Your duels, verdicts, ignored photos and album-size standard are the one thing Firnlight can’t work out again. A copy restores here or on another device; restoring adds to what’s already here rather than replacing it.")
             }
 
             Section {
@@ -96,7 +96,7 @@ struct SettingsView: View {
             } header: {
                 Text("Updates")
             } footer: {
-                Text("Alpenglow is downloaded from GitHub rather than an app store, so nothing tells you a fix exists unless it asks. The check sends nothing about you or your library.")
+                Text("Firnlight is downloaded from GitHub rather than an app store, so nothing tells you a fix exists unless it asks. The check sends nothing about you or your library.")
             }
 
             Section {
@@ -165,11 +165,11 @@ struct SettingsView: View {
         if let error = updates.lastError { return error }
         switch updates.availability {
         case .unknown:
-            return updates.consent == true ? nil : "Alpenglow hasn’t checked, and won’t until you turn this on."
+            return updates.consent == true ? nil : "Firnlight hasn’t checked, and won’t until you turn this on."
         case .upToDate:
-            return "Alpenglow \(AppIdentity.version) is the newest release."
+            return "Firnlight \(AppIdentity.version) is the newest release."
         case .available(let version, _):
-            return "Alpenglow \(version) is available. You have \(AppIdentity.version)."
+            return "Firnlight \(version) is available. You have \(AppIdentity.version)."
         }
     }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build Alpenglow (Debug), quit any running instance, and launch the fresh
+# Build Firnlight (Debug), quit any running instance, and launch the fresh
 # build. Intended for a quick edit → rebuild → see-it-running dev loop.
 #
 # Killing first (rather than just re-launching) is deliberate: FR-1.6 makes a
@@ -15,10 +15,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-PROJECT="Alpenglow.xcodeproj"
-SCHEME="Alpenglow"
+PROJECT="Firnlight.xcodeproj"
+SCHEME="Firnlight"
 CONFIG="Debug"
-APP_NAME="Alpenglow"
+APP_NAME="Firnlight"
 
 # Resolve the built .app path from the build settings (works with whatever
 # DerivedData location Xcode uses, so it stays in sync with the IDE).
@@ -54,8 +54,8 @@ fi
 # a hash of AppIcon.icon against a stamp kept beside the built product. The stamp
 # living in DerivedData is deliberate: wiping DerivedData yields a new bundle
 # path, which needs the clear anyway.
-ICON_SRC="Alpenglow/AppIcon.icon"
-ICON_STAMP="$(dirname "$APP_PATH")/.alpenglow-icon-hash"
+ICON_SRC="Firnlight/AppIcon.icon"
+ICON_STAMP="$(dirname "$APP_PATH")/.firnlight-icon-hash"
 icon_hash() {
   # -print0/sort -z keeps the order stable regardless of directory traversal;
   # hashing the per-file digests folds names and contents into one value.

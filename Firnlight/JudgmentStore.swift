@@ -27,7 +27,7 @@ import os
 /// verified against the real container before this was written, rather than
 /// trusted to reproduce the same name.
 nonisolated enum JudgmentStore {
-    private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "JudgmentStore")
+    private static let log = Logger(subsystem: "space.remco.Firnlight", category: "JudgmentStore")
 
     /// Every model the app persists. The container is built from the union;
     /// each configuration below then claims a disjoint subset.

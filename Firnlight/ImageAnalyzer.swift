@@ -23,7 +23,7 @@ nonisolated enum ImageAnalyzer {
         var horizonAngleDegrees: Float?
     }
 
-    private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "ImageAnalyzer")
+    private static let log = Logger(subsystem: "space.remco.Firnlight", category: "ImageAnalyzer")
 
     static func analyze(_ image: CGImage) async throws -> Outcome {
         var outcome = Outcome()

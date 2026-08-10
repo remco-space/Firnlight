@@ -6,7 +6,7 @@ import os
 import UIKit
 #endif
 
-/// Keeps the "Alpenglow" album in Photos mirroring the current top-ranked,
+/// Keeps the "Firnlight" album in Photos mirroring the current top-ranked,
 /// deduplicated wallpaper candidates.
 ///
 /// This is the app's ONLY write path into the Photos library, and it is
@@ -17,7 +17,7 @@ import UIKit
 /// The album is tracked by `localIdentifier`, persisted in `UserDefaults`, not
 /// by title: a title match would orphan the album on user rename (the next
 /// sync would create a duplicate while System Settings keeps rotating the
-/// stale one) and could hijack an unrelated pre-existing "Alpenglow" album.
+/// stale one) and could hijack an unrelated pre-existing "Firnlight" album.
 /// The stored identifier is looked up first; title match is only a fallback
 /// for the very first sync (or if the stored identifier no longer resolves,
 /// e.g. the album was deleted), and any title match immediately persists its
@@ -145,7 +145,7 @@ nonisolated enum WallpaperAlbumSync {
         /// can't proceed, and silently creating one would be wrong: the
         /// user's devices share a single album (FR-6.10), so on a second
         /// device that just hasn't finished syncing yet, creating would leave
-        /// them with two "Alpenglow" albums the moment the real one arrives.
+        /// them with two "Firnlight" albums the moment the real one arrives.
         /// ExportView turns this into a wait-or-create choice rather than an
         /// error the user can only stare at.
         case albumNotVisible
@@ -169,7 +169,7 @@ nonisolated enum WallpaperAlbumSync {
         }
     }
 
-    private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "WallpaperAlbumSync")
+    private static let log = Logger(subsystem: "space.remco.Firnlight", category: "WallpaperAlbumSync")
 
     /// Makes album membership exactly the current top `count` candidates, in
     /// diversity order (consecutive photos as different as possible), so

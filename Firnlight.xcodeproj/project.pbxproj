@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		000000000000000000000120 /* Alpenglow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Alpenglow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000120 /* Firnlight.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Firnlight.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		000000000000000000000010 /* Alpenglow */ = {
+		000000000000000000000010 /* Firnlight */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Alpenglow;
+			path = Firnlight;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -30,7 +30,7 @@
 		000000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
-				000000000000000000000010 /* Alpenglow */,
+				000000000000000000000010 /* Firnlight */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -38,7 +38,7 @@
 		000000000000000000000020 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				000000000000000000000120 /* Alpenglow.app */,
+				000000000000000000000120 /* Firnlight.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -46,9 +46,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		000000000000000100000000 /* Alpenglow */ = {
+		000000000000000100000000 /* Firnlight */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 000000000000000110000000 /* Build configuration list for PBXNativeTarget "Alpenglow" */;
+			buildConfigurationList = 000000000000000110000000 /* Build configuration list for PBXNativeTarget "Firnlight" */;
 			buildPhases = (
 				000000000000000120000000 /* Sources */,
 				000000000000000130000000 /* Frameworks */,
@@ -57,11 +57,11 @@
 			buildRules = (
 			);
 			fileSystemSynchronizedGroups = (
-				000000000000000000000010 /* Alpenglow */,
+				000000000000000000000010 /* Firnlight */,
 			);
-			name = Alpenglow;
-			productName = MyApp;
-			productReference = 000000000000000000000120 /* Alpenglow.app */;
+			name = Firnlight;
+			productName = Firnlight;
+			productReference = 000000000000000000000120 /* Firnlight.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -79,7 +79,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 000000000000000010000000 /* Build configuration list for PBXProject "Alpenglow" */;
+			buildConfigurationList = 000000000000000010000000 /* Build configuration list for PBXProject "Firnlight" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -93,7 +93,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				000000000000000100000000 /* Alpenglow */,
+				000000000000000100000000 /* Firnlight */,
 			);
 		};
 /* End PBXProject section */
@@ -115,7 +115,7 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		000000000000000011000000 /* Debug configuration for PBXProject "Alpenglow" */ = {
+		000000000000000011000000 /* Debug configuration for PBXProject "Firnlight" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -184,7 +184,7 @@
 			};
 			name = Debug;
 		};
-		000000000000000012000000 /* Release configuration for PBXProject "Alpenglow" */ = {
+		000000000000000012000000 /* Release configuration for PBXProject "Firnlight" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -245,13 +245,13 @@
 			};
 			name = Release;
 		};
-		000000000000000111000000 /* Debug configuration for PBXNativeTarget "Alpenglow" */ = {
+		000000000000000111000000 /* Debug configuration for PBXNativeTarget "Firnlight" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 25;
 				VERSIONING_SYSTEM = "apple-generic";
 				DEVELOPMENT_TEAM = VGZ5MZ2P8B;
 				ENABLE_APP_SANDBOX = YES;
@@ -266,9 +266,9 @@
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Alpenglow-Info.plist";
+				INFOPLIST_FILE = "Firnlight-Info.plist";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 remco.space";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Alpenglow reads your photo library on-device to find and rank nature photos that make great wallpapers. Your photos never leave your device.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Firnlight reads your photo library on-device to find and rank nature photos that make great wallpapers. Your photos never leave your device.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -281,8 +281,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.14.2;
-				PRODUCT_BUNDLE_IDENTIFIER = space.remco.Alpenglow;
+				MARKETING_VERSION = 0.15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = space.remco.Firnlight;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
@@ -304,13 +304,13 @@
 			};
 			name = Debug;
 		};
-		000000000000000112000000 /* Release configuration for PBXNativeTarget "Alpenglow" */ = {
+		000000000000000112000000 /* Release configuration for PBXNativeTarget "Firnlight" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 25;
 				VERSIONING_SYSTEM = "apple-generic";
 				DEVELOPMENT_TEAM = VGZ5MZ2P8B;
 				ENABLE_APP_SANDBOX = YES;
@@ -325,9 +325,9 @@
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Alpenglow-Info.plist";
+				INFOPLIST_FILE = "Firnlight-Info.plist";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 remco.space";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Alpenglow reads your photo library on-device to find and rank nature photos that make great wallpapers. Your photos never leave your device.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Firnlight reads your photo library on-device to find and rank nature photos that make great wallpapers. Your photos never leave your device.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -340,8 +340,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.14.2;
-				PRODUCT_BUNDLE_IDENTIFIER = space.remco.Alpenglow;
+				MARKETING_VERSION = 0.15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = space.remco.Firnlight;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
@@ -366,19 +366,19 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		000000000000000010000000 /* Build configuration list for PBXProject "Alpenglow" */ = {
+		000000000000000010000000 /* Build configuration list for PBXProject "Firnlight" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				000000000000000011000000 /* Debug configuration for PBXProject "Alpenglow" */,
-				000000000000000012000000 /* Release configuration for PBXProject "Alpenglow" */,
+				000000000000000011000000 /* Debug configuration for PBXProject "Firnlight" */,
+				000000000000000012000000 /* Release configuration for PBXProject "Firnlight" */,
 			);
 			defaultConfigurationName = Release;
 		};
-		000000000000000110000000 /* Build configuration list for PBXNativeTarget "Alpenglow" */ = {
+		000000000000000110000000 /* Build configuration list for PBXNativeTarget "Firnlight" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				000000000000000111000000 /* Debug configuration for PBXNativeTarget "Alpenglow" */,
-				000000000000000112000000 /* Release configuration for PBXNativeTarget "Alpenglow" */,
+				000000000000000111000000 /* Debug configuration for PBXNativeTarget "Firnlight" */,
+				000000000000000112000000 /* Release configuration for PBXNativeTarget "Firnlight" */,
 			);
 			defaultConfigurationName = Release;
 		};

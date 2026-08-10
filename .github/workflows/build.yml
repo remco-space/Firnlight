@@ -43,14 +43,14 @@ jobs:
 
       - name: Build (macOS)
         run: |
-          xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow \
+          xcodebuild -project Firnlight.xcodeproj -scheme Firnlight \
             -configuration Debug -destination "platform=macOS" \
             CODE_SIGNING_ALLOWED=NO \
             build
 
       - name: Build (iOS Simulator)
         run: |
-          xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow \
+          xcodebuild -project Firnlight.xcodeproj -scheme Firnlight \
             -configuration Debug -destination "generic/platform=iOS Simulator" \
             CODE_SIGNING_ALLOWED=NO \
             build

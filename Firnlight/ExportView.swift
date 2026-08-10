@@ -876,14 +876,14 @@ struct ExportView: View {
     /// hunting for a button that cannot exist.
     private var handOffText: String {
         // "the", not "a": there is exactly one such album, and the article has
-        // to read correctly whatever `wallpaperAlbumName` is — "a “Alpenglow”"
+        // to read correctly whatever `wallpaperAlbumName` is — "a “Firnlight”"
         // is wrong today (seen on the iPad), and "an" would be wrong the moment
         // the name started with a consonant sound.
         let album = "Keeps the “\(Thresholds.wallpaperAlbumName)” album in Photos in sync with your top-ranked wallpapers, previewed below."
         #if os(macOS)
         return album + " In System Settings → Wallpaper, choose “Add Photo Album” and pick it for automatic rotation."
         #else
-        return album + " Alpenglow doesn't set wallpaper here — iPhone and iPad don't let apps do that. The album syncs to your Mac through iCloud Photos, and you point System Settings → Wallpaper at it there."
+        return album + " Firnlight doesn't set wallpaper here — iPhone and iPad don't let apps do that. The album syncs to your Mac through iCloud Photos, and you point System Settings → Wallpaper at it there."
         #endif
     }
 
@@ -1379,7 +1379,7 @@ struct ExportView: View {
                 systemImage: "icloud.and.arrow.down"
             )
             .foregroundStyle(.orange)
-            Text("If you've already used Alpenglow on another device, the album will arrive once iCloud Photos finishes syncing — syncing now would create a second one. If this is your first device, create it here.")
+            Text("If you've already used Firnlight on another device, the album will arrive once iCloud Photos finishes syncing — syncing now would create a second one. If this is your first device, create it here.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

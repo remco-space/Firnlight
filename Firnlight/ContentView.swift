@@ -36,7 +36,7 @@ struct ContentView: View {
     // FR-8.1: persist which tab the user was on. `@AppStorage`, not the more
     // idiomatic `@SceneStorage`, because `@SceneStorage` restores through
     // AppKit's window-restoration machinery — it needs a window to still
-    // exist, or be reconstructable, across launches. Alpenglow is a
+    // exist, or be reconstructable, across launches. Firnlight is a
     // single-window app that quits when its window closes (FR-1.7), so there
     // is no surviving window state for `@SceneStorage` to hang its restore
     // off; in practice it doesn't come back on the next launch. `@AppStorage`
@@ -57,7 +57,7 @@ struct ContentView: View {
             }
         }
         // No minimum size here: on the Mac the window owns that (see
-        // AlpenglowApp), and on iPhone the screen is narrower than any floor
+        // FirnlightApp), and on iPhone the screen is narrower than any floor
         // worth setting.
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
@@ -113,14 +113,14 @@ struct ContentView: View {
                 isAskingAboutUpdates = true
             }
         }
-        .alert("Let Alpenglow check for new releases?", isPresented: $isAskingAboutUpdates) {
+        .alert("Let Firnlight check for new releases?", isPresented: $isAskingAboutUpdates) {
             // Both answers are final, which is why neither is worded as "not
             // now": the question is asked once, and the switch in Settings is
             // where either answer is changed later.
             Button("Don’t Check") { updates.setConsent(false) }
             Button("Check for Releases") { updates.setConsent(true) }
         } message: {
-            Text("Alpenglow is downloaded from GitHub rather than an app store, so it can only tell you a newer version exists by asking GitHub. It sends nothing about you or your library, and you can change this in Settings.")
+            Text("Firnlight is downloaded from GitHub rather than an app store, so it can only tell you a newer version exists by asking GitHub. It sends nothing about you or your library, and you can change this in Settings.")
         }
     }
 }
@@ -224,7 +224,7 @@ private struct LibraryTab: View {
             Image(systemName: "arrow.down.circle")
                 .foregroundStyle(.tint)
                 .accessibilityHidden(true) // decorative — the text beside it carries the meaning (FR-4.13)
-            Text("Alpenglow \(version) is available. You have \(AppIdentity.version).")
+            Text("Firnlight \(version) is available. You have \(AppIdentity.version).")
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 12)
             Button("Get It…") { openURL(url) }
@@ -249,7 +249,7 @@ private struct LibraryTab: View {
                 .font(.system(size: 52))
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true) // decorative — statusMessage below carries the actual state (FR-4.13)
-                .help("Alpenglow can't read your Photos library yet — grant access to start finding wallpapers.")
+                .help("Firnlight can't read your Photos library yet — grant access to start finding wallpapers.")
 
             Text("Photos Access")
                 .font(.title2.bold())
@@ -290,18 +290,18 @@ private struct LibraryTab: View {
     private var statusMessage: String {
         switch authorization.status {
         case .notDetermined:
-            "Alpenglow needs to read your photo library to find wallpaper-worthy nature photos. Everything stays on your device."
+            "Firnlight needs to read your photo library to find wallpaper-worthy nature photos. Everything stays on your device."
         case .authorized:
             "Access granted."
         case .limited:
             // FR-1.8: a selection is not a smaller library, it is a different
-            // job the app can't do — it can't tell a photo you deleted from
-            // one you didn't select, and Photos won't let it maintain an album
+            // job the app can’t do — it can’t tell a photo you deleted from
+            // one you didn’t select, and Photos won’t let it maintain an album
             // at all. Saying so beats appearing to work.
             #if os(macOS)
-            "Alpenglow only has access to selected photos, which isn’t enough to keep the wallpaper album or notice photos you delete. Allow access to all photos in System Settings → Privacy & Security → Photos."
+            "Firnlight only has access to selected photos, which isn’t enough to keep the wallpaper album or notice photos you delete. Allow access to all photos in System Settings → Privacy & Security → Photos."
             #else
-            "Alpenglow only has access to selected photos, which isn’t enough to keep the wallpaper album or notice photos you delete. Allow access to all photos in Settings."
+            "Firnlight only has access to selected photos, which isn’t enough to keep the wallpaper album or notice photos you delete. Allow access to all photos in Settings."
             #endif
         case .denied:
             // The app holding privacy permissions has a different name on each
@@ -348,7 +348,7 @@ private struct LibraryStatusView: View {
                 // Fixed order, every phase: blurb, progress, outcome. The only
                 // thing that ever changes height is `outcome`, at the bottom,
                 // where FR-8.7 allows a result to take room.
-                Text("Alpenglow keeps up with your library on its own, watching for photos added, edited or deleted. It looks for high-resolution landscape photos worth considering as wallpapers — metadata only, and nothing leaves your device.")
+                Text("Firnlight keeps up with your library on its own, watching for photos added, edited or deleted. It looks for high-resolution landscape photos worth considering as wallpapers — metadata only, and nothing leaves your device.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -452,7 +452,7 @@ private struct LibraryStatusView: View {
             // last good summary to imply the app is current when it isn't.
             Label("Couldn't read the library", systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.orange)
-                .help("The last pass over the library stopped with the error below; Alpenglow tries again the next time your library changes.")
+                .help("The last pass over the library stopped with the error below; Firnlight tries again the next time your library changes.")
             Text(message)
                 .font(.callout)
                 .foregroundStyle(.secondary)

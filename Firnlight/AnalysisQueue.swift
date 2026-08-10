@@ -11,7 +11,7 @@ import UIKit
 /// Why an analysis run is waiting rather than working (FR-3.4, FR-3.6, FR-3.7).
 ///
 /// Every case but the last is a condition the *system* reports, never one the
-/// app invented: the requirements are explicit that Alpenglow obeys the user's
+/// app invented: the requirements are explicit that Firnlight obeys the user's
 /// system-wide choices rather than adding settings of its own, so there is
 /// deliberately no in-app "Wi-Fi only" toggle or thermal preference to pair
 /// with these. `iCloudRetryPending` is the exception and the one wait the app
@@ -77,7 +77,7 @@ nonisolated final class NetworkPolicy: Sendable {
     private let monitor = NWPathMonitor()
 
     private init() {
-        monitor.start(queue: DispatchQueue(label: "space.remco.Alpenglow.NetworkPolicy"))
+        monitor.start(queue: DispatchQueue(label: "space.remco.Firnlight.NetworkPolicy"))
     }
 
     /// nil when iCloud downloads may proceed, else what to wait for.
@@ -187,7 +187,7 @@ actor AnalysisQueue {
         self.modelContext = ModelContext(modelContainer)
     }
 
-    private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "AnalysisQueue")
+    private static let log = Logger(subsystem: "space.remco.Firnlight", category: "AnalysisQueue")
 
     private enum ItemResult: Sendable {
         case analyzed(String, ImageAnalyzer.Outcome)

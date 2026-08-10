@@ -1,6 +1,6 @@
 # Project skills (project-scoped)
 
-These skills apply only to Alpenglow. Claude Code discovers them at startup —
+These skills apply only to Firnlight. Claude Code discovers them at startup —
 after adding or changing skills here, restart Claude Code (or `/clear`) to pick
 them up.
 

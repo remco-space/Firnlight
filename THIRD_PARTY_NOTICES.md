@@ -56,7 +56,7 @@ PolyForm Perimeter License 1.0.0
 ```
 
 The full license text is in that submodule's own `LICENSE` file. It permits
-any use except building a competing product; Alpenglow does not compete with
+any use except building a competing product; Firnlight does not compete with
 a Claude Code skills collection, so this applies without restriction here.
 
 ## `swiftui-specialist`, `swiftui-whats-new-27`

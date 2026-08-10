@@ -45,7 +45,7 @@ final class LibraryScanner {
     /// granted is kept (FR-8.7).
     private(set) var outcome: Outcome?
 
-    private let log = Logger(subsystem: "space.remco.Alpenglow", category: "LibraryScanner")
+    private let log = Logger(subsystem: "space.remco.Firnlight", category: "LibraryScanner")
 
     var isScanning: Bool {
         if case .scanning = phase { true } else { false }

@@ -24,8 +24,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-APP_NAME="Alpenglow"
-BUNDLE_ID="space.remco.Alpenglow"
+APP_NAME="Firnlight"
+BUNDLE_ID="space.remco.Firnlight"
 OUT_DIR="docs/store"
 # A real screenshot of this UI runs well into six figures of bytes; a solid
 # black or white capture (the missing-permission failure mode) compresses to
@@ -46,10 +46,10 @@ check_size() {
 }
 
 echo "==> Building $APP_NAME (Debug)…"
-xcodebuild -project Alpenglow.xcodeproj -scheme "$APP_NAME" -configuration Debug build
+xcodebuild -project Firnlight.xcodeproj -scheme "$APP_NAME" -configuration Debug build
 
 APP_PATH="$(
-  xcodebuild -project Alpenglow.xcodeproj -scheme "$APP_NAME" -configuration Debug \
+  xcodebuild -project Firnlight.xcodeproj -scheme "$APP_NAME" -configuration Debug \
     -showBuildSettings 2>/dev/null \
   | awk -F' = ' '
       / BUILT_PRODUCTS_DIR / { dir = $2 }
@@ -68,7 +68,7 @@ ICT="$XCODE_ROOT/Contents/Applications/Icon Composer.app/Contents/Executables/ic
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-"$ICT" Alpenglow/AppIcon.icon --export-image --output-file "$WORK/icon.png" \
+"$ICT" Firnlight/AppIcon.icon --export-image --output-file "$WORK/icon.png" \
   --platform macOS --rendition Default --width 1024 --height 1024 --scale 1
 sips -Z 256 "$WORK/icon.png" --out "$OUT_DIR/icon.png" >/dev/null
 check_size "$OUT_DIR/icon.png"
@@ -122,7 +122,7 @@ capture_tab export
 quit_app
 
 echo "==> Updating README.md's caption to the current release…"
-VERSION="$(sed -n 's/^\t*MARKETING_VERSION = \(.*\);/\1/p' Alpenglow.xcodeproj/project.pbxproj | head -1)"
+VERSION="$(sed -n 's/^\t*MARKETING_VERSION = \(.*\);/\1/p' Firnlight.xcodeproj/project.pbxproj | head -1)"
 [[ -n "$VERSION" ]] || { echo "error: could not read MARKETING_VERSION" >&2; exit 1; }
 sed -i '' -E "s/Screens as of v[0-9]+\.[0-9]+\.[0-9]+\./Screens as of v${VERSION}./" README.md
 
