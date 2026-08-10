@@ -150,7 +150,7 @@ struct CandidateGridView: View {
             ContentUnavailableView(
                 "Couldn’t Load Your Photos",
                 systemImage: "exclamationmark.triangle",
-                description: Text("Nothing has been lost — Alpenglow just couldn’t read this list.\n\n\(loadError)")
+                description: Text("Nothing has been lost — Firnlight just couldn’t read this list.\n\n\(loadError)")
             )
         }
     }
@@ -165,7 +165,7 @@ struct CandidateGridView: View {
                     ContentUnavailableView(
                         "No Candidates Yet",
                         systemImage: "photo.stack",
-                        description: Text("Alpenglow is still working through your library — accepted photos appear here, best first.")
+                        description: Text("Firnlight is still working through your library — accepted photos appear here, best first.")
                     )
                 }
             } else {
@@ -605,7 +605,7 @@ struct ThumbnailCell: View {
 /// Context-menu actions shared by every image shown in the app.
 @MainActor
 enum CandidateActions {
-    private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "CandidateActions")
+    private static let log = Logger(subsystem: "space.remco.Firnlight", category: "CandidateActions")
 
     /// FR-4.6's "Open in Photos". Best-effort deep link; the scheme is
     /// undocumented but widely used.

@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Alpenglow is a native macOS app that curates desktop wallpapers from the user's own
+Firnlight is a native macOS app that curates desktop wallpapers from the user's own
 Photos library: it finds high-resolution nature photos without people, learns
-personal preference from pairwise duels, and maintains a Photos album ("Alpenglow")
+personal preference from pairwise duels, and maintains a Photos album ("Firnlight")
 that System Settings can rotate as wallpaper. Everything runs on-device.
 
 ## How this project is documented
@@ -116,7 +116,7 @@ Signing state: automatic signing under the free personal team (`VGZ5MZ2P8B`)
 only — no Developer ID, no notarization. A downloaded release is ad-hoc
 signed enough to run, but Gatekeeper still blocks first launch as "Apple
 cannot check it for malicious software" (FR-10.2); the fix users need is
-right-click → Open, or `xattr -cr Alpenglow.app`.
+right-click → Open, or `xattr -cr Firnlight.app`.
 
 CI: release builds come from GitHub Actions `macos-26` runners (Xcode
 26.x), so what ships is built against the SDK generation users run, and
@@ -205,10 +205,10 @@ Xcode project (no SwiftPM manifest, no test target):
 
 ```bash
 # Build
-xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow -configuration Debug build
+xcodebuild -project Firnlight.xcodeproj -scheme Firnlight -configuration Debug build
 
 # Or just open it
-open Alpenglow.xcodeproj
+open Firnlight.xcodeproj
 ```
 
 Requires the full **Xcode 26+** toolchain (matching the app's macOS/iOS 26+
@@ -246,7 +246,7 @@ the only place a version can live and still be the one the app is running:
   leave the machine sharing a version *and* build number with a different one.
   Set `MARKETING_VERSION` by editing the build setting, *not* with `agvtool
   new-marketing-version`: that subcommand looks for `CFBundleShortVersionString`
-  in `Alpenglow-Info.plist`, which is only a partial plist here
+  in `Firnlight-Info.plist`, which is only a partial plist here
   (`GENERATE_INFOPLIST_FILE = YES` supplies the key), so it reads an empty
   version and then tries to write to a path named after the setting's value.
   `next-version -all` prints the same `Cannot find "…/YES"` line for that
@@ -262,7 +262,7 @@ directly and by the iOS footer through the same `AppIdentity`. (All of this
 lives here for the same reason signing does: build settings cannot carry a
 comment.)
 
-**The app icon** is a hand-authored Icon Composer bundle, `Alpenglow/AppIcon.icon`
+**The app icon** is a hand-authored Icon Composer bundle, `Firnlight/AppIcon.icon`
 (one bundle serves macOS and iOS). Its artwork carries its own documentation as
 comments in the `Assets/*.svg` files; the notes below are the parts JSON and
 build settings cannot hold a comment for.
@@ -326,7 +326,7 @@ runs anyway, as Xcode's own `RegisterWithLaunchServices` phase. The tell is
 that the *identical* bundle copied to a fresh path renders correctly; that copy
 is also the way to check what the icon really looks like in situ:
 ```bash
-cp -R "$(...)/Build/Products/Debug/Alpenglow.app" /tmp/iconcheck/ && open /tmp/iconcheck/Alpenglow.app
+cp -R "$(...)/Build/Products/Debug/Firnlight.app" /tmp/iconcheck/ && open /tmp/iconcheck/Firnlight.app
 ```
 Deleting the icon store is what actually shifts it. `build-and-run.sh` does that
 for you, but only when the contents of `AppIcon.icon` changed — the deletion is
@@ -344,16 +344,16 @@ Validate and preview from the command line — there is no need to open the GUI:
 ```bash
 ICT="/Applications/Xcode<version>.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool"
 # Diagnostics (empty array == valid):
-"$ICT" Alpenglow/AppIcon.icon --export-intermediate-representation --output-directory /tmp/ir --platform macOS
+"$ICT" Firnlight/AppIcon.icon --export-intermediate-representation --output-directory /tmp/ir --platform macOS
 # Render one of Default/Dark/ClearLight/ClearDark/TintedLight/TintedDark:
-"$ICT" Alpenglow/AppIcon.icon --export-image --output-file /tmp/icon.png \
+"$ICT" Firnlight/AppIcon.icon --export-image --output-file /tmp/icon.png \
   --platform macOS --rendition Default --width 512 --height 512 --scale 1
 ```
 
 Runtime logs go to the unified logging system under subsystem
-`space.remco.Alpenglow` (categories per component). Filter in Console.app or:
+`space.remco.Firnlight` (categories per component). Filter in Console.app or:
 ```bash
-log stream --predicate 'subsystem == "space.remco.Alpenglow"'
+log stream --predicate 'subsystem == "space.remco.Firnlight"'
 ```
 For a simulator, the same predicate works through `xcrun simctl spawn <udid> log show`.
 

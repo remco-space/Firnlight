@@ -50,9 +50,9 @@ jobs:
         run: |
           # Belt-and-braces for FR-10.3: refuse to publish a release whose
           # tag disagrees with the version the built app will actually
-          # report (Alpenglow-Info.plist / About.swift read MARKETING_VERSION
+          # report (Firnlight-Info.plist / About.swift read MARKETING_VERSION
           # back at runtime — see CLAUDE.md's versioning section).
-          PROJECT_VERSION="$(xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow \
+          PROJECT_VERSION="$(xcodebuild -project Firnlight.xcodeproj -scheme Firnlight \
             -configuration Release -showBuildSettings 2>/dev/null \
             | awk -F' = ' '/ MARKETING_VERSION / { print $2; exit }')"
           EXPECTED_TAG="v${PROJECT_VERSION}"
@@ -63,7 +63,7 @@ jobs:
 
       - name: Build (ad-hoc signed)
         run: |
-          xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow \
+          xcodebuild -project Firnlight.xcodeproj -scheme Firnlight \
             -configuration Release -destination "platform=macOS" \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGN_STYLE=Manual \
@@ -77,7 +77,7 @@ jobs:
           TAG_NAME: ${{ github.ref_name }}
         run: |
           APP_PATH="$(
-            xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow -configuration Release \
+            xcodebuild -project Firnlight.xcodeproj -scheme Firnlight -configuration Release \
               -showBuildSettings 2>/dev/null \
             | awk -F' = ' '
                 / BUILT_PRODUCTS_DIR / { dir = $2 }
@@ -89,7 +89,7 @@ jobs:
             echo "::error::Built app not found at $APP_PATH"
             exit 1
           fi
-          ZIP_NAME="Alpenglow-${TAG_NAME}.zip"
+          ZIP_NAME="Firnlight-${TAG_NAME}.zip"
           # ditto, not zip: preserves the app bundle's resource forks and
           # extended attributes the way Finder's "Compress" does.
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_NAME"

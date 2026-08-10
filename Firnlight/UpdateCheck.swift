@@ -13,7 +13,7 @@ import os
 /// plain unauthenticated `GET` of the repository's "latest release" endpoint,
 /// with no query, no body, no identifier of any kind, and the answer is
 /// compared against the running bundle's own version locally. What the request
-/// unavoidably carries — that some copy of Alpenglow asked, from some address —
+/// unavoidably carries — that some copy of Firnlight asked, from some address —
 /// is the irreducible cost of asking at all, which is why FR-10.8 makes the
 /// asking conditional on the user's agreement rather than assuming it. Until
 /// they agree, no request is made: `consent` is unset, and every entry point
@@ -51,12 +51,12 @@ final class UpdateCheck {
     /// shown as themselves rather than as a spinner (FR-8.7).
     private var isChecking = false
 
-    private let log = Logger(subsystem: "space.remco.Alpenglow", category: "UpdateCheck")
+    private let log = Logger(subsystem: "space.remco.Firnlight", category: "UpdateCheck")
 
     /// The repository the releases come from — a fact about the project, not
     /// about any machine (FR-10.7). It is the same repository README and
     /// CHANGELOG point at.
-    private nonisolated static let repository = "remco-space/Alpenglow"
+    private nonisolated static let repository = "remco-space/Firnlight"
 
     private static let consentDefaultsKey = "UpdateCheck.consent"
 

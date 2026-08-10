@@ -24,10 +24,10 @@ xcuserdata/
 *.xccheckout
 
 # Xcode project — keep the project itself, drop only per-user state
-Alpenglow.xcodeproj/project.xcworkspace/xcuserdata/
-Alpenglow.xcodeproj/xcuserdata/
-Alpenglow.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
-Alpenglow.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/configuration/
+Firnlight.xcodeproj/project.xcworkspace/xcuserdata/
+Firnlight.xcodeproj/xcuserdata/
+Firnlight.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+Firnlight.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/configuration/
 
 # ---- SourceKit-LSP (xcode-build-server) ----
 # Machine-specific build/index paths; regenerate with `xcode-build-server config`.

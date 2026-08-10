@@ -289,7 +289,7 @@ nonisolated enum Thresholds {
     // MARK: Wallpaper album (Phase 6)
 
     /// Name of the Photos album the app keeps in sync with top candidates.
-    static let wallpaperAlbumName = "Alpenglow"
+    static let wallpaperAlbumName = "Firnlight"
 
     /// Default number of top-ranked photos synced into the wallpaper album
     /// (used when the quality curve is too flat or small to suggest from).

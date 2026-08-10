@@ -34,14 +34,14 @@ import os
 /// and for the same reason: a replayed duel choice is not a harmless duplicate
 /// but a second SGD step the user never made.
 nonisolated enum JudgmentArchive {
-    private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "JudgmentArchive")
+    private static let log = Logger(subsystem: "space.remco.Firnlight", category: "JudgmentArchive")
 
     /// The archive's own file type, so the exporter and importer name the same
     /// thing. Plain JSON — readable, diffable, and requiring nothing of a
     /// future version but that it can still parse it.
     static let contentType: UTType = .json
 
-    static var defaultFilename: String { "Alpenglow Judgments" }
+    static var defaultFilename: String { "Firnlight Judgments" }
 
     // MARK: The archive format
 
@@ -117,7 +117,7 @@ nonisolated enum JudgmentArchive {
         var errorDescription: String? {
             switch self {
             case .unreadableFormat(let version):
-                "This file was written by a newer version of Alpenglow (format \(version)). Nothing was changed — update Alpenglow and try again."
+                "This file was written by a newer version of Firnlight (format \(version)). Nothing was changed — update Firnlight and try again."
             }
         }
     }
@@ -250,7 +250,7 @@ nonisolated enum JudgmentArchive {
     /// fresh suggestion after reset still moves the size to match it, same as
     /// always. `resetLearnedTaste` below leaves it untouched, which is what
     /// makes this sentence true rather than aspirational.
-    static let resetStays = "Your photos, the wallpaper album in Photos, and everything the app has scanned and analyzed. Alpenglow starts ranking from your Photos favorites again, as it did on the first launch. The album size you’ve set, relative to the suggestion, carries over unchanged."
+    static let resetStays = "Your photos, the wallpaper album in Photos, and everything the app has scanned and analyzed. Firnlight starts ranking from your Photos favorites again, as it did on the first launch. The album size you’ve set, relative to the suggestion, carries over unchanged."
 
     /// Discards everything the app has learned about the user's taste.
     ///

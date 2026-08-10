@@ -5,7 +5,7 @@
   of this base; only keys Xcode has no INFOPLIST_KEY_ build setting for belong
   here.
 
-  It lives outside the Alpenglow/ folder on purpose: that folder is a
+  It lives outside the Firnlight/ folder on purpose: that folder is a
   PBXFileSystemSynchronizedRootGroup, so anything inside it is picked up
   automatically — an Info.plist there risks also being copied into the bundle
   as a resource.

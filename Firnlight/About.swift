@@ -3,7 +3,7 @@ import SwiftUI
 import AppKit
 #endif
 
-/// FR-8.8/FR-8.9: what Alpenglow says it is, and which one this is.
+/// FR-8.8/FR-8.9: what Firnlight says it is, and which one this is.
 ///
 /// One source for the four facts FR-8.8 lists — name, one sentence, version,
 /// copyright — so the Mac's About box and the iPhone/iPad footer cannot drift
@@ -30,7 +30,7 @@ enum AppIdentity {
     static var name: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
-            ?? "Alpenglow"
+            ?? "Firnlight"
     }
 
     /// FR-8.8's one sentence. Deliberately the brief's own description of the
@@ -71,7 +71,7 @@ enum AppIdentity {
 /// cannot be a leftover. Only the one sentence has no Info.plist key, and the
 /// panel's `credits` option is where it goes.
 ///
-/// Hence `CommandGroup(replacing: .appInfo)`: the default "About Alpenglow"
+/// Hence `CommandGroup(replacing: .appInfo)`: the default "About Firnlight"
 /// item calls the panel with no options, which would show the sentence only if
 /// it were duplicated into a `Credits.rtf` resource — a second copy of a fact,
 /// and an RTF file that could carry no explanation of itself. Replacing the

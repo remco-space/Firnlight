@@ -115,7 +115,7 @@ actor PreferenceRanker {
         var judgmentCount: Int?
     }
 
-    private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "PreferenceRanker")
+    private static let log = Logger(subsystem: "space.remco.Firnlight", category: "PreferenceRanker")
 
     private var entries: [Entry] = []
     private var indexByID: [String: Int] = [:]
@@ -760,7 +760,7 @@ actor PreferenceRanker {
     /// `JudgmentArchive.resetLearnedTaste` deletes the file and nothing more.
     nonisolated static var weightsFileURL: URL {
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Alpenglow", isDirectory: true)
+            .appendingPathComponent("Firnlight", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent("ranker-weights.json")
     }

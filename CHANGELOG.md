@@ -12,6 +12,15 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Changed
+
+- The app is renamed from Alpenglow to Firnlight. The new bundle identifier
+  means macOS treats it as a new app: Photos access needs a one-time
+  re-grant, and learned duel data does not carry over automatically. The
+  Photos album the app maintains is now created as "Firnlight" — the old
+  "Alpenglow" album is left untouched for you to delete — and on the Mac,
+  System Settings → Wallpaper needs to be re-pointed at the new album.
+
 ## [0.14.2] - 2026-08-10
 
 ### Fixed

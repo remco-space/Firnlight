@@ -1,6 +1,6 @@
-# Alpenglow — Product Brief
+# Firnlight — Product Brief
 
-Alpenglow curates desktop wallpapers from the user's own Photos library: it
+Firnlight curates desktop wallpapers from the user's own Photos library: it
 finds high-resolution nature photos without people, learns the user's personal
 taste from quick pairwise comparisons, and maintains a Photos album that System
 Settings can rotate as wallpaper.
@@ -10,7 +10,7 @@ for the newest: its look and feel follow the current design language (the
 27 era and beyond), rendered as faithfully as each supported system can.
 The Mac
 is where wallpaper happens: only there does the album become
-the desktop. On iPhone and iPad Alpenglow is a companion — the same finding,
+the desktop. On iPhone and iPad Firnlight is a companion — the same finding,
 learning and curating, feeding the same album — but it never sets wallpaper.
 Requirements apply everywhere unless marked *(macOS)* or *(iPhone and iPad)*.
 
@@ -45,15 +45,15 @@ The app has three tabs matching the three stages of the journey:
 - **FR-1.6** *(macOS)* Launching the app twice just brings the already-running
   window forward instead of opening a second one. *(Why: two copies running at
   once could destroy the taste the user has trained.)*
-- **FR-1.7** *(macOS)* Alpenglow is a single-window app: closing the window
+- **FR-1.7** *(macOS)* Firnlight is a single-window app: closing the window
   quits it, as does ⌘Q (FR-8.3). *(Why: for a single-window utility a
   windowless, still-running state is a no-op with nothing for the user to do.)*
   If a sync is running, quitting waits for it to finish or undo itself (FR-6.8).
-- **FR-1.8** Alpenglow works only with access to the whole library. Given a
+- **FR-1.8** Firnlight works only with access to the whole library. Given a
   limited selection it does nothing but say so and offer the upgrade to full
   access — including when access is narrowed while the app is open — rather
   than appearing to work on part of a library.
-- **FR-1.9** Alpenglow asks before every change it makes in Photos, naming
+- **FR-1.9** Firnlight asks before every change it makes in Photos, naming
   exactly what will be created, added, or removed. The user can turn off asking
   for each kind of change from the alert itself, and turn it back on in the
   app's settings. *(Why: the library is the user's, not the app's — but a
@@ -76,7 +76,7 @@ The app has three tabs matching the three stages of the journey:
 - **FR-2.6** Photos deleted from the library, or edited until they no longer
   qualify (e.g. cropped too small), drop out of the app automatically —
   including while the app is open, without a re-scan.
-- **FR-2.7** Alpenglow is always current with the user's library: it catches
+- **FR-2.7** Firnlight is always current with the user's library: it catches
   up at launch and follows changes as they happen, with nothing to press.
   There is no re-scan control, because there is nothing a re-scan would find
   that the app has not already found.
@@ -224,7 +224,7 @@ The app has three tabs matching the three stages of the journey:
 
 ## 6. The wallpaper album (Export tab)
 
-- **FR-6.1** The app maintains a Photos album named "Alpenglow" holding
+- **FR-6.1** The app maintains a Photos album named "Firnlight" holding
   exactly the user's top-ranked, de-duplicated photos. Each sync reports the
   total plus how many were added and removed.
 - **FR-6.2** The album is ordered for visual variety, so that on "rotate in
@@ -274,7 +274,7 @@ The app has three tabs matching the three stages of the journey:
 - **FR-6.10** The album changes only when the user asks for a sync. *(Why: the
   user's devices share one album, and unattended changes would let them undo
   each other's.)*
-- **FR-6.11** A device that cannot yet see the Alpenglow album says so and
+- **FR-6.11** A device that cannot yet see the Firnlight album says so and
   waits.
 
 ## 7. Durability
@@ -287,6 +287,12 @@ The app has three tabs matching the three stages of the journey:
 - **FR-7.3** An update never costs the user accumulated work. A version that
   cannot read what an older one saved says so and leaves it intact, rather
   than starting empty or refusing to open.
+  *(One sanctioned exception to FR-7.1–7.3: at 0.15.0 the app changed its name
+  from Alpenglow to Firnlight, and macOS treats a renamed app as a new one — so
+  that single update asked for Photos access once more and did not carry stored
+  work across by itself. The cost was chosen deliberately, disclosed in the
+  changelog, and is not a precedent; these requirements bind every other
+  release.)*
 - **FR-7.4** The user can copy everything they have decided off the device, and
   restore it — here or on another device. "Everything they have decided" is
   every decision section 9 gives cross-device meaning — the album-size
@@ -298,7 +304,7 @@ The app has three tabs matching the three stages of the journey:
 
 ## 8. Native feel
 
-- **FR-8.1** Alpenglow follows Apple's Human Interface Guidelines for the
+- **FR-8.1** Firnlight follows Apple's Human Interface Guidelines for the
   platform it is running on. This single rule stands in for the whole
   native-feel checklist Apple already maintains: respecting the system
   light/dark appearance and accent, adapting cleanly to any window or screen
@@ -316,7 +322,7 @@ The app has three tabs matching the three stages of the journey:
   the rest of the app stays usable while it runs. *(Why: a frozen window with a
   spinning cursor looks broken and leaves the user with nothing to do — even
   honest waiting should never take the whole app hostage.)*
-- **FR-8.3** *(macOS)* Alpenglow has a standard menu bar that exposes its real
+- **FR-8.3** *(macOS)* Firnlight has a standard menu bar that exposes its real
   commands as named menu items with correct enabled/disabled state and standard
   keyboard shortcuts — at least Quit (⌘Q), the three photo actions of FR-4.6
   (worded as their reverse when the photo already carries the verdict), the
@@ -359,7 +365,7 @@ The app has three tabs matching the three stages of the journey:
   as much of what makes an app feel native as any control style.)*
 - **FR-8.8** The app tells the user what it is and which one they have, in
   each platform's own place for that: on macOS a filled-in About box —
-  Alpenglow's icon and name, one sentence saying what it does, its true
+  Firnlight's icon and name, one sentence saying what it does, its true
   version, and a copyright line naming its author; on iPhone and iPad the
   same facts somewhere the user would naturally find them. The icon shown is
   the icon: the same rendering the system presents for the app everywhere
@@ -368,7 +374,7 @@ The app has three tabs matching the three stages of the journey:
   a template leftover or a placeholder. *(Why: About is where a user checks
   what they are running before reporting a problem or updating; an empty box
   or a stock "1.0" says nobody finished the app.)*
-- **FR-8.9** Alpenglow is versioned as major.minor.patch, semantic-versioning
+- **FR-8.9** Firnlight is versioned as major.minor.patch, semantic-versioning
   style read for an app: the major number marks a release that changes what
   the app is or asks the user to relearn something, minor adds features, and
   patch only fixes. Every user-visible change bumps the version, the version
@@ -377,7 +383,7 @@ The app has three tabs matching the three stages of the journey:
   fit for its first real release it stays at 0.minor.patch, so the version
   never claims a maturity the app does not have. *(Why: a version is the one
   handle user and author share when something must be identified — "which
-  Alpenglow does this happen in?" — and it only works if it is truthful and
+  Firnlight does this happen in?" — and it only works if it is truthful and
   moves with the app.)*
 
 - **FR-8.10** The interface holds only what this brief calls for: every
@@ -408,7 +414,7 @@ The app has three tabs matching the three stages of the journey:
 
 ## 10. Distribution
 
-- **FR-10.1** Alpenglow is available as a free download from GitHub
+- **FR-10.1** Firnlight is available as a free download from GitHub
   Releases, alongside its public source under an open license — never
   gated behind a store account, a paid tier, or a build step the user has
   to run themselves.

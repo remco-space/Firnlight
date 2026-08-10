@@ -19,7 +19,7 @@ import UIKit
 final class PhotoLibraryAuthorization {
     private(set) var status: PHAuthorizationStatus
 
-    private let log = Logger(subsystem: "space.remco.Alpenglow", category: "Authorization")
+    private let log = Logger(subsystem: "space.remco.Firnlight", category: "Authorization")
 
     init() {
         status = PHPhotoLibrary.authorizationStatus(for: .readWrite)

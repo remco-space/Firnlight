@@ -33,17 +33,17 @@ import os
 ///
 /// (The refusal was environmental, not a mis-set identifier: the installed
 /// bundle's `BGTaskSchedulerPermittedIdentifiers` reads
-/// `space.remco.Alpenglow.analysis.*`, exactly what is registered below.)
+/// `space.remco.Firnlight.analysis.*`, exactly what is registered below.)
 @MainActor
 final class ContinuedAnalysisTask {
     /// Must stay in step with `BGTaskSchedulerPermittedIdentifiers` in
     /// Info.plist, which declares the wildcard form. The scheduler rejects any
     /// identifier not covered there with `BGTaskSchedulerErrorCodeNotPermitted`.
     private static var identifierPrefix: String {
-        (Bundle.main.bundleIdentifier ?? "Alpenglow") + ".analysis"
+        (Bundle.main.bundleIdentifier ?? "Firnlight") + ".analysis"
     }
 
-    private static let log = Logger(subsystem: "space.remco.Alpenglow", category: "ContinuedAnalysisTask")
+    private static let log = Logger(subsystem: "space.remco.Firnlight", category: "ContinuedAnalysisTask")
 
     /// One owner for the whole process, because the thing it owns is
     /// process-wide: `BGTaskScheduler.register` binds an identifier once, for

@@ -1,19 +1,19 @@
-# Alpenglow
+# Firnlight
 
-<img src="docs/store/icon.png" width="128" height="128" alt="Alpenglow app icon: a mountain silhouette splitting sunlight into a rainbow">
+<img src="docs/store/icon.png" width="128" height="128" alt="Firnlight app icon: a mountain silhouette splitting sunlight into a rainbow">
 
-Alpenglow curates desktop wallpapers from your own Photos library. It finds
+Firnlight curates desktop wallpapers from your own Photos library. It finds
 high-resolution nature photos without people, learns your taste from quick
-pairwise duels, and maintains a Photos album — "Alpenglow" — that System
+pairwise duels, and maintains a Photos album — "Firnlight" — that System
 Settings can rotate as your wallpaper. Everything runs on-device.
 
 It runs on macOS 26+ and, as a companion, on iPhone and iPad on iOS 26+. The Mac
-is the only place wallpaper actually gets set; on iPhone and iPad, Alpenglow
+is the only place wallpaper actually gets set; on iPhone and iPad, Firnlight
 finds, learns, and curates into the same album, which syncs to the Mac.
 
 [![Library tab: analysis progress and a grid of ranked wallpaper candidates](docs/store/library.png)](docs/store/library.png)
 
-*Alpenglow keeps up with your library on its own — nothing to scan, nothing
+*Firnlight keeps up with your library on its own — nothing to scan, nothing
 to manage — and ranks what it finds.*
 
 [![Duel tab: two candidate photos side by side, asking which makes the better wallpaper](docs/store/duel.png)](docs/store/duel.png)
@@ -31,7 +31,7 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) for exactly what the app does and why.
 
 ## Status
 
-Alpenglow is pre-1.0 (see [CHANGELOG.md](CHANGELOG.md) for the current
+Firnlight is pre-1.0 (see [CHANGELOG.md](CHANGELOG.md) for the current
 version) and under active development. Some behaviors are documented as
 verified only on specific hardware — see the doc comments at the relevant
 call sites for details.
@@ -48,7 +48,7 @@ malicious software"). To clear that:
 
 - Right-click (or Control-click) the app in Finder and choose **Open**, then
   confirm in the dialog that appears — this only needs to be done once, or
-- Run `xattr -cr Alpenglow.app` in Terminal before opening it.
+- Run `xattr -cr Firnlight.app` in Terminal before opening it.
 
 ## Usage
 
@@ -60,7 +60,7 @@ the pipeline:
    catches up when it opens and follows changes as they happen.
 2. **Duel** — shows you two photos at a time and learns your taste from
    which one you pick.
-3. **Export** — maintains the "Alpenglow" Photos album with your top-ranked
+3. **Export** — maintains the "Firnlight" Photos album with your top-ranked
    photos. On the Mac, point System Settings → Wallpaper at that album to
    have it rotate automatically.
 
@@ -73,11 +73,11 @@ runs a newer beta instead:
 
 ```bash
 git clone --recurse-submodules <this-repo-url>
-cd Alpenglow
-xcodebuild -project Alpenglow.xcodeproj -scheme Alpenglow -configuration Debug build
+cd Firnlight
+xcodebuild -project Firnlight.xcodeproj -scheme Firnlight -configuration Debug build
 ```
 
-or just `open Alpenglow.xcodeproj`. See [CLAUDE.md](CLAUDE.md) for the fuller
+or just `open Firnlight.xcodeproj`. See [CLAUDE.md](CLAUDE.md) for the fuller
 build, run, and debugging notes (icon rendering, log filtering, simulator
 quirks, and so on).
 

@@ -366,7 +366,7 @@ struct AnalysisView: View {
             statRow("leaf", .secondary, "Not nature", stats.notNature,
                     help: "Rejected: these don't look like nature scenes.")
             statRow("icloud.and.arrow.down", .orange, "iCloud (deferred)", stats.skipped,
-                    help: "Deferred: the originals are in iCloud and not downloaded yet. Alpenglow comes back to them itself once the network and the device allow the download.")
+                    help: "Deferred: the originals are in iCloud and not downloaded yet. Firnlight comes back to them itself once the network and the device allow the download.")
             // Only shown when there is something to report. FR-3.2 fixes the
             // set-aside reasons the user is offered, and this isn't one of
             // them — it's the app admitting it couldn't look, rather than a
