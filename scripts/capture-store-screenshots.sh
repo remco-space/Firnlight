@@ -124,6 +124,6 @@ quit_app
 echo "==> Updating README.md's caption to the current release…"
 VERSION="$(sed -n 's/^\t*MARKETING_VERSION = \(.*\);/\1/p' Alpenglow.xcodeproj/project.pbxproj | head -1)"
 [[ -n "$VERSION" ]] || { echo "error: could not read MARKETING_VERSION" >&2; exit 1; }
-sed -i '' -E "s/The three tabs, as of v[0-9]+\.[0-9]+\.[0-9]+:/The three tabs, as of v${VERSION}:/" README.md
+sed -i '' -E "s/Screens as of v[0-9]+\.[0-9]+\.[0-9]+\./Screens as of v${VERSION}./" README.md
 
 echo "==> Done — docs/store/*.png and README.md's caption are current with v$VERSION."

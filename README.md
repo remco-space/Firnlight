@@ -1,5 +1,7 @@
 # Alpenglow
 
+<img src="docs/store/icon.png" width="128" height="128" alt="Alpenglow app icon: a mountain silhouette splitting sunlight into a rainbow">
+
 Alpenglow curates desktop wallpapers from your own Photos library. It finds
 high-resolution nature photos without people, learns your taste from quick
 pairwise duels, and maintains a Photos album — "Alpenglow" — that System
@@ -9,17 +11,23 @@ It runs on macOS 26+ and, as a companion, on iPhone and iPad on iOS 26+. The Mac
 is the only place wallpaper actually gets set; on iPhone and iPad, Alpenglow
 finds, learns, and curates into the same album, which syncs to the Mac.
 
+[![Library tab: analysis progress and a grid of ranked wallpaper candidates](docs/store/library.png)](docs/store/library.png)
+
+*Alpenglow keeps up with your library on its own — nothing to scan, nothing
+to manage — and ranks what it finds.*
+
+[![Duel tab: two candidate photos side by side, asking which makes the better wallpaper](docs/store/duel.png)](docs/store/duel.png)
+
+*You shape the ranking two photos at a time: whichever makes the better
+wallpaper.*
+
+[![Export tab: the synced Wallpaper Album and a preview grid of the top-ranked photos](docs/store/export.png)](docs/store/export.png)
+
+*Your top picks land in a Photos album System Settings can rotate for you.*
+
+Screens as of v0.14.1.
+
 See [REQUIREMENTS.md](REQUIREMENTS.md) for exactly what the app does and why.
-
-## Screenshots
-
-<img src="docs/store/icon.png" width="128" height="128" alt="Alpenglow app icon: a mountain silhouette splitting sunlight into a rainbow">
-
-The three tabs, as of v0.14.1:
-
-| Library | Duel | Export |
-| --- | --- | --- |
-| [![Library tab: analysis progress and a grid of ranked wallpaper candidates](docs/store/library.png)](docs/store/library.png) | [![Duel tab: two candidate photos side by side, asking which makes the better wallpaper](docs/store/duel.png)](docs/store/duel.png) | [![Export tab: the synced Wallpaper Album and a preview grid of the top-ranked photos](docs/store/export.png)](docs/store/export.png) |
 
 ## Status
 

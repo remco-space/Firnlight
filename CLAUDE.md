@@ -133,7 +133,10 @@ not written retroactively from git history; `README.md` follows
 [makeareadme.com](https://www.makeareadme.com/), trimmed to what a small app
 (not a library) needs.
 
-The README's Screenshots section (FR-10.10) is `docs/store/`: `icon.png` and
+The README's picture story (FR-10.10 — icon plus one screenshot per tab,
+told inline as part of the pitch rather than broken out under its own
+heading, so the page reads as one story rather than a document with a
+"screenshots" section bolted on) is backed by `docs/store/`: `icon.png` and
 one PNG per tab (`library.png`, `duel.png`, `export.png`), referenced from
 `README.md` with the release they were captured for named alongside them.
 `scripts/capture-store-screenshots.sh` regenerates all four and updates that
