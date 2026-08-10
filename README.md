@@ -11,6 +11,16 @@ finds, learns, and curates into the same album, which syncs to the Mac.
 
 See [REQUIREMENTS.md](REQUIREMENTS.md) for exactly what the app does and why.
 
+## Screenshots
+
+<img src="docs/store/icon.png" width="128" height="128" alt="Alpenglow app icon: a mountain silhouette splitting sunlight into a rainbow">
+
+The three tabs, as of v0.14.1:
+
+| Library | Duel | Export |
+| --- | --- | --- |
+| [![Library tab: analysis progress and a grid of ranked wallpaper candidates](docs/store/library.png)](docs/store/library.png) | [![Duel tab: two candidate photos side by side, asking which makes the better wallpaper](docs/store/duel.png)](docs/store/duel.png) | [![Export tab: the synced Wallpaper Album and a preview grid of the top-ranked photos](docs/store/export.png)](docs/store/export.png) |
+
 ## Status
 
 Alpenglow is pre-1.0 (see [CHANGELOG.md](CHANGELOG.md) for the current
