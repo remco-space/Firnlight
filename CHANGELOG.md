@@ -12,6 +12,47 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-10
+
+### Added
+
+- Alpenglow now asks before every change it makes in Photos, naming exactly
+  what will be created, added or removed. Each kind of change can be waved
+  through for good from the alert itself, and turned back on in Settings.
+- A Settings screen — the standard Settings window on the Mac (⌘,), a sheet
+  from the foot of the Export tab on iPhone and iPad.
+- Your judgments can be copied to a file and restored, here or on another
+  device. Restoring merges rather than replaces.
+- A deliberate way to start your taste over, which says what goes and what
+  stays before it happens.
+- Alpenglow can tell you when a newer release exists, if you agree to it
+  asking. It reports nothing about you or your library, and you are asked
+  once.
+
+### Changed
+
+- The app now keeps itself current with your library, with nothing to press:
+  it catches up when it opens and follows changes as Photos reports them, so
+  photos you add, edit or delete appear and disappear on their own. The
+  scan and re-scan controls are gone — there is nothing left for them to
+  find.
+- Photos left only in iCloud are retried by the app itself when the network
+  and the device allow, instead of waiting behind a retry button.
+- The Library tab now offers only stopping a run, and resuming one you
+  stopped. "Analyze N Photos", "Resume" as a starter and "Retry N iCloud
+  Photos" are gone with the work they used to gate.
+- Alpenglow now works only with access to your whole photo library. With
+  access limited to a selection it says so and offers the upgrade, rather
+  than appearing to work: it cannot tell a deleted photo from an unselected
+  one, and Photos will not let it maintain an album at all.
+
+### Fixed
+
+- A version that can't read what another version saved now says so and leaves
+  your data untouched, instead of refusing to open.
+- Lists that fail to load say so instead of showing the same empty state as a
+  library with nothing in it yet.
+
 ## [0.13.0] - 2026-08-09
 
 ### Changed

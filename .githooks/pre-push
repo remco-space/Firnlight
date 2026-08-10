@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+#
+# FR-10.4: the repository refuses a push that would publish anything personal
+# to a machine or an account, rather than relying on anyone to remember to
+# look.
+#
+# Git will not run a hook that lives in the repository by itself — hooks are
+# per-clone configuration, not tracked content — so a fresh clone opts in with
+# one line, documented in the README:
+#
+#     git config core.hooksPath .githooks
+#
+# That line is also set automatically at the start of every Claude Code
+# session (.claude/hooks/git-hooks-install.sh), so the machine this project
+# grew on cannot silently lose it. This hook is a courtesy, not the
+# guarantee: it catches a leak before it ever leaves this machine, but a
+# clone that never ran the opt-in line has no hook to skip. The "Personal
+# data check" GitHub Actions workflow
+# (.github/workflows/check-no-personal-data.yml) is the actual backstop — it
+# runs the identical script server-side on every push to every branch,
+# needs nothing configured first, and fails the push's branch even when this
+# hook never ran at all.
+set -euo pipefail
+
+exec "$(git rev-parse --show-toplevel)/scripts/check-no-personal-data.sh"

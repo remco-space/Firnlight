@@ -8,12 +8,18 @@ import os
 import UIKit
 #endif
 
-/// Why an analysis run is waiting rather than working (FR-3.6, FR-3.7).
+/// Why an analysis run is waiting rather than working (FR-3.4, FR-3.6, FR-3.7).
 ///
-/// Every case is a condition the *system* reports, never one the app invented:
-/// the requirements are explicit that Alpenglow obeys the user's system-wide
-/// choices rather than adding settings of its own, so there is deliberately no
-/// in-app "Wi-Fi only" toggle or thermal preference to pair with these.
+/// Every case but the last is a condition the *system* reports, never one the
+/// app invented: the requirements are explicit that Alpenglow obeys the user's
+/// system-wide choices rather than adding settings of its own, so there is
+/// deliberately no in-app "Wi-Fi only" toggle or thermal preference to pair
+/// with these. `iCloudRetryPending` is the exception and the one wait the app
+/// does schedule for itself, because FR-3.4 hands it that job: deferred photos
+/// are retried by the app when network and power allow, so between rounds
+/// there is a wait that belongs to nobody but the app, and saying so is better
+/// than a run that looks stalled.
+///
 /// `CaseIterable` so the view can lay out every message this can carry and
 /// size its slot to the longest of them before any wait begins (FR-8.7) — see
 /// `AnalysisView`'s waiting label.
@@ -24,6 +30,7 @@ nonisolated enum AnalysisWait: Sendable, Equatable, CaseIterable {
     case lowDataMode
     case cellularNetwork
     case noNetwork
+    case iCloudRetryPending
 
     /// Said in the user's terms — what is being waited for, and why — rather
     /// than naming the API that reported it.
@@ -41,6 +48,8 @@ nonisolated enum AnalysisWait: Sendable, Equatable, CaseIterable {
             "Waiting for Wi-Fi — iCloud photos aren't downloading over cellular."
         case .noNetwork:
             "Waiting for a network connection to download iCloud photos."
+        case .iCloudRetryPending:
+            "Waiting to try the remaining iCloud photos again."
         }
     }
 }

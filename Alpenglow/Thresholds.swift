@@ -111,6 +111,57 @@ nonisolated enum Thresholds {
     /// cause cleared.
     static let analysisPauseRecheckInterval: Duration = .seconds(20)
 
+    /// How long a run waits before trying the photos iCloud hasn't delivered
+    /// again (FR-3.4: deferred photos are the app's to retry, never the
+    /// user's).
+    ///
+    /// Deliberately much longer than the pause re-check above, because it
+    /// answers a different question. That one asks whether a *condition* has
+    /// cleared, which costs a property read; this one asks PhotoKit to attempt
+    /// the downloads again, which costs a network round trip per photo and had
+    /// just failed. Five minutes is short enough that a download unblocked by
+    /// the user opening Photos, or by iCloud finishing something else, is
+    /// picked up while they are still at the machine, and long enough that a
+    /// photo which will never arrive costs a handful of attempts an hour
+    /// rather than a spin.
+    static let deferredRetryInterval: Duration = .seconds(300)
+
+    /// How long the app lets library changes settle before catching up with
+    /// them (FR-2.6, FR-2.7).
+    ///
+    /// Photos reports changes as they happen, and a single user action rarely
+    /// produces a single notification — importing a batch, an edit propagating
+    /// from another device, or the app's own album sync all arrive as a burst.
+    /// Catching up is a pass over the library, so the burst is worth
+    /// collapsing into one. Two seconds is under the time it takes to notice a
+    /// photo missing from the grid, and comfortably longer than the gaps
+    /// within a burst.
+    static let libraryChangeSettleDelay: Duration = .seconds(2)
+
+    /// How often `LibraryCatchUp` re-reads Photos authorization on its own,
+    /// independent of `PhotoLibraryWatcher` (FR-1.8).
+    ///
+    /// The fast path for noticing a narrowing — full access cut down to a
+    /// selection while the app is open — is `photoLibraryDidChange`, and for
+    /// most of the app's life that is also the only path: a narrowing made
+    /// while backgrounded is caught by the `scenePhase` refresh in
+    /// `ContentView` when the app returns to the foreground. Neither covers a
+    /// session that stays foregrounded and idle the whole time: no scene-phase
+    /// transition fires, and — see the doc comment on
+    /// `PhotoLibraryWatcher.photoLibraryDidChange` — Apple documents the
+    /// change observer firing for edits to an already-limited selection, not
+    /// for the authorization-level transition itself, so relying on it alone
+    /// for that case is an assumption this project could not verify. This
+    /// timer is the fallback for exactly that gap, not the primary mechanism,
+    /// which is why it can afford to be slow: `PHPhotoLibrary
+    /// .authorizationStatus(for:)` is a local, synchronous read with no
+    /// PhotoKit round trip, so the cost of checking is negligible, but there
+    /// is nothing to gain from checking often — a narrowing is a deliberate
+    /// trip to Settings, not an event that needs catching within seconds.
+    /// Five minutes bounds how long the app could work on a library it no
+    /// longer fully sees without ever bothering the user with a busy loop.
+    static let authorizationNarrowingRecheckInterval: Duration = .seconds(300)
+
     /// Long-edge size of the analysis bitmap requested from PHImageManager. Never analyze full-res.
     static let analysisPixelSize = 1024
 

@@ -179,10 +179,21 @@ nonisolated enum WallpaperAlbumSync {
     /// the Export tab's "Sync Album" button and the menu bar command of the
     /// same name (FR-8.3) — both explicit acts. Nothing schedules it, and
     /// nothing may: the user's devices share one album, so an unattended sync
-    /// on one would silently undo a deliberate one on another. FR-2.7's launch
-    /// re-sync deliberately stops at scanning and analysis and never reaches
-    /// here.
-    static func sync(container: ModelContainer, count: Int) async throws -> Outcome {
+    /// on one would silently undo a deliberate one on another. The app's
+    /// catching up with the library deliberately stops at scanning and
+    /// analysis and never reaches here (FR-2.7).
+    ///
+    /// FR-1.9 puts a second gate in front of it: `confirm` is asked, with the
+    /// exact counts this call has just worked out, before a single change
+    /// request is made. It is called at the last moment when nothing has yet
+    /// happened, so declining costs nothing and needs no undo. Returning `nil`
+    /// is that decline — not an error, since the user answering a question is
+    /// not a failure.
+    static func sync(
+        container: ModelContainer,
+        count: Int,
+        confirm: @Sendable (PhotosChange) async -> Bool
+    ) async throws -> Outcome? {
         let ordered = try await FeatureStore(modelContainer: container)
             .albumCandidates(limit: count)
             .candidates
@@ -209,6 +220,20 @@ nonisolated enum WallpaperAlbumSync {
         var assetByID: [String: PHAsset] = [:]
         fetchedTargets.enumerateObjects { asset, _, _ in assetByID[asset.localIdentifier] = asset }
         let orderedAssets = orderedIDs.compactMap { assetByID[$0] }
+
+        // FR-1.9: ask before touching the library, naming exactly what this
+        // sync will do. Deliberately here — after the diff is known, so the
+        // question is specific, and before the gate below is taken, so a user
+        // reading an alert isn't holding off their own app's quit.
+        guard await confirm(PhotosChange(
+            kind: .changeAlbum,
+            added: added,
+            removed: removed,
+            total: orderedAssets.count
+        )) else {
+            log.info("Album sync declined by the user; the library was not touched")
+            return nil
+        }
 
         // Hold the termination gate across the remove→re-add span below and
         // its rollback: quitting between the two transactions would strand
@@ -332,8 +357,17 @@ nonisolated enum WallpaperAlbumSync {
     /// Export tab's explicit "Create Album" action — the app never decides on
     /// its own that an album is missing rather than merely unsynced, because
     /// PhotoKit exposes no way to tell those apart.
-    static func createAlbum() async throws {
+    ///
+    /// Asked about like every other change (FR-1.9), under its own switch:
+    /// bringing an album into existence is a different thing to agree to than
+    /// changing what is in one. Returns whether it was created.
+    @discardableResult
+    static func createAlbum(confirm: @Sendable (PhotosChange) async -> Bool) async throws -> Bool {
         let name = Thresholds.wallpaperAlbumName
+        guard await confirm(PhotosChange(kind: .createAlbum)) else {
+            log.info("Album creation declined by the user")
+            return false
+        }
         try await PHPhotoLibrary.shared().performChanges {
             _ = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: name)
         }
@@ -342,6 +376,7 @@ nonisolated enum WallpaperAlbumSync {
         }
         UserDefaults.standard.set(created.localIdentifier, forKey: storedIdentifierDefaultsKey)
         log.info("Created album “\(name, privacy: .public)”")
+        return true
     }
 
     /// Puts the album back the way the last sync found it, if that sync never
@@ -371,7 +406,7 @@ nonisolated enum WallpaperAlbumSync {
     /// add would union the two into something that was never the album's
     /// contents. The record is cleared only on success, so an interrupted
     /// restore stays on offer.
-    static func restoreInterruptedSync() async {
+    static func restoreInterruptedSync(confirm: @Sendable (PhotosChange) async -> Bool) async {
         let defaults = UserDefaults.standard
         guard let identifiers = defaults.stringArray(forKey: interruptedMembershipDefaultsKey),
               !identifiers.isEmpty else { return }
@@ -387,6 +422,33 @@ nonisolated enum WallpaperAlbumSync {
 
         let previous = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
         let stranded = PHAsset.fetchAssets(in: album, options: nil)
+
+        // FR-1.9 wants exactly what will be added or removed — not `previous`
+        // and `stranded` taken whole, which double-counts every photo present
+        // in both: sync() computes its counts as a set difference for the same
+        // reason, so restore's alert must match it rather than overstate both
+        // numbers in the common case (most of what's stranded is also what's
+        // being restored).
+        var previousIDs: Set<String> = []
+        previous.enumerateObjects { asset, _, _ in previousIDs.insert(asset.localIdentifier) }
+        var strandedIDs: Set<String> = []
+        stranded.enumerateObjects { asset, _, _ in strandedIDs.insert(asset.localIdentifier) }
+        let added = previousIDs.subtracting(strandedIDs).count
+        let removed = strandedIDs.subtracting(previousIDs).count
+
+        // FR-1.9 again, and under the same switch as a sync: putting the album
+        // back is the same kind of act — setting what is in it — done with a
+        // different destination in mind.
+        guard await confirm(PhotosChange(
+            kind: .changeAlbum,
+            added: added,
+            removed: removed,
+            total: previous.count
+        )) else {
+            log.info("Restore declined by the user; the record stays on offer")
+            return
+        }
+
         do {
             AlbumSyncGate.shared.begin()
             defer { AlbumSyncGate.shared.end() }

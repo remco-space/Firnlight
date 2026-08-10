@@ -750,12 +750,22 @@ actor PreferenceRanker {
 
     // MARK: Persistence
 
-    private var weightsFileURL: URL {
+    /// Where the learned weights live.
+    ///
+    /// `static` and reachable from outside the actor because starting the
+    /// user's taste over (FR-7.5) has to delete this file as well as the
+    /// judgments: the weights are what those judgments were baked into, and
+    /// leaving them behind would have the app carry on ranking by a taste the
+    /// user had just discarded. Everything else about them stays private —
+    /// `JudgmentArchive.resetLearnedTaste` deletes the file and nothing more.
+    nonisolated static var weightsFileURL: URL {
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Alpenglow", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent("ranker-weights.json")
     }
+
+    private var weightsFileURL: URL { Self.weightsFileURL }
 
     private func loadWeights() -> Weights? {
         guard let data = try? Data(contentsOf: weightsFileURL) else { return nil }

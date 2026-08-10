@@ -1,0 +1,36 @@
+name: Personal data check
+
+# FR-10.4: the repository enforces scripts/check-no-personal-data.sh itself,
+# on every push, wherever it comes from — including a fresh clone that never
+# ran the local pre-push hook's one-line opt-in (.githooks/pre-push, README).
+# That hook is a courtesy that catches a leak before it ever leaves the
+# machine it was written on; this workflow is the actual guarantee, because
+# it runs the identical script server-side and needs nothing configured
+# beforehand.
+#
+# No branch filter on `push` on purpose: a check that only ran against `main`
+# would still let a personal path sit in the public history of every other
+# branch indefinitely. Untargeted `pull_request` covers a PR opened from a
+# fork, where the push itself happens on infrastructure this repository does
+# not control.
+#
+# Deliberately its own workflow rather than a step bolted onto Build: this
+# check has nothing to do with whether the app compiles, needs no Xcode and
+# no macOS runner, and should stay fast and green even while a build is
+# broken — conflating the two would make a machine-specific leak wait behind
+# an unrelated compile failure, or a compile failure wait behind a runner
+# with no personal-data problem to report.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run scripts/check-no-personal-data.sh
+        run: bash scripts/check-no-personal-data.sh

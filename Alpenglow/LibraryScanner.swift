@@ -34,15 +34,7 @@ final class LibraryScanner {
     /// construction, the card emptied out, and everything below it slid up and
     /// back down again a moment later.
     enum Outcome: Equatable {
-        /// `hidden` is the number of stored candidates this scan could not see,
-        /// which is only ever non-zero under limited access. It is reported
-        /// separately rather than folded into `candidates`, because a count
-        /// that silently includes photos the app can no longer read is not the
-        /// "clear summary" FR-2.4 asks for — the user was shown 10 candidates
-        /// beside "Examined 3 photos", with nothing to say where the other 7
-        /// went. Their records are deliberately kept (see the orphan-cleanup
-        /// guard), so the honest report is that they exist and are out of reach.
-        case finished(candidates: Int, examined: Int, newlyAdded: Int, editedQueued: Int, removed: Int, hidden: Int)
+        case finished(candidates: Int, examined: Int, newlyAdded: Int, editedQueued: Int, removed: Int)
         case failed(String)
     }
 
@@ -59,26 +51,32 @@ final class LibraryScanner {
         if case .scanning = phase { true } else { false }
     }
 
-    /// What the scan control is called right now — shared by the Library
-    /// card's button and the menu item FR-8.3 requires beside it, so the two
-    /// can never disagree.
+    /// Set while a scan is running by a change that arrived during it, so the
+    /// pass that would have been dropped is run once at the end instead.
     ///
-    /// Held here, and rewritten only when a scan *settles*, because FR-8.7
-    /// forbids a control resizing while the app works. Both call sites used to
-    /// derive the title from `phase` (`phase == .idle ? "Scan Library" :
-    /// "Scan Again"`), which flipped it the instant a scan *started* — the
-    /// button widened under the pointer that had just clicked it, and did so
-    /// with nobody clicking at all on FR-2.7's launch scan. Carrying the
-    /// previous title through the scanning phase leaves the change where the
-    /// requirement allows one: on the settled result of the run.
-    private(set) var scanActionTitle = "Scan Library"
+    /// Nothing asks for a scan by hand any more (FR-2.7), so every one of them
+    /// is the app catching up with a library change — and a change that lands
+    /// mid-scan is exactly the one a plain "already scanning, ignore" guard
+    /// would lose, leaving the app quietly out of date with no control anywhere
+    /// to put it right.
+    private var rescanRequested = false
 
-    /// Runs a full metadata scan. Inserts records for new candidates, refreshes
-    /// mutable metadata (favorites), queues photos edited since their analysis
-    /// for targeted re-analysis, and removes records whose assets were deleted
-    /// or no longer qualify.
+    /// Brings the store in line with the library: inserts records for new
+    /// candidates, refreshes mutable metadata (favorites), queues photos edited
+    /// since their analysis for targeted re-analysis, and removes records whose
+    /// assets were deleted or no longer qualify (FR-2.2, FR-2.6).
     func scan(into context: ModelContext) async {
-        guard !isScanning else { return }
+        guard !isScanning else {
+            rescanRequested = true
+            return
+        }
+        repeat {
+            rescanRequested = false
+            await runScan(into: context)
+        } while rescanRequested
+    }
+
+    private func runScan(into context: ModelContext) async {
         phase = .scanning(examined: 0, total: 0)
 
         do {
@@ -96,10 +94,7 @@ final class LibraryScanner {
             var editedQueued = 0
             var removed = 0
             var unsavedChanges = 0
-            /// Candidate assets this scan actually saw. Equals the stored count
-            /// with full access; falls short of it under limited access, and
-            /// the difference is what the summary reports as hidden.
-            var visibleCandidates = 0
+            var candidates = 0
             var seenIdentifiers: Set<String> = []
             seenIdentifiers.reserveCapacity(existingRecords.count)
             /// Whether this scan touched any `PhotoRecord` the grid reads —
@@ -115,7 +110,7 @@ final class LibraryScanner {
                 }
 
                 if isCandidate(asset) {
-                    visibleCandidates += 1
+                    candidates += 1
                     if let record {
                         if record.isFavorite != asset.isFavorite {
                             record.isFavorite = asset.isFavorite
@@ -180,38 +175,35 @@ final class LibraryScanner {
                 }
             }
 
-            // Assets deleted from the library leave orphaned records — clean up.
+            // Assets deleted from the library leave orphaned records — clean up
+            // (FR-2.6).
             //
-            // Only safe with full access, where "not in the fetch" really does
-            // mean "not in the library". Under `.limited` the fetch returns
-            // only the user's chosen selection, so this would read every photo
-            // outside that selection as deleted and destroy its record —
-            // feature print, aesthetics score, horizon measurement and cached
-            // rank alike. It would happen unattended, too: `isAuthorized` is
-            // true for `.limited`, so FR-2.7 re-scans at every launch without
-            // the user clicking anything. Narrowing access must cost reach and
-            // nothing else (FR-7.1).
+            // This is only sound because the app runs on the whole library and
+            // nothing less (FR-1.8): "not in the fetch" then really does mean
+            // "not in the library". Under a limited selection the fetch returns
+            // only the user's chosen photos, so this would read every photo
+            // outside the selection as deleted and destroy its record — feature
+            // print, aesthetics score, horizon measurement and cached rank
+            // alike — unattended, since catching up needs no click. That is the
+            // concrete reason a selection counts as not granted rather than as
+            // a narrower kind of access.
             //
-            // What is *not* at stake is the user's trained taste. Choices,
-            // verdicts and ignores live in `Judgments.store`, which this file
-            // never opens, so the worst case is the analysis cache — costly to
-            // rebuild but rebuildable, and the judgments simply reattach to the
-            // photos when they return. That separation is why this is a bad day
-            // rather than an unrecoverable one.
-            //
-            // Records outside the selection simply go stale instead, which is
-            // harmless: they can't be re-analyzed or exported while they're
-            // invisible, and widening access again brings them straight back.
-            // The in-loop deletion above stays — it only ever fires for assets
-            // the fetch *did* return, so it judges a photo the app can see.
-            if isLimitedAccess {
-                log.info("Skipping orphan cleanup: limited access can't distinguish a deleted photo from an unselected one")
-            } else {
+            // The `total`/`assets` fetch above was taken when the scan started,
+            // and nothing in the loop above observes cancellation — a scan
+            // already running when access narrows to a selection runs to
+            // completion on that stale, now-partial fetch. `LibraryCatchUp.end()`
+            // only stops the *next* pass. So this is re-checked here, live,
+            // immediately before the one step that is unsound on anything less
+            // than the whole library, rather than trusted to have stayed true
+            // for as long as the scan above took to run.
+            if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized {
                 for (identifier, record) in recordsByIdentifier where !seenIdentifiers.contains(identifier) {
                     context.delete(record)
                     removed += 1
                     contentChanged = true
                 }
+            } else {
+                log.info("Access narrowed mid-scan; skipping orphan cleanup so photos outside this fetch are not mistaken for deleted")
             }
 
             try context.save()
@@ -225,24 +217,18 @@ final class LibraryScanner {
                 contentChanged = true
             }
 
-            let stored = try context.fetchCount(FetchDescriptor<PhotoRecord>())
-            // Report what this scan could see, and account for the rest
-            // separately. With full access these are the same number.
-            let hidden = max(0, stored - visibleCandidates)
             // Written in this order, and only here: the outcome is swapped for
             // its replacement in one step, then the run is marked over. The
             // card therefore never sees a moment with no summary in it.
             outcome = .finished(
-                candidates: visibleCandidates,
+                candidates: candidates,
                 examined: total,
                 newlyAdded: newlyAdded,
                 editedQueued: editedQueued,
-                removed: removed,
-                hidden: hidden
+                removed: removed
             )
             phase = .idle
-            scanActionTitle = "Scan Again"
-            log.info("Scan finished: \(total) examined, \(visibleCandidates) candidates visible of \(stored) stored (\(newlyAdded) new, \(editedQueued) edited queued for re-analysis, \(removed) removed, \(hidden) hidden)")
+            log.info("Scan finished: \(total) examined, \(candidates) candidates (\(newlyAdded) new, \(editedQueued) edited queued for re-analysis, \(removed) removed)")
             // FR-4.5: the visible Library view brings itself up to date for
             // content, not just order. A scan can change what belongs in the
             // grid — add, remove, or re-flag a favorite (FR-2.2), drop a
@@ -259,7 +245,6 @@ final class LibraryScanner {
             log.error("Scan failed: \(error.localizedDescription)")
             outcome = .failed(error.localizedDescription)
             phase = .idle
-            scanActionTitle = "Try Again"
         }
     }
 
@@ -397,13 +382,6 @@ final class LibraryScanner {
         try context.save()
         log.info("Applied \(changed) ignore judgments from the shared store")
         return changed
-    }
-
-    /// Whether the app can currently see only a user-chosen subset of the
-    /// library. Read at the point of use rather than cached, because the user
-    /// can change the selection while the app is running.
-    private var isLimitedAccess: Bool {
-        PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited
     }
 
     /// Metadata-only wallpaper pre-filter; never touches pixel data.

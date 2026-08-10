@@ -44,6 +44,15 @@ final class GridModel {
     /// indicator reads this, so switching views is covered by the same
     /// indicator a re-rank is.
     private(set) var isLoading = false
+    /// Why the last load failed, if it did (FR-8.12).
+    ///
+    /// The three loads used to swallow their errors with `try?`, which turned
+    /// every failure into an empty list — and an empty grid already means
+    /// "nothing here yet". A user whose store had gone unreadable would have
+    /// been shown the same friendly "No Candidates Yet" as someone who had
+    /// simply never scanned, which is precisely the ambiguity FR-8.12 exists
+    /// to forbid. Kept until a load succeeds, so a failure can't flicker past.
+    private(set) var loadError: String?
     /// The Library tab's view switch (FR-4.9). Lives here rather than as
     /// view-local `@State` so it has one source of truth reachable both from
     /// `CandidateGridView`'s own picker and from the View menu's Library
@@ -74,15 +83,23 @@ final class GridModel {
         let store = store(container)
         repeat {
             pendingReload = false
-            // `selection` is re-read each pass, so a view switched during a
-            // load is what the coalesced repeat goes on to fetch.
-            switch selection {
-            case .library:
-                result = try? await store.rankedCandidates()
-            case .notWallpaperMaterial:
-                notWallpaperMaterial = (try? await store.notWallpaperMaterialCandidates()) ?? []
-            case .ignored:
-                ignored = (try? await store.ignoredCandidates()) ?? []
+            do {
+                // `selection` is re-read each pass, so a view switched during a
+                // load is what the coalesced repeat goes on to fetch.
+                switch selection {
+                case .library:
+                    result = try await store.rankedCandidates()
+                case .notWallpaperMaterial:
+                    notWallpaperMaterial = try await store.notWallpaperMaterialCandidates()
+                case .ignored:
+                    ignored = try await store.ignoredCandidates()
+                }
+                loadError = nil
+            } catch {
+                // The view keeps whatever it last had — a stale list is more
+                // use than a blank one — and the message is what tells the
+                // user the list is stale (FR-8.12).
+                loadError = error.localizedDescription
             }
         } while pendingReload
     }
@@ -123,18 +140,39 @@ struct CandidateGridView: View {
         .focusedSceneValue(\.libraryGridModel, model)
     }
 
+    /// FR-8.12: a list that could not be read never reads as a list with
+    /// nothing in it. Shown in place of the empty state, and only there — a
+    /// view that still has content keeps showing it, since a stale list plus
+    /// this message is more use than a blank one.
+    @ViewBuilder
+    private var loadFailure: some View {
+        if let loadError = model.loadError {
+            ContentUnavailableView(
+                "Couldn’t Load Your Photos",
+                systemImage: "exclamationmark.triangle",
+                description: Text("Nothing has been lost — Alpenglow just couldn’t read this list.\n\n\(loadError)")
+            )
+        }
+    }
+
     @ViewBuilder
     private var candidateGrid: some View {
         if let result = model.result {
             if result.candidates.isEmpty {
-                ContentUnavailableView(
-                    "No Candidates Yet",
-                    systemImage: "photo.stack",
-                    description: Text("Run the scan and analysis above — accepted photos appear here, best first.")
-                )
+                if model.loadError != nil {
+                    loadFailure
+                } else {
+                    ContentUnavailableView(
+                        "No Candidates Yet",
+                        systemImage: "photo.stack",
+                        description: Text("Alpenglow is still working through your library — accepted photos appear here, best first.")
+                    )
+                }
             } else {
                 grid(result.candidates)
             }
+        } else if model.loadError != nil {
+            loadFailure
         } else {
             loadingPlaceholder("Loading candidates…")
         }
@@ -143,7 +181,9 @@ struct CandidateGridView: View {
     @ViewBuilder
     private var notWallpaperMaterialGrid: some View {
         if let marked = model.notWallpaperMaterial {
-            if marked.isEmpty {
+            if marked.isEmpty, model.loadError != nil {
+                loadFailure
+            } else if marked.isEmpty {
                 ContentUnavailableView(
                     "No Photos Marked",
                     systemImage: "hand.thumbsdown",
@@ -152,6 +192,8 @@ struct CandidateGridView: View {
             } else {
                 grid(marked)
             }
+        } else if model.loadError != nil {
+            loadFailure
         } else {
             loadingPlaceholder("Loading photos…")
         }
@@ -160,7 +202,9 @@ struct CandidateGridView: View {
     @ViewBuilder
     private var ignoredGrid: some View {
         if let ignored = model.ignored {
-            if ignored.isEmpty {
+            if ignored.isEmpty, model.loadError != nil {
+                loadFailure
+            } else if ignored.isEmpty {
                 ContentUnavailableView(
                     "No Ignored Photos",
                     systemImage: "eye.slash",
@@ -169,6 +213,8 @@ struct CandidateGridView: View {
             } else {
                 grid(ignored)
             }
+        } else if model.loadError != nil {
+            loadFailure
         } else {
             loadingPlaceholder("Loading photos…")
         }
@@ -700,10 +746,21 @@ enum CandidateActions {
         let descriptor = FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.localIdentifier == localIdentifier }
         )
-        guard let record = try? modelContext.fetch(descriptor).first else { return }
-        modelContext.insert(IgnoreRecord(photoKey: record.judgmentKey, isIgnored: ignored, timestamp: Date()))
-        record.isExcluded = ignored
-        try? modelContext.save()
+        // Logged rather than swallowed. FR-8.12 asks that no failure be
+        // silent, and this one reaches the user by the shortest possible
+        // route: anything that stops this write is the store itself, and the
+        // reload this bump triggers reads that same store — so the grid's own
+        // `loadError` says so a moment later, in words, where the photos would
+        // have been. What must not happen is the write failing and the app
+        // carrying on as if the photo had been ignored.
+        do {
+            guard let record = try modelContext.fetch(descriptor).first else { return }
+            modelContext.insert(IgnoreRecord(photoKey: record.judgmentKey, isIgnored: ignored, timestamp: Date()))
+            record.isExcluded = ignored
+            try modelContext.save()
+        } catch {
+            log.error("Failed to \(ignored ? "ignore" : "un-ignore") \(localIdentifier, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
         RankingClock.shared.bump() // grid + export preview + suggestion reload
     }
 }

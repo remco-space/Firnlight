@@ -17,11 +17,21 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
 
-    /// The scan → analyze pipeline, owned here rather than by the Library tab
-    /// that displays it. FR-2.7's startup re-sync drives these, and it has to
-    /// run whichever tab the user is on — see the `.task` below.
-    @State private var scanner = LibraryScanner()
-    @State private var analysisModel = AnalysisModel()
+    /// The pipeline that keeps the app current with the library (FR-2.7),
+    /// owned here rather than by the Library tab that displays it: a `TabView`
+    /// only builds the *selected* tab, and catching up has to happen whichever
+    /// tab the user was last on. It is also what the tab's own progress reads,
+    /// so a launch catch-up and a change-driven one are visibly the same run.
+    @State private var catchUp = LibraryCatchUp()
+
+    /// FR-10.8. Shared with the settings switch that turns it on and off — see
+    /// `UpdateCheck.shared`.
+    private let updates = UpdateCheck.shared
+    /// The one time the app puts the question. Raised once the library is
+    /// usable rather than at the first frame, so a first launch shows the
+    /// Photos-access screen alone instead of stacking an unrelated alert on
+    /// top of it.
+    @State private var isAskingAboutUpdates = false
 
     // FR-8.1: persist which tab the user was on. `@AppStorage`, not the more
     // idiomatic `@SceneStorage`, because `@SceneStorage` restores through
@@ -37,7 +47,7 @@ struct ContentView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             Tab("Library", systemImage: "photo.on.rectangle.angled", value: AppTab.library) {
-                LibraryTab(authorization: authorization, scanner: scanner, analysisModel: analysisModel)
+                LibraryTab(authorization: authorization, catchUp: catchUp, updates: updates)
             }
             Tab("Duel", systemImage: "rectangle.split.2x1", value: AppTab.duel) {
                 DuelView()
@@ -50,29 +60,34 @@ struct ContentView: View {
         // AlpenglowApp), and on iPhone the screen is narrower than any floor
         // worth setting.
         .onChange(of: scenePhase) { _, newPhase in
-            // Pick up grants made in System Settings while we were in the background.
-            if newPhase == .active {
-                authorization.refresh()
-            }
+            guard newPhase == .active else { return }
+            // Pick up grants made in System Settings while we were in the
+            // background (FR-1.3), and narrowings made the same way (FR-1.8).
+            authorization.refresh()
+            // Pick a run back up that the system ended while the app was away,
+            // or one whose deferred iCloud work may now be possible (FR-3.4,
+            // FR-3.6). Deliberately *not* a whole catch-up: the library
+            // reports its own changes (see `LibraryCatchUp`), so walking it
+            // again on every switch back to the app would be work with a known
+            // answer.
+            catchUp.resumeIfWorkRemains()
         }
-        // FR-2.7: with access already granted, launching re-syncs on its own —
-        // scan, then analyze to completion, exactly as clicking the buttons
-        // would.
+        // FR-2.7: with access to the whole library, the app catches up on its
+        // own — at launch and from then on as Photos reports changes — with
+        // nothing for the user to press.
         //
         // Attached to the TabView, not to the Library tab that shows the
         // progress, because `TabView` only builds the *selected* tab: while
         // this lived in `LibraryTab.task`, FR-8.1 restoring the user to Export
-        // or Duel meant the tab never mounted and the re-sync silently never
-        // ran. FR-2.7 is unconditional, so its trigger has to hang off
-        // something that exists on every launch regardless of tab.
+        // or Duel meant the tab never mounted and the catch-up silently never
+        // ran. It is unconditional, so its trigger has to hang off something
+        // that exists on every launch regardless of tab.
         //
-        // `.task(id:)` on the authorization state rather than a plain `.task`
-        // and a "did this already" flag: the re-sync must also start the
-        // moment the user grants access without relaunching (FR-1.3), which is
-        // exactly when this id flips. Re-running after a revoke → re-grant is
-        // correct too, not a double-run to guard against — and a redundant
-        // trigger is a no-op anyway, since `scan` returns early while a scan is
-        // in flight and `start` hands back the already-running task.
+        // `.task(id:)` on the authorization state rather than a plain `.task`:
+        // the pipeline must also start the moment the user grants access
+        // without relaunching (FR-1.3), which is exactly when this id flips —
+        // and must stand down the moment access is narrowed to a selection
+        // (FR-1.8), which is when it flips back.
         //
         // Nothing about *where* the work runs changes: the scan yields
         // cooperatively and analysis runs in its own actor off the main thread,
@@ -80,27 +95,45 @@ struct ContentView: View {
         // switching to Library mid-run picks up the same observable models
         // already counting up (FR-2.4, FR-4.11).
         .task(id: authorization.isAuthorized) {
-            guard authorization.isAuthorized else { return }
+            guard authorization.isAuthorized else {
+                await catchUp.end()
+                return
+            }
             // Deliberately no album work here. Recovering an interrupted sync
             // (FR-6.8) is offered in the Export tab instead of done on launch,
             // because these devices share one album and FR-6.10 forbids
             // changing it unattended — see WallpaperAlbumSync.restoreInterruptedSync.
-            await scanner.scan(into: modelContext)
-            // start() rescores and bumps RankingClock when it finishes.
-            await analysisModel.start(container: modelContext.container).value
+            catchUp.begin(context: modelContext, authorization: authorization)
+
+            // FR-10.8, in the order the requirement puts it: agreement first,
+            // then — and only then — a check.
+            if updates.hasBeenAsked {
+                await updates.checkIfAgreed()
+            } else {
+                isAskingAboutUpdates = true
+            }
+        }
+        .alert("Let Alpenglow check for new releases?", isPresented: $isAskingAboutUpdates) {
+            // Both answers are final, which is why neither is worded as "not
+            // now": the question is asked once, and the switch in Settings is
+            // where either answer is changed later.
+            Button("Don’t Check") { updates.setConsent(false) }
+            Button("Check for Releases") { updates.setConsent(true) }
+        } message: {
+            Text("Alpenglow is downloaded from GitHub rather than an app store, so it can only tell you a newer version exists by asking GitHub. It sends nothing about you or your library, and you can change this in Settings.")
         }
     }
 }
 
-/// Library tab: Photos authorization flow, then the scan → analyze pipeline.
+/// Library tab: Photos authorization, then the pipeline's progress and the
+/// ranked grid.
 private struct LibraryTab: View {
     let authorization: PhotoLibraryAuthorization
-    /// Owned by `ContentView`, because FR-2.7's startup re-sync drives them
-    /// from outside any tab. This tab renders their progress and offers the
-    /// manual scan / analyze / retry controls onto the same two models, so a
-    /// run the user starts here and one the launch started are the same run.
-    let scanner: LibraryScanner
-    let analysisModel: AnalysisModel
+    /// Owned by `ContentView`, because catching up runs from outside any tab.
+    /// This tab renders its progress, so a catch-up the launch started and one
+    /// a library change started are visibly the same run.
+    let catchUp: LibraryCatchUp
+    let updates: UpdateCheck
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
@@ -112,15 +145,15 @@ private struct LibraryTab: View {
     // no separate "wait for the grid, then scroll" step to get right.
     //
     // Fidelity trade-off, deliberate: this restores a raw pixel offset, not a
-    // specific photo's position. The Library tab's content is the scan/
-    // analysis cards followed by the ranked grid, and the grid re-orders
+    // specific photo's position. The Library tab's content is the pipeline
+    // cards followed by the ranked grid, and the grid re-orders
     // itself between launches as duels retrain the ranking (FR-4.5) — so a
     // pixel-perfect "same photo under the cursor" restore is impossible
     // anyway (the content at that offset isn't guaranteed to be the same). An
     // approximate return to the same scrolled region is what FR-8.1 asks for
     // and what this delivers; a per-item anchor would be more precise for the
     // grid specifically but couldn't survive the cards above it changing
-    // height (e.g. a scan summary appearing) between launches either.
+    // height (e.g. a summary appearing) between launches either.
     @State private var scrollPosition = ScrollPosition(
         y: CGFloat(UserDefaults.standard.double(forKey: "libraryScrollOffsetY"))
     )
@@ -136,11 +169,11 @@ private struct LibraryTab: View {
             ScrollView {
                 VStack(spacing: 20) {
                     VStack(spacing: 20) {
-                        if authorization.status == .limited {
-                            limitedAccessBanner
+                        if case .available(let version, let url) = updates.availability {
+                            updateNotice(version: version, url: url)
                         }
-                        ScanView(scanner: scanner, analysisModel: analysisModel)
-                        AnalysisView(model: analysisModel, scanToken: scanCompletionToken)
+                        LibraryStatusView(scanner: catchUp.scanner)
+                        AnalysisView(model: catchUp.analysis, scanToken: scanCompletionToken)
                     }
                     .frame(maxWidth: 560)
 
@@ -166,13 +199,12 @@ private struct LibraryTab: View {
                     UserDefaults.standard.set(Double(currentScrollOffsetY), forKey: "libraryScrollOffsetY")
                 }
             }
-            // FR-8.3: lets the menu bar's "Scan Library"/"Scan Again" trigger
-            // the same scan this tab's own button does. Published only in
-            // this authorized branch, so the command is disabled for free
-            // whenever Photos access isn't granted — see AppCommands.swift.
+            // FR-8.3: lets the menu bar's Stop and Resume act on the same run
+            // this tab's own control does. Published only in this authorized
+            // branch, so the commands are disabled for free whenever the whole
+            // library isn't available — see AppCommands.swift.
             .focusedSceneValue(\.libraryCommandTarget, LibraryCommandTarget(
-                scanner: scanner,
-                analysisModel: analysisModel,
+                analysisModel: catchUp.analysis,
                 modelContext: modelContext
             ))
         } else {
@@ -180,68 +212,32 @@ private struct LibraryTab: View {
         }
     }
 
-    /// What limited access means, which differs by platform.
+    /// FR-10.8: a newer release exists, and here is where to get it.
     ///
-    /// On the Mac it is a narrowing: the app sees fewer photos, and everything
-    /// else still works, so FR-1.2's job is to offer a shortcut to change the
-    /// selection. There is no in-app route — PhotoKit's limited-library picker
-    /// (`presentLimitedLibraryPickerFromViewController:`) is
-    /// `API_UNAVAILABLE(macos)` with no AppKit counterpart as of macOS 27 beta
-    /// 4 — so the button opens the Privacy pane with a label honest about the
-    /// extra step needed there (System Settings → Privacy & Security → Photos
-    /// → Edit Selected Photos) rather than implying a one-click reselect.
-    ///
-    /// On iPhone and iPad it is disqualifying (FR-1.8). Under `.limited`
-    /// PhotoKit cannot create or fetch user albums at all, and it fails
-    /// *silently* — `performChanges` reports success and the following fetch
-    /// returns nothing — so a banner about "which photos are available" would
-    /// let the app look like it was working while the album it exists to
-    /// maintain could never be written. The banner therefore leads with that,
-    /// and the button offers the only upgrade path that exists: the app's own
-    /// Settings page. There is no API to re-prompt for full access, and the
-    /// limited-library picker only edits the selection (see
-    /// `PhotoLibraryAuthorization.settingsURL`).
-    private var limitedAccessBanner: some View {
+    /// Only ever drawn when the user has agreed to the check (nothing else can
+    /// produce an `.available`), and only in the Library tab — the app's first
+    /// screen, and one place rather than three saying the same thing (FR-8.10).
+    /// It arrives and stays, which FR-8.7 allows to take room, and it sits
+    /// above content rather than above a control anybody was reaching for.
+    private func updateNotice(version: String, url: URL) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: "lock.trianglebadge.exclamationmark")
-                .foregroundStyle(.orange)
-                .accessibilityHidden(true) // decorative — the text beside it already carries the meaning (FR-4.13)
-                .help(limitedAccessHelp)
-            Text(limitedAccessMessage)
-                .foregroundStyle(.secondary)
+            Image(systemName: "arrow.down.circle")
+                .foregroundStyle(.tint)
+                .accessibilityHidden(true) // decorative — the text beside it carries the meaning (FR-4.13)
+            Text("Alpenglow \(version) is available. You have \(AppIdentity.version).")
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 12)
-            #if os(macOS)
-            Button("Change Selection in Settings…") { openPrivacySettings() }
-            #else
-            Button("Allow Access to All Photos…") { openPrivacySettings() }
-            #endif
+            Button("Get It…") { openURL(url) }
         }
         .padding(12)
         .frame(maxWidth: .infinity)
-        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private var limitedAccessMessage: String {
-        #if os(macOS)
-        "Only your selected photos are available to Alpenglow."
-        #else
-        "Alpenglow can't maintain the wallpaper album with limited photo access. Allow access to all photos to use it."
-        #endif
-    }
-
-    private var limitedAccessHelp: String {
-        #if os(macOS)
-        "Photos access is limited — Alpenglow only sees the photos you selected, so wallpapers can only come from that selection."
-        #else
-        "Photos only lets apps create and update albums with access to the whole library, so the wallpaper album can't be maintained with limited access."
-        #endif
-    }
-
-    /// Non-nil once a scan has finished; value changes when results change.
+    /// Non-nil once a catch-up has finished; value changes when results change.
     private var scanCompletionToken: Int? {
-        if case .finished(let candidates, _, let newlyAdded, let editedQueued, let removed, let hidden) = scanner.outcome {
-            candidates &+ newlyAdded &+ editedQueued &+ removed &+ hidden
+        if case .finished(let candidates, _, let newlyAdded, let editedQueued, let removed) = catchUp.scanner.outcome {
+            candidates &+ newlyAdded &+ editedQueued &+ removed
         } else {
             nil
         }
@@ -269,11 +265,17 @@ private struct LibraryTab: View {
                     Task { await authorization.request() }
                 }
                 .buttonStyle(.borderedProminent)
-            case .denied:
+            case .denied, .limited:
+                // `.limited` shares the button because it shares the remedy:
+                // there is no API to re-prompt for full access or to widen a
+                // selection (see `PhotoLibraryAuthorization.settingsURL`), so
+                // the privacy settings are the only route from a selection to
+                // the whole library (FR-1.8).
+                //
                 // `.restricted` (parental controls/MDM) has no button here:
                 // Privacy Settings can't grant it — only the managing admin
-                // can — so offering the same shortcut as `.denied` would be a
-                // dead end. `statusMessage` above already explains why.
+                // can — so offering the same shortcut would be a dead end.
+                // `statusMessage` above already explains why.
                 Button("Open Privacy Settings") {
                     openPrivacySettings()
                 }
@@ -292,7 +294,15 @@ private struct LibraryTab: View {
         case .authorized:
             "Access granted."
         case .limited:
-            "Limited access granted. Alpenglow can only see the photos you selected."
+            // FR-1.8: a selection is not a smaller library, it is a different
+            // job the app can't do — it can't tell a photo you deleted from
+            // one you didn't select, and Photos won't let it maintain an album
+            // at all. Saying so beats appearing to work.
+            #if os(macOS)
+            "Alpenglow only has access to selected photos, which isn’t enough to keep the wallpaper album or notice photos you delete. Allow access to all photos in System Settings → Privacy & Security → Photos."
+            #else
+            "Alpenglow only has access to selected photos, which isn’t enough to keep the wallpaper album or notice photos you delete. Allow access to all photos in Settings."
+            #endif
         case .denied:
             // The app holding privacy permissions has a different name on each
             // platform, and pointing the user at the wrong one is the whole
@@ -310,47 +320,39 @@ private struct LibraryTab: View {
     }
 
     /// FR-1.2's shortcut into the platform's own privacy settings. The
-    /// per-platform destination lives on `PhotoLibraryAuthorization` because
-    /// the Export tab needs the same one for FR-1.8; opening it is the same
-    /// `openURL` on both platforms.
+    /// per-platform destination lives on `PhotoLibraryAuthorization`; opening
+    /// it is the same `openURL` on both platforms.
     private func openPrivacySettings() {
         guard let url = PhotoLibraryAuthorization.settingsURL else { return }
         openURL(url)
     }
 }
 
-/// Metadata scan card: run state, progress, and result summary.
-private struct ScanView: View {
-    @Environment(\.modelContext) private var modelContext
+/// What the app is doing about the library, and what it last found (FR-2.4).
+///
+/// There is no control in here, and that is the requirement rather than an
+/// omission: FR-2.7 says the app is always current and that there is no
+/// re-scan, "because there is nothing a re-scan would find that the app has
+/// not already found". What replaced the button is `LibraryCatchUp` — the app
+/// catches up at launch and follows the library's own change notifications
+/// from then on. So this card reports, and reporting is all it does.
+private struct LibraryStatusView: View {
     let scanner: LibraryScanner
-    /// Not displayed here — only consulted for whether a scan may start, which
-    /// depends on it as much as on the scanner (see `scanButton`).
-    let analysisModel: AnalysisModel
 
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Library Scan")
+                Text("Library")
                     .font(.headline)
 
-                // Fixed order, every phase: blurb, progress, button, outcome.
-                // The card used to swap its whole contents on `scanner.phase`,
-                // which broke FR-8.7 three ways — the button vanished for the
-                // length of every scan (including FR-2.7's launch scan, which
-                // nobody asked for), the progress bar and its count appeared
-                // out of nowhere and pushed the analysis card and the grid
-                // below down with them, and the finished summary landed
-                // *above* the button, moving the very control that had just
-                // been clicked. Laid out this way, the only thing that ever
-                // changes height is `outcome`, at the bottom, where the
-                // requirement allows a result to take room.
-                Text("Finds high-resolution landscape photos worth considering as wallpapers. Metadata only — fast, and nothing leaves your device.")
+                // Fixed order, every phase: blurb, progress, outcome. The only
+                // thing that ever changes height is `outcome`, at the bottom,
+                // where FR-8.7 allows a result to take room.
+                Text("Alpenglow keeps up with your library on its own, watching for photos added, edited or deleted. It looks for high-resolution landscape photos worth considering as wallpapers — metadata only, and nothing leaves your device.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 progressRow
-
-                scanButton
 
                 outcome
             }
@@ -363,24 +365,24 @@ private struct ScanView: View {
         }
     }
 
-    /// The running count, in a slot that is there whether or not a scan is.
+    /// The running count, in a slot that is there whether or not a pass is.
     ///
-    /// Built unconditionally and faded rather than inserted, per FR-8.7: a
-    /// scan is largely the app's own work — FR-2.7 starts one at launch — and
-    /// inserting these two rows when it began pushed the scan button, the
-    /// analysis card and the whole candidate grid down the page. Reserving the
-    /// rows for good costs a fixed strip of empty card and buys a column that
-    /// never jumps. `shownWhileWaiting` supplies the other half of the
-    /// requirement: a scan that beats `Thresholds.noticeableWaitDelay` — an
-    /// unchanged library, or one with nothing to examine — finishes without
-    /// ever flashing a bar nobody could have read.
+    /// Built unconditionally and faded rather than inserted, per FR-8.7: every
+    /// pass is now the app's own work — nobody asks for one — so inserting
+    /// these two rows when one began would push the analysis card and the
+    /// whole candidate grid down the page with no act of the user's behind it.
+    /// Reserving the rows for good costs a fixed strip of empty card and buys a
+    /// column that never jumps. `shownWhileWaiting` supplies FR-2.4's other
+    /// half — "a change small enough to be instant simply appears": a pass that
+    /// beats `Thresholds.noticeableWaitDelay` finishes without ever flashing a
+    /// bar nobody could have read.
     private var progressRow: some View {
         let progress = scanProgress
         return VStack(alignment: .leading, spacing: 4) {
             ProgressView(value: progress.value, total: progress.total)
                 // Pinned to the linear style, in both states. Left to itself a
                 // `ProgressView` with no value draws as a *circular* spinner,
-                // and a bar that turned into a spinner and back mid-scan would
+                // and a bar that turned into a spinner and back mid-pass would
                 // resize the row this slot exists to keep still (FR-8.7).
                 // Named explicitly, the indeterminate and determinate forms are
                 // the same bar in the same track.
@@ -401,7 +403,7 @@ private struct ScanView: View {
     /// before there is any denominator to count against, and on a large cold
     /// library that gap outlasts `Thresholds.noticeableWaitDelay`, so the slot
     /// is on screen for it. A determinate bar sitting at zero for those
-    /// seconds reads as a scan that has stalled, which is the opposite of the
+    /// seconds reads as work that has stalled, which is the opposite of the
     /// live progress FR-2.4 promises; an indeterminate bar says "working, no
     /// count yet", which is the truth. It costs nothing under FR-8.7 because
     /// `.progressViewStyle(.linear)` above keeps both forms the same size —
@@ -418,19 +420,14 @@ private struct ScanView: View {
         return (Double(examined), Double(total), "\(examined) of \(total) photos examined")
     }
 
-    /// What the last settled scan found, below the button that ran it — never
-    /// above it, which is FR-8.7's one hard rule about results ("never the
-    /// control whose use produced it"). Everything this pushes down is the
-    /// analysis card and the grid, neither of which the click was aimed at.
+    /// What the app last found in the library.
     ///
     /// It reads `scanner.outcome`, not `scanner.phase`, and so survives the
-    /// next scan: the previous summary stays put for the whole run and is
-    /// swapped for the new one at the instant that one exists. An earlier
-    /// version emptied this out when a scan started, on the reasoning that
-    /// clicking the button was itself the user's act — but FR-8.7 asks for
-    /// more than that, that redoing something move nothing *at all*, and
-    /// clearing the summary only to refill the same space a few seconds later
-    /// is the exact shape it names.
+    /// next pass: the previous summary stays put for the whole run and is
+    /// swapped for the new one at the instant that one exists. FR-8.7 asks
+    /// that redoing something move nothing *at all*, and clearing the summary
+    /// only to refill the same space a few seconds later is the exact shape it
+    /// names.
     @ViewBuilder
     private var outcome: some View {
         if let outcome = scanner.outcome {
@@ -441,27 +438,21 @@ private struct ScanView: View {
     @ViewBuilder
     private func outcomeContent(_ outcome: LibraryScanner.Outcome) -> some View {
         switch outcome {
-        case .finished(let candidates, let examined, let newlyAdded, let editedQueued, let removed, let hidden):
+        case .finished(let candidates, let examined, let newlyAdded, let editedQueued, let removed):
             Label("\(candidates) wallpaper candidates", systemImage: "photo.stack")
                 .font(.callout.weight(.semibold))
                 .help("Photos whose size and shape qualify them for the wallpaper pipeline; Vision analysis filters them further.")
             Text(scanSummary(examined: examined, newlyAdded: newlyAdded, editedQueued: editedQueued, removed: removed))
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            // FR-2.4: don't let the headline count quietly include photos this
-            // scan couldn't see. Only ever appears under limited access, where
-            // their records are kept on purpose rather than deleted.
-            if hidden > 0 {
-                Text("\(hidden) more can't be seen with limited photo access — their analysis is kept and returns when you allow access to all photos.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                .fixedSize(horizontal: false, vertical: true)
 
         case .failed(let message):
-            Label("Scan failed", systemImage: "exclamationmark.triangle")
+            // FR-8.12: a pass that failed says so, rather than leaving the
+            // last good summary to imply the app is current when it isn't.
+            Label("Couldn't read the library", systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.orange)
-                .help("The library scan stopped with the error below; scanning again is safe.")
+                .help("The last pass over the library stopped with the error below; Alpenglow tries again the next time your library changes.")
             Text(message)
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -478,42 +469,6 @@ private struct ScanView: View {
             parts.append("removed \(removed)")
         }
         return parts.joined(separator: ", ") + "."
-    }
-
-    /// Never prominent, in any scan phase. FR-8.5 allows at most one prominent
-    /// action per screen and the Library tab shows this card and the analysis
-    /// card together, so exactly one of the two has to own that style — and it
-    /// is the analysis card: FR-3.5 names the tab's next action in that card's
-    /// vocabulary throughout ("Analyze N Photos", "Resume", "Retry N iCloud
-    /// Photos", "Analysis complete"), never in this one's. Scanning is not the
-    /// action the user is being led towards; under FR-2.7 it starts on its own
-    /// at launch, and this button exists to repeat it on demand.
-    ///
-    /// Deciding it here, statically, rather than from the pipeline's state is
-    /// the point. An earlier version made this prominent while the scanner was
-    /// `.idle`, reasoning that the analysis card could not yet be offering
-    /// anything — true when written, and untrue as soon as an `await` landed
-    /// ahead of the scan in `ContentView`'s startup task: through a restore of
-    /// an interrupted sync (FR-6.8) the scanner sits `.idle` for as long as
-    /// that Photos work takes, while `AnalysisView`'s own `.task` loads stats
-    /// and renders a prominent "Analyze N Photos" beside it. A rule that holds
-    /// only while the call graph above it stays a particular shape is not a
-    /// rule; this one holds unconditionally.
-    /// Its title comes from `LibraryScanner.scanActionTitle` rather than from
-    /// `phase`, so it stays put for the length of a run — see the property.
-    /// Disabled rather than removed: a disabled button is the same size in the
-    /// same place, which is what FR-8.7 asks of a control during the app's own
-    /// work.
-    ///
-    /// The disabled condition is `LibraryCommandTarget.canScan`, the same one
-    /// the menu item uses, rather than a local `isScanning` test — an analysis
-    /// run has to be idle too, and the two routes to this action must agree
-    /// (FR-8.3).
-    private var scanButton: some View {
-        Button(scanner.scanActionTitle) {
-            Task { await scanner.scan(into: modelContext) }
-        }
-        .disabled(!LibraryCommandTarget.canScan(scanner: scanner, analysisModel: analysisModel))
     }
 }
 
