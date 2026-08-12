@@ -6,8 +6,35 @@ import os
 /// Online logistic (Bradley–Terry) preference ranker over Vision feature prints.
 ///
 /// Raw score: s = w·featurePrint + b₁·aesthetics + b₂·levelness + b₃·resolution
-/// (levelness and resolution weights are learned from duels, never hard-coded —
-/// low-resolution or tilted photos are penalized only as much as choices imply).
+///                + b₄·season + b₅·latitude
+/// (every b weight is learned from duels, never hard-coded — low-resolution,
+/// tilted, or seasonally/geographically atypical photos are penalized, or
+/// favored, only as much as choices imply). `season` and `latitude` are
+/// FR-5.2's "when and where": `season` is `Self.seasonFraction`, a photo's
+/// time of year (0…1, wrapping); `latitude` is its stored latitude ÷ 90
+/// (−1…1). Both are computed from the record alone — **never** from where it
+/// falls in the current candidate set. That gives them the same
+/// library-independent, fixed-scale property `resolution`/`levelness` already
+/// have via their `Thresholds` constants, just without needing one of their
+/// own: a calendar has 12 months and a globe has 90° of latitude either way,
+/// so there is nothing here to tune. This is deliberate, not merely simple:
+/// an earlier revision normalized
+/// "when" against the oldest/newest dated photo in the live candidate set and
+/// "where" against distance from that set's location centroid, both of which
+/// silently rescaled every already-trained weight's effective meaning the
+/// moment an ordinary library scan added one new extreme-dated or
+/// off-centroid photo — reshuffling the whole ranking with zero new user
+/// judgment behind it, which is exactly what FR-5.2 ("no trait counts for
+/// more or less than the user's own decisions imply") forbids. A fixed scale
+/// has no such moving target: the same photo always maps to the same
+/// `season`/`latitude` value, on every device, at every library size, so
+/// `weights.time`/`weights.location` mean the same thing for as long as they
+/// exist — the same property `resolution`/`levelness` already had. A photo
+/// missing a date or location gets that feature's own neutral midpoint — 0.5
+/// for `season`'s 0…1 scale, 0 for `latitude`'s −1…1 one — not a penalty
+/// (FR-3.8), and `sgdStep` additionally skips the gradient term entirely for
+/// any duel where either side lacks it, so an unknown date/location never
+/// itself becomes a trained signal, only ever a genuinely uninformative one.
 /// Choice model: P(winner beats loser) = sigmoid(s_winner − s_loser)
 /// One SGD step per recorded choice; `PhotoRecord.preferenceScore` caches the
 /// raw score s after every update so the grid can re-rank live. A bad
@@ -88,6 +115,27 @@ actor PreferenceRanker {
         /// (log scale). Its ranking weight is learned from duels, so old
         /// low-resolution photos are penalized only as much as choices imply.
         let resolution: Float
+        /// FR-5.2's "when": `Self.seasonFraction` of the record's creation
+        /// date (fixed calendar scale, 0…1); 0.5 and `hasTime == false` when
+        /// the record has no creation date. See the type doc comment for why
+        /// this is a fixed scale rather than normalized against the current
+        /// candidate set.
+        let time: Float
+        let hasTime: Bool
+        /// FR-5.2's "where": the record's latitude ÷ 90 (fixed scale, −1…1);
+        /// 0 (this scale's own neutral midpoint — NOT 0.5, which belongs to
+        /// `time`'s 0…1 scale) and `hasLocation == false` when the record has
+        /// no location. Longitude is captured on `PhotoRecord` but
+        /// deliberately not folded in here: a fixed linear encoding of it
+        /// (e.g. ÷180) wraps discontinuously at the ±180° antimeridian —
+        /// two photos taken meters apart on either side of that line would
+        /// read as maximally far apart on this feature, a false signal no
+        /// duel choice produced. Latitude has no equivalent seam (it runs
+        /// −90…90 with no wraparound), so it stands alone as the "where"
+        /// feature; see the type doc comment for the general fixed-scale
+        /// rationale this follows.
+        let location: Float
+        let hasLocation: Bool
         var score: Float = 0 // raw, pre-sigmoid
         /// FR-4.6's "Not Wallpaper Material" toggle's current state, for the
         /// duel cards' overlay — whether this photo's *latest* verdict
@@ -108,6 +156,9 @@ actor PreferenceRanker {
         var aesthetics: Float
         var horizon: Float
         var resolution: Float
+        /// FR-5.2's "when"/"where" coefficients — see the type doc comment.
+        var time: Float = 0
+        var location: Float = 0
         var seededWithFavorites: Bool
         /// How many judgments these weights already contain — see
         /// `applicableJudgmentCount`. Optional so weights written before this
@@ -292,6 +343,7 @@ actor PreferenceRanker {
         let records = (try? modelContext.fetch(descriptor)) ?? []
         let minWidth = Float(Thresholds.minimumCandidatePixelWidth)
         let resolutionRange = log2(Thresholds.resolutionFullScoreWidth / minWidth)
+
         // Fetched once here, not per entry, for the same reason
         // `FeatureStore.latestBadVerdictKeys()` is fetched once per query
         // rather than per candidate (FR-8.2).
@@ -306,6 +358,27 @@ actor PreferenceRanker {
             guard let data = record.featurePrint else { return nil }
             let tilt = abs(record.horizonAngleDegrees ?? 0)
             let resolution = min(1, max(0, log2(Float(record.pixelWidth) / minWidth) / resolutionRange))
+
+            let time: Float
+            let hasTime: Bool
+            if let created = record.creationDate {
+                time = Self.seasonFraction(of: created)
+                hasTime = true
+            } else {
+                time = 0.5 // neutral — no date (FR-3.8)
+                hasTime = false
+            }
+
+            let location: Float
+            let hasLocation: Bool
+            if let lat = record.latitude {
+                location = Float(lat / 90) // -1 (south pole) … 1 (north pole)
+                hasLocation = true
+            } else {
+                location = 0 // neutral midpoint of the -1…1 scale — no location (FR-3.8)
+                hasLocation = false
+            }
+
             return Entry(
                 id: record.localIdentifier,
                 key: record.judgmentKey,
@@ -315,6 +388,10 @@ actor PreferenceRanker {
                 levelness: 1 - min(tilt, Thresholds.horizonMaxTiltDegrees) / Thresholds.horizonMaxTiltDegrees,
                 tiltDegrees: tilt,
                 resolution: resolution,
+                time: time,
+                hasTime: hasTime,
+                location: location,
+                hasLocation: hasLocation,
                 isNotWallpaperMaterial: badVerdictKeys.contains(record.judgmentKey)
             )
         }
@@ -595,12 +672,21 @@ actor PreferenceRanker {
         weights.aesthetics *= decay
         weights.horizon *= decay
         weights.resolution *= decay
+        weights.time *= decay
+        weights.location *= decay
 
         let difference = vDSP.subtract(winner.vector, loser.vector)
         weights.feature = vDSP.add(weights.feature, vDSP.multiply(gradient, difference))
         weights.aesthetics += gradient * (winner.aesthetics - loser.aesthetics)
         weights.horizon += gradient * (winner.levelness - loser.levelness)
         weights.resolution += gradient * (winner.resolution - loser.resolution)
+        // FR-3.8: a duel where either side has no known date/location trains
+        // nothing on that dimension — the difference is forced to 0 rather
+        // than comparing a real value against the other side's neutral
+        // midpoint, which would otherwise treat "unknown" as if it meant
+        // "average" and let the gap itself become a trained signal.
+        weights.time += gradient * (winner.hasTime && loser.hasTime ? winner.time - loser.time : 0)
+        weights.location += gradient * (winner.hasLocation && loser.hasLocation ? winner.location - loser.location : 0)
     }
 
     private func seedFromFavorites() {
@@ -635,12 +721,14 @@ actor PreferenceRanker {
     ///   `weights.feature` away from this photo's feature direction is what
     ///   drags visually-similar photos down too ("and others like it",
     ///   FR-4.7), independent of anything else in the candidate set.
-    /// - levelness/resolution = copied from the bad photo's own values, so
-    ///   those two SGD terms are always exactly zero. A single bad verdict
-    ///   on its own isn't evidence that tilt or resolution *caused* the
+    /// - levelness/resolution/time/location = copied from the bad photo's own
+    ///   values (time/location copying both the value and its `has` flag), so
+    ///   those SGD terms are always exactly zero. A single bad verdict on its
+    ///   own isn't evidence that tilt, resolution, when, or where *caused* the
     ///   badness — unlike a real duel, there's no second photo to contrast
-    ///   against — so `weights.horizon`/`weights.resolution` stay untouched
-    ///   by verdict training and only ever move from actual duel choices.
+    ///   against — so `weights.horizon`/`weights.resolution`/`weights.time`/
+    ///   `weights.location` stay untouched by verdict training and only ever
+    ///   move from actual duel choices.
     ///
     /// Using a fixed reference instead of a live opponent is also what makes
     /// this replay-safe (FR-5.3): the pseudo-duel is fully determined by the
@@ -657,7 +745,11 @@ actor PreferenceRanker {
             isFavorite: false,
             levelness: entry.levelness,
             tiltDegrees: 0,
-            resolution: entry.resolution
+            resolution: entry.resolution,
+            time: entry.time,
+            hasTime: entry.hasTime,
+            location: entry.location,
+            hasLocation: entry.hasLocation
         )
         sgdStep(winner: neutral, loser: entry)
     }
@@ -667,6 +759,8 @@ actor PreferenceRanker {
             + weights.aesthetics * entry.aesthetics
             + weights.horizon * entry.levelness
             + weights.resolution * entry.resolution
+            + weights.time * entry.time
+            + weights.location * entry.location
     }
 
     private func recomputeScores() {
@@ -803,5 +897,27 @@ actor PreferenceRanker {
 
     private static func pairKey(_ a: String, _ b: String) -> String {
         a < b ? "\(a)|\(b)" : "\(b)|\(a)"
+    }
+
+    /// FR-5.2's "when", as a fixed, library-independent 0…1 reading of a
+    /// date's position in the calendar year — day-of-year over the year's
+    /// actual length (365 or 366), so Dec 31 in a leap year isn't quietly
+    /// treated as 0.3% short of the year. A fixed UTC calendar, not
+    /// `Calendar.current`: the same photo must map to the same value on
+    /// every device regardless of its time zone (FR-5.2's "same library and
+    /// same judgments always produce the same ranking" — a Mac in Berlin and
+    /// an iPhone in Los Angeles training the same shared weights file must
+    /// compute the exact same feature for it). Deliberately linear rather
+    /// than a cyclical (sin/cos) encoding: Dec 31 and Jan 1 sit at opposite
+    /// ends of the 0…1 range despite being adjacent in the calendar, which
+    /// costs the feature some precision right at the year boundary but keeps
+    /// it a single scalar with a single learned weight, matching every other
+    /// feature here — not worth two dimensions for one edge case.
+    private static func seasonFraction(of date: Date) -> Float {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let dayOfYear = calendar.ordinality(of: .day, in: .year, for: date) ?? 1
+        let daysInYear = calendar.range(of: .day, in: .year, for: date)?.count ?? 365
+        return Float(dayOfYear - 1) / Float(daysInYear)
     }
 }

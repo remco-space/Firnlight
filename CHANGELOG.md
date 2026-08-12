@@ -30,6 +30,17 @@ heading when that version is released (FR-10.3).
   Separately, the pair-draw fallback used when the sample budget finds no
   valid pair could serve a near-duplicate (visually identical) pair; it now
   applies the same distance guard the primary sampling loop already does.
+- The preference ranker learned only from how a photo looks; FR-5.2's
+  "when and where" half was silently missing — a photo's location was never
+  even captured, and its capture date was used for display sort order only.
+  Both now feed the ranker as learned features (never hard-coded weights), and
+  a photo with no date or location is never penalized for the gap (FR-3.8).
+  Separately, the blurred/obstructed rejection (FR-3.1) relied solely on the
+  general aesthetics score as a blur proxy; it now also runs Vision's
+  dedicated `DetectLensSmudgeRequest`, which catches a smudge an otherwise
+  well-exposed, sharp frame's aesthetics score alone would miss. Both changes
+  re-examine already-analyzed photos in the background, at no cost to any
+  recorded judgment.
 
 ### Removed
 

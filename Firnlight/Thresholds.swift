@@ -91,7 +91,15 @@ nonisolated enum Thresholds {
     /// badly blurred or smeared photo accepted under v3 must be re-scored
     /// against `severelyFlawedAestheticsScore` before it can keep counting as
     /// a candidate.
-    static let currentAnalysisVersion = 4 // v4 rejects severely flawed (blurred/smeared/obstructed) photos
+    /// v5 is required too: `ImageAnalyzer` now also runs
+    /// `DetectLensSmudgeRequest`, a dedicated obstruction detector the
+    /// aesthetics-score gate alone couldn't see — a photo the v4 gate let
+    /// through must be re-checked against `lensSmudgeConfidenceThreshold`
+    /// before it can keep counting as a candidate. Bumping this alone queues
+    /// every already-analyzed record for re-analysis in the background, with
+    /// no judgment lost and no user action required (FR-5.2's "must
+    /// re-examine what it must" — see `AnalysisQueue.processNextBatch`).
+    static let currentAnalysisVersion = 5 // v5 adds DetectLensSmudgeRequest to the flaw gate
 
     /// Records analyzed and saved per batch; a killed app loses at most one batch.
     static let analysisBatchSize = 32
@@ -195,12 +203,28 @@ nonisolated enum Thresholds {
     /// rather than merely ranked lower. Set well under the neutral midpoint
     /// (0) so an ordinarily mediocre but intact photo is never caught: this
     /// gate is for photos too damaged to use "however good the scene," not a
-    /// second aesthetics cutoff. No dedicated blur/obstruction request exists
-    /// in Vision, so this reuses the one score Apple documents as folding
-    /// technical quality in; unverified against real flawed photos, so tune
-    /// from real library data the same way `natureLabels` is tuned, via the
+    /// second aesthetics cutoff. This is one of two independent flaw gates —
+    /// see `lensSmudgeConfidenceThreshold` for the other — since aesthetics
+    /// folds in technical quality generally but isn't a dedicated obstruction
+    /// detector; unverified against real flawed photos, so tune from real
+    /// library data the same way `natureLabels` is tuned, via the
     /// ImageAnalyzer debug log.
     static let severelyFlawedAestheticsScore: Float = -0.5
+
+    /// `SmudgeObservation.confidence` (0…1) from `DetectLensSmudgeRequest`
+    /// (macOS/iOS 26+) at or above which a photo is rejected as flawed — the
+    /// dedicated detector for FR-3.1's "a finger over the lens" specifically,
+    /// independent of `severelyFlawedAestheticsScore`: a smudge can sit in a
+    /// corner of an otherwise well-exposed, sharp frame and never pull the
+    /// overall aesthetics score low enough to trip that gate alone. 0.7 errs
+    /// toward the same side `severelyFlawedAestheticsScore` does — reject only
+    /// what the model is confident about, since a false rejection silently
+    /// removes a candidate the user never gets a chance to see and choose in a
+    /// duel, while a false negative is merely ranked on its other merits, same
+    /// as any other request in this pipeline. Unverified against real smudged
+    /// photos (no such photos in hand while this shipped); tune from real
+    /// library data via the ImageAnalyzer debug log.
+    static let lensSmudgeConfidenceThreshold: Float = 0.7
 
     // MARK: Candidate grid (Phase 4)
 
@@ -229,7 +253,23 @@ nonisolated enum Thresholds {
     /// version shipped was never applied to the weights that existed at the
     /// time, so only a full rebuild folds that backlog in — no incremental
     /// catch-up is possible (FR-5.3).
-    static let rankerAlgorithmVersion = 5 // v5: bad verdicts train the ranking
+    /// v6 is required too: it adds the `time`/`location` features (FR-5.2's
+    /// "when and where"), and `Weights` gained the two fields that carry
+    /// their learned coefficients — a v5 weights file has no opinion about
+    /// either, so only a full rebuild (re-seed + full choice/verdict replay)
+    /// folds them in, same reasoning as v5's bad-verdict backlog.
+    /// v7 is required too: v6's `time`/`location` were normalized against the
+    /// current candidate set (oldest/newest dated photo, distance from the
+    /// location centroid), which meant an ordinary library scan could shift
+    /// those denominators and silently rescale every already-trained
+    /// `weights.time`/`weights.location` coefficient's meaning — a v6 weights
+    /// file may have been fit to a scale that no longer matches what
+    /// `PreferenceRanker.loadEntries()` now computes, so it must be discarded
+    /// and rebuilt rather than reused. v7 replaces both with fixed,
+    /// library-independent scales (`PreferenceRanker.seasonFraction`,
+    /// latitude ÷ 90) that never move under a growing library — see
+    /// `PreferenceRanker`'s type doc comment.
+    static let rankerAlgorithmVersion = 7 // v7: time/location use fixed scales, not candidate-set-relative ones (FR-5.2)
 
     /// SGD learning rate for the online Bradley–Terry ranker.
     static let rankerLearningRate: Float = 0.5
