@@ -6,7 +6,7 @@ import AppKit
 
 /// App entry point.
 ///
-/// Platform constraints baked into the whole design: macOS 26+ and iOS 26+
+/// Platform constraints baked into the whole design: macOS 27+ and iOS 27+
 /// (iPhone and iPad), Swift 6 strict concurrency, SwiftUI + PhotoKit + Vision
 /// (modern async struct API) + SwiftData + Accelerate. No third-party
 /// dependencies and no telemetry; all processing currently runs on-device with
