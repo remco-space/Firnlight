@@ -4,361 +4,275 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Firnlight is a native macOS app that curates desktop wallpapers from the user's own
-Photos library: it finds high-resolution nature photos without people, learns
-personal preference from pairwise duels, and maintains a Photos album ("Firnlight")
-that System Settings can rotate as wallpaper. Everything runs on-device.
+Firnlight is a native macOS app (with an iPhone/iPad companion) that curates
+desktop wallpapers from the user's own Photos library: it finds high-resolution
+nature photos without people, learns preference from pairwise duels, and
+maintains a Photos album ("Firnlight") that System Settings can rotate as
+wallpaper. Everything runs on-device. Target: **macOS/iOS 27+**.
 
 ## How this project is documented
 
-Two layers, with a strict division of labor:
+- **`REQUIREMENTS.md` is the product brief** — WHAT the user experiences and
+  WHY (FR-x.y numbering). No APIs, thresholds, or algorithms. Product and UX
+  must be verifiable against it; when product behavior changes, update the
+  brief in the same change.
+- **The code is the technical documentation.** Architecture, algorithms,
+  concurrency, persistence, platform constraints live as doc comments at the
+  implementation site and nowhere else. `Thresholds.swift` holds every tunable
+  constant with its rationale and tuning history — never inline a magic number
+  elsewhere. Never create separate technical documents, or duplicate technical
+  detail into this file or the brief.
 
-- **`REQUIREMENTS.md` is the product brief** — WHAT the user experiences and WHY,
-  in human-readable language (FR-x.y numbering). Product and UX design must always
-  be verifiable against it. It contains no APIs, thresholds, or algorithm details.
-  When product behavior changes, update the brief in the same change.
-- **The code is the technical documentation.** How things work — architecture,
-  algorithms, concurrency, persistence, platform constraints — lives as doc
-  comments at the implementation site, and nowhere else. `Thresholds.swift` holds
-  every tunable constant with its rationale and tuning history (never inline a
-  magic number elsewhere). When technical behavior changes, update the doc
-  comments in place; do not create separate technical documents or duplicate
-  technical detail into this file or the brief.
-
-So: to learn *why* the app behaves some way, read `REQUIREMENTS.md`; to learn
-*how*, read the code — start with `ContentView.swift` (the three tabs mirror the
-pipeline) and follow the doc comments.
+To learn *why*, read `REQUIREMENTS.md`; to learn *how*, read the code, starting
+at `ContentView.swift` (the three tabs mirror the pipeline).
 
 ## UI & design skills (precedence)
 
-For any UI/UX, HIG, Liquid Glass, or accessibility work, prefer these skills:
-**`liquid-glass`** is authoritative for the glass API and its design rules
-(`.glassEffect()`, not `.background(.material)`); **`ui-review-tahoe`** is the
-review checklist for macOS UI and defers to it on glass; **`swiftui-specialist`**
-covers native SwiftUI generally, and **`swiftui-whats-new-27`** carries what the
-27 SDK changed. These are native-focused and current. Do not use the third-party
-`apple-hig-designer-skill-2026` — it is a web/CSS generation skill, targeting an
-era older still, not a native macOS reviewer.
+For UI/UX, HIG, Liquid Glass, or accessibility work: **`liquid-glass`** is
+authoritative for the glass API and its design rules (`.glassEffect()`, not
+`.background(.material)`); **`ui-review-tahoe`** is the macOS review checklist
+and defers to it on glass; **`swiftui-specialist`** covers SwiftUI generally;
+**`swiftui-whats-new-27`** carries what the 27 SDK changed. Do not use the
+third-party `apple-hig-designer-skill-2026` — it generates web/CSS, and is not
+a native macOS reviewer.
 
-A change that adds or alters UI is not done until it has been reviewed against
-the **`ui-review-tahoe`** checklist and against section 8 of `REQUIREMENTS.md`
-(Native feel) — run that review on the changed views before declaring the work
-complete, and when a native-feel defect slips through anyway, add the missing
-class of rule to section 8 as part of the fix (that is how FR-8.7 came to be).
+A change that adds or alters UI is not done until reviewed against the
+**`ui-review-tahoe`** checklist and section 8 of `REQUIREMENTS.md` (Native
+feel). When a native-feel defect slips through anyway, add the missing class of
+rule to section 8 as part of the fix — that is how FR-8.7 came to be.
 
 ## Framework skills (project-scoped, none tracked in git — FR-10.5)
 
-`.claude/skills/` carries, alongside first-party skills, a set of
-third-party ones — none of them committed to this repository, whatever
-their license. Two mechanisms obtain them fresh instead:
+`.claude/skills/` carries third-party skills that are never committed here,
+whatever their license. Two mechanisms obtain them fresh:
 
-- Ten framework skills are live symlinks into the
-  `.claude/skills-src/swift-ios-skills` git submodule
+- Symlinks into the `.claude/skills-src/swift-ios-skills` submodule
   ([dpearson2699/swift-ios-skills](https://github.com/dpearson2699/swift-ios-skills)):
   `photokit`, `vision-framework`, `swiftdata`, `swiftui-patterns`,
   `swiftui-uikit-interop`, `background-processing`, `ios-accessibility`,
-  `ios-localization`, `swift-concurrency`, `app-store-review`. Two UI skills,
-  `liquid-glass` and `ui-review-tahoe`, are the same kind of symlink into a
-  second submodule, `.claude/skills-src/claude-code-apple-skills`
-  ([rshankras/claude-code-apple-skills](https://github.com/rshankras/claude-code-apple-skills)).
-  A `SessionStart` hook (`.claude/hooks/skills-submodule-update.sh`) advances
-  both submodules to each one's latest **tagged release** every session —
-  not the branch tip, since SKILL.md content loads straight into context as
-  instructions and a release tag is a bounded, named point rather than an
-  arbitrary unreviewed commit.
-- Two more, `swiftui-specialist` and `swiftui-whats-new-27`, are Apple's own
-  content, published only via the local Xcode toolchain
-  (`xcrun agent skills export`) rather than any repository — there is
-  nothing to point a submodule at. `.claude/hooks/apple-skills-export.sh`
-  runs that export on `SessionStart` whenever they're missing and copies the
-  two into place; both directories are gitignored.
+  `ios-localization`, `swift-concurrency`, `app-store-review`; and into
+  `.claude/skills-src/claude-code-apple-skills`
+  ([rshankras/claude-code-apple-skills](https://github.com/rshankras/claude-code-apple-skills)):
+  `liquid-glass`, `ui-review-tahoe`. A `SessionStart` hook
+  (`.claude/hooks/skills-submodule-update.sh`) advances both submodules to each
+  one's latest **tagged release** — not the branch tip, since SKILL.md loads
+  straight into context as instructions and a tag is a bounded, named point.
+- `swiftui-specialist` and `swiftui-whats-new-27` are Apple's own, published
+  only via the local toolchain (`xcrun agent skills export`), so there is
+  nothing to point a submodule at. `.claude/hooks/apple-skills-export.sh` runs
+  that export on `SessionStart` when they're missing. Both are gitignored.
 
-All of the above stay current with no manual step. See
-`.claude/skills/README.md` for the full provenance table, how to pin a
-revision if a release ever regresses, and `THIRD_PARTY_NOTICES.md` for the
-license notices the submodule-sourced ones still owe their authors.
+See `.claude/skills/README.md` for the provenance table and how to pin a
+revision if a release regresses, and `THIRD_PARTY_NOTICES.md` for license
+notices.
 
-The `swift-ios-skills` upstream repo has ~86 skills, one per Apple
-framework/topic; only the ones this app actually touches were added,
-deliberately, not the whole set. **When a change adds a new framework or
-platform capability** (a new `import`, a new App Store surface, a new Apple
-framework), check that repo's skill list for a matching one before writing
-the feature from scratch, and if it fits, add it the same way: symlink
-`.claude/skills-src/swift-ios-skills/skills/<name>` into
-`.claude/skills/<name>`, and add its row to the provenance table. Don't add
-speculative skills for frameworks the app doesn't use yet.
+The upstream repo has ~86 skills; only the ones this app touches were added.
+**When a change adds a framework or platform capability** (a new `import`, a
+new App Store surface), check that repo for a matching skill before writing the
+feature from scratch; if it fits, symlink
+`.claude/skills-src/swift-ios-skills/skills/<name>` into `.claude/skills/<name>`
+and add its provenance row. No speculative skills for unused frameworks.
 
 ## Versioning (FR-8.9)
 
-Keeping the version truthful is Claude's job and part of making a change, not
-a release chore. When work with any user-visible effect lands, bump the
-version with it: **minor** for capability the user gains, **patch** for a fix
-to something that already existed. One body of related work gets one bump —
-the highest that applies, patch resetting to 0 on a minor bump — not one per
-commit. The **major** number, and the call that the app has earned 1.0
-(FR-8.9 holds it at 0.x until then), belong to the user alone; never bump
-either unprompted. The build number rises with every version bump, and with
-any rebuild that reaches a device without one, so no two different builds
-ever present the same version-and-build pair. Where the numbers live in the
-project and how they reach what the user sees is, as with all technical
-detail, documented at the site.
+Keeping the version truthful is part of making a change, not a release chore.
+When work with any user-visible effect lands, bump with it: **minor** for
+capability gained, **patch** for a fix to what existed. One body of related
+work gets one bump — the highest that applies, patch resetting to 0 on a minor
+bump. The **major** number, and the call that the app has earned 1.0, belong to
+the user alone; never bump either unprompted — it stays `0.x.y` until then. The build number rises with every
+version bump, and with any rebuild that reaches a device without one.
 
 ## Release process (FR-10)
 
-Release steps are scripts, not prose: any step of producing or refreshing a
-release that a machine can run — building, rendering, capturing, checking —
-lives as a runnable script (in `scripts/`, or an existing one), invoked by
-name from the docs; prose is reserved for what genuinely needs a human. A
-recipe of copy-paste commands in documentation is a script that hasn't been
-written yet: it decays silently as the app changes, and every release re-pays
-the cost of following it by hand.
+Release steps are scripts, not prose: any step a machine can run — building,
+rendering, capturing, checking — lives as a runnable script (in `scripts/`),
+invoked by name from the docs. A recipe of copy-paste commands in documentation
+is a script that hasn't been written yet.
 
-Signing state: automatic signing under the free personal team (`VGZ5MZ2P8B`)
-only — no Developer ID, no notarization. A downloaded release is ad-hoc
-signed enough to run, but Gatekeeper still blocks first launch as "Apple
-cannot check it for malicious software" (FR-10.2); the fix users need is
-right-click → Open, or `xattr -cr Firnlight.app`.
+Signing: automatic signing under the free personal team (`VGZ5MZ2P8B`) only —
+no Developer ID, no notarization. A downloaded release is ad-hoc signed enough
+to run, but Gatekeeper blocks first launch (FR-10.2); the fix is right-click →
+Open, or `xattr -cr Firnlight.app`.
 
-CI: release builds come from GitHub Actions `macos-26` runners (Xcode
-26.x), so what ships is built against the SDK generation users run, and
-that run is also the authoritative proof the project builds with that
-Xcode. A machine on a newer macOS/Xcode beta can only build *for* an older
-generation (a newer macOS refuses to launch older Xcodes, `xcodebuild`
-included), never prove it.
+Releases are cut by pushing a `vX.Y.Z` tag matching `MARKETING_VERSION`; CI
+builds and publishes, taking the release body from the matching `CHANGELOG.md`
+section. The deployment targets and CI runner images still say 26 — move both
+to 27 together once GitHub ships an Xcode 27 image.
 
-**The 27 floor is declared but not yet enforced, and this is the one place
-that says so.** REQUIREMENTS.md's opening puts the app on macOS/iOS 27+, and
-0.15.0 was published as the last release for the 26 generation (announced in
-its own changelog entry, which is the only place the users it strands ever
-see it — no later release will install for them). The build settings still
-say `MACOSX_DEPLOYMENT_TARGET`/`IPHONEOS_DEPLOYMENT_TARGET = 26.0`, because
-GitHub Actions has no macOS 27 runner and no image carrying Xcode 27:
-`macos-26` is still `macos-latest`, with Xcode 26.0.1–26.6 only. A
-deployment target cannot exceed the SDK building it, so raising the two
-settings today would stop CI compiling the project at all — taking releases
-(FR-10.1) with it, to buy a floor no user is asking for yet. Raise both
-settings, and both workflows' `runs-on` and Xcode-selection steps, in one
-change the moment an image with Xcode 27 exists; until then an app targeting
-26 satisfies "runs on 27+" by running there, and this note is the standing
-record of the gap. Re-check the runner images before assuming it still
-holds.
-
-File formats to use, once built: `LICENSE` follows
+File formats: `LICENSE` follows
 [choosealicense.com/licenses/mit](https://choosealicense.com/licenses/mit/);
-`CHANGELOG.md` follows [keepachangelog.com](https://keepachangelog.com/),
-with an entry added to `Unreleased` as part of the change that prompts it,
-not written retroactively from git history; `README.md` follows
+`CHANGELOG.md` follows [keepachangelog.com](https://keepachangelog.com/), with
+entries added to `Unreleased` as part of the change that prompts them, never
+retroactively from git history; `README.md` follows
 [makeareadme.com](https://www.makeareadme.com/), trimmed to what a small app
-(not a library) needs.
+needs.
 
-The README's picture story (FR-10.10 — icon plus one screenshot per tab,
-told inline as part of the pitch rather than broken out under its own
-heading, so the page reads as one story rather than a document with a
-"screenshots" section bolted on) is backed by `docs/store/`: `icon.png` and
-one PNG per tab (`library.png`, `duel.png`, `export.png`), referenced from
-`README.md` with the release they were captured for named alongside them.
-`scripts/capture-store-screenshots.sh` regenerates all four and updates that
-caption to the current `MARKETING_VERSION` in one run — build, render,
-capture, and check are all steps a machine can do, so none of them is prose
-here (see the rule opening this section). Run it whenever a release changes
-what any of the three tabs looks like — a stale screenshot is exactly what
-FR-10.10 forbids. The tab screenshots need a Photos library the app is
-already authorized against with real analyzed candidates: an empty or
-simulated one is also a "look the app doesn't really have", which is why the
-script can't run in the iOS Simulator either (Vision doesn't analyze anything
-there — see that limitation above). The script itself documents the rest:
-why it drives the app through `AppStorage("selectedTab")` and a read-back
-window frame instead of the pointer (safe to run on a machine doing other
-things with the screen at the same time), and how it catches
-`screencapture`'s silent solid-black failure mode when the Screen Recording
-grant is missing.
+The README's picture story (FR-10.10) is backed by `docs/store/`: `icon.png`
+plus one PNG per tab (`library.png`, `duel.png`, `export.png`), captioned with
+the release they were captured for. `scripts/capture-store-screenshots.sh`
+regenerates all four and updates that caption to the current
+`MARKETING_VERSION`. Run it whenever a release changes what a tab looks like —
+a stale screenshot is what FR-10.10 forbids. It needs a real, authorized Photos
+library with analyzed candidates, so it cannot run in the Simulator (Vision
+does not analyze there — see below). The script documents the rest.
 
-First-party-only tree (FR-10.5): nothing authored by a third party is
-tracked in this repository, whatever license it carries — that includes
-code, assets, and development aids such as skill content. Anything the
-project's build or working practice needs from elsewhere is *obtained*, not
-copied: a pointer plus a documented, ideally automatic, fetch step that a
-fresh clone can run, so the setup reproduces itself away from this machine.
-Where those fetch mechanisms live and how they work is, as with all
-technical detail, documented at the site (`.claude/skills/README.md` for
-skills).
+First-party-only tree (FR-10.5): nothing authored by a third party is tracked
+here, whatever its license — code, assets, or development aids such as skill
+content. What the build or working practice needs from elsewhere is *obtained*,
+not copied: a pointer plus an automatic fetch step a fresh clone can run.
 
-Pre-publish check (FR-10.4): before the first push and before every push
-after, diff what's about to be pushed against the developer's own home
-directory path and against common secret/token patterns — a standing check,
-not a one-time cleanup. Project identifiers that are already meant to be
-public — the Apple Developer Team ID, the bundle identifier — are not
-personal data and don't need scrubbing; this check is about the developer's
-own machine and accounts, not the project's own public-by-design
-identifiers.
+Pre-publish check (FR-10.4): before every push, run
+`scripts/check-no-personal-data.sh` — a standing check, not a one-time cleanup.
+The Team ID and bundle identifier are public by design and are not personal
+data; this check is about the developer's own machine and accounts.
 
 ## Committing
 
-Claude commits its own work without asking. The moment a change is verified
-to function as intended — built, and vetted at whatever depth the change
-warrants (for UI, that includes the review the skills section requires) — it
-is committed, with the version bump FR-8.9 ties to it, rather than left
-waiting for permission. One body of related work is one commit. Two things
-are never swept into such a commit silently: another agent's unfinished
-edits sharing the working tree (coordinate a commit order instead — every
-commit must describe a state that actually compiled and ran), and work the
-user explicitly asked to hold. An unverified change stays uncommitted, and
-saying so beats committing it with a hopeful message.
+Claude commits its own work without asking. The moment a change is verified to
+function as intended — built, and vetted at whatever depth it warrants (for UI,
+the review above) — it is committed, with the version bump FR-8.9 ties to it.
+One body of related work is one commit. Two things are never swept in silently:
+another agent's unfinished edits sharing the working tree (coordinate a commit
+order — every commit must describe a state that compiled and ran), and work the
+user asked to hold. An unverified change stays uncommitted, and saying so beats
+committing it with a hopeful message.
 
 ## Branching & merging (FR-10.6)
 
-`main` is the stable default branch: it always builds and always describes
-the current working state of the app — never a half-landed experiment.
-Each body of work lives on a short-lived branch of its own, named for the
-work (`fix-duel-flicker`, not `wip2`), branched from `main` and merged back
-whole once verified per the committing rules above; delete the branch after
-the merge. Merges into `main` use a merge commit (`--no-ff`), so each body
-of work stays legible as one unit in history. This is plain
-GitHub-flow-style trunk development — if a branch structure needs
-explaining, it's wrong (FR-10.6).
+`main` always builds and always describes the current working state. Each body
+of work lives on a short-lived branch named for the work (`fix-duel-flicker`,
+not `wip2`), branched from `main` and merged back whole once verified; delete
+the branch after. Merges use `--no-ff`, so each body of work stays legible as
+one unit. Plain GitHub-flow trunk development — if a branch structure needs
+explaining, it's wrong.
 
 ## Build & run
 
 Xcode project (no SwiftPM manifest, no test target):
 
 ```bash
-# Build
 xcodebuild -project Firnlight.xcodeproj -scheme Firnlight -configuration Debug build
-
-# Or just open it
-open Firnlight.xcodeproj
+open Firnlight.xcodeproj   # or just this
 ```
 
-Requires the full **Xcode 26+** toolchain (matching the deployment target the
-project still carries — see the CI paragraph above for why that is 26 while
-REQUIREMENTS.md's opening says 27+), not the Command Line Tools. A newer
-Xcode/macOS beta builds *for* 26 just as well if that's what a given machine
-has installed instead. If `xcodebuild` errors with *"requires Xcode, but active
-developer directory … is a command line tools instance"*, the CLT are
-selected. The exact install path depends on how Xcode is managed on the
-machine (Xcodes app, direct download, App Store) — select the full Xcode
+Requires the full **Xcode 26+** toolchain, not the Command Line Tools. If
+`xcodebuild` errors with *"requires Xcode, but active developer directory … is
+a command line tools instance"*, the CLT are selected. Select the full Xcode
 permanently with
-`sudo xcode-select -s /Applications/Xcode<version>.app/Contents/Developer`,
-or override for one command without sudo via
+`sudo xcode-select -s /Applications/Xcode<version>.app/Contents/Developer`, or
+per-command via
 `DEVELOPER_DIR=/Applications/Xcode<version>.app/Contents/Developer xcodebuild …`.
 
-There are no automated tests — thresholds are tuned by hand against a real Photos
-library, and the app requires interactive Photos authorization to do anything.
+No automated tests — thresholds are tuned by hand against a real Photos
+library, and the app needs interactive Photos authorization to do anything.
 
-**Signing must stay stable** (`DEVELOPMENT_TEAM = VGZ5MZ2P8B`, automatic signing).
-macOS TCC binds the Photos permission grant to the code signature, so changing the
-signing identity forces the user to re-grant access. (This lives here because it
-is project configuration, not code — it cannot carry its own comment.)
+**Signing must stay stable** (`DEVELOPMENT_TEAM = VGZ5MZ2P8B`, automatic
+signing). macOS TCC binds the Photos grant to the code signature, so changing
+the signing identity forces the user to re-grant access.
 
-**Versioning (FR-8.9)** lives entirely in two build settings, because that is
-the only place a version can live and still be the one the app is running:
+**Versioning (FR-8.9)** lives in two build settings, the only place a version
+can live and still be the one the app is running:
 
-- `MARKETING_VERSION` — FR-8.9's `0.minor.patch`. Bump it in the same change
-  that makes the user-visible change: minor for capability the user gained,
-  patch for fixes to what already existed. It stays `0.x.y` until the app is fit
-  for its first real release.
-- `CURRENT_PROJECT_VERSION` — the build number, a plain counter that only ever
-  goes up. `VERSIONING_SYSTEM = "apple-generic"`, so Apple's own `agvtool`
-  drives it: `xcrun agvtool what-version` reads it and `xcrun agvtool
-  next-version -all` bumps it (from the project directory). Never let a build
-  leave the machine sharing a version *and* build number with a different one.
-  Set `MARKETING_VERSION` by editing the build setting, *not* with `agvtool
-  new-marketing-version`: that subcommand looks for `CFBundleShortVersionString`
-  in `Firnlight-Info.plist`, which is only a partial plist here
-  (`GENERATE_INFOPLIST_FILE = YES` supplies the key), so it reads an empty
-  version and then tries to write to a path named after the setting's value.
-  `next-version -all` prints the same `Cannot find "…/YES"` line for that
-  reason; there it is harmless noise — it bumps the build number in the pbxproj
-  correctly and writes no such file. Verify with `git status` if in doubt.
+- `MARKETING_VERSION` — FR-8.9's `0.minor.patch`.
+- `CURRENT_PROJECT_VERSION` — the build number, a counter that only goes up.
+  `VERSIONING_SYSTEM = "apple-generic"`, so `agvtool` drives it: `xcrun agvtool
+  what-version` reads, `xcrun agvtool next-version -all` bumps (from the
+  project directory). Set `MARKETING_VERSION` by editing the build setting,
+  *not* with `agvtool new-marketing-version`: that subcommand looks for
+  `CFBundleShortVersionString` in `Firnlight-Info.plist`, which is only a
+  partial plist here (`GENERATE_INFOPLIST_FILE = YES` supplies the key), so it
+  reads an empty version and writes to a path named after the setting's value.
+  `next-version -all` prints the same `Cannot find "…/YES"` line — there it is
+  harmless noise; it bumps the pbxproj correctly and writes no such file.
 
 `GENERATE_INFOPLIST_FILE = YES` stamps both into the bundle as
 `CFBundleShortVersionString` / `CFBundleVersion`, and `AppIdentity` in
-`About.swift` reads them back from `Bundle.main` — no Swift literal anywhere
-restates them. The copyright line FR-8.8 asks for is the third setting,
-`INFOPLIST_KEY_NSHumanReadableCopyright`, read by the macOS About panel
-directly and by the iOS footer through the same `AppIdentity`. (All of this
-lives here for the same reason signing does: build settings cannot carry a
-comment.)
+`About.swift` reads them back from `Bundle.main` — no Swift literal restates
+them. FR-8.8's copyright line is a third setting,
+`INFOPLIST_KEY_NSHumanReadableCopyright`, read by the macOS About panel directly
+and by the iOS footer through `AppIdentity`. (Build settings cannot carry a
+comment, which is why this and the signing note live here.)
 
-**The app icon** is a hand-authored Icon Composer bundle, `Firnlight/AppIcon.icon`
-(one bundle serves macOS and iOS). Its artwork carries its own documentation as
-comments in the `Assets/*.svg` files; the notes below are the parts JSON and
-build settings cannot hold a comment for.
+### The app icon
 
-`icon.json` maps FR-8.6's clauses onto the glass-icon feature set, one clause per
-key: `fill.linear-gradient` is the colour gradient; four `groups` — Prism,
-Light, Ridge, Sun, front to back — give depth, with the glass and the spectrum
+A hand-authored Icon Composer bundle, `Firnlight/AppIcon.icon` (one bundle
+serves both platforms). Artwork is documented in the `Assets/*.svg` files; below
+is only what JSON and build settings cannot hold a comment for.
+
+`icon.json` maps FR-8.6's clauses onto the glass-icon feature set, one clause
+per key: `fill.linear-gradient` is the colour gradient; four `groups` — Prism,
+Light, Ridge, Sun, front to back — give depth, with the glass and spectrum
 overlapping the dark flank (the shoulder peak's glass face is a *layer inside
-the Ridge group*, not the Prism, because it stands beyond the saddle and the
-fan must pass in front of it — see `Assets/shoulder.svg`); the Prism casts a `shadow` onto the ridge
-and the Ridge one onto the ground (light and sun cast none — light does not
-shadow); `translucency` on the glass plus the Light group's `blend-mode:
-plus-lighter` is how the layers show through one another; `specular` on the
-glass faces puts the highlight on them, on the sun's side, which is what makes
-it read as lit from one direction; and `refractivity` + `blur-material` on the
-Prism act on the beam layer *behind* it — the system itself bends and blurs
-the sun's light through the glass (the dispersion geometry and its faux
-physics are documented in `Assets/light.svg`). Four is the ceiling — a fifth
-visible group is rejected with `too-many-visible-groups`.
-The six appearances are *derived* by the system from this one composition — the
-`fill-specializations` / `image-name-specializations` keys parse but do nothing in
-Xcode 27b4, so per-appearance artwork is not authorable.
+the Ridge group*, not the Prism, because it stands beyond the saddle and the fan
+must pass in front of it — see `Assets/shoulder.svg`); the Prism casts a
+`shadow` onto the ridge and the Ridge one onto the ground (light and sun cast
+none); `translucency` on the glass plus the Light group's `blend-mode:
+plus-lighter` makes layers show through one another; `specular` on the glass
+faces puts the highlight on the sun's side, which is what reads as lit from one
+direction; `refractivity` + `blur-material` on the Prism act on the beam layer
+*behind* it, so the system bends and blurs the sun's light through the glass
+(dispersion geometry documented in `Assets/light.svg`). Four visible groups is
+the ceiling — a fifth is rejected with `too-many-visible-groups`. The six
+appearances are *derived* from this one composition;
+`fill-specializations` / `image-name-specializations` parse but do nothing in
+Xcode 27 betas, so per-appearance artwork is not authorable.
 
-Two ways to get *no icon at all*, both silent — no warning, and the build still
+Two ways to get *no icon at all*, both silent — no warning, build still
 succeeds:
-- `ASSETCATALOG_COMPILER_APPICON_NAME` not matching the bundle's basename
+- `ASSETCATALOG_COMPILER_APPICON_NAME` not matching the bundle basename
   (`AppIcon`).
 - Moving the `.icon` inside an `.xcassets`. It must stay a sibling of the Swift
   sources; the target's synchronized file group picks it up with no pbxproj edit.
 
-**The icon exists in the built app three times over**, and they are not the
-same picture — which matters because FR-8.8 forbids the app ever showing "a
-second, subtly different version" of its own icon:
-- the compiled Icon Composer composition in `Assets.car` (`CFBundleIconName`),
-  which the system renders *live* — glass, deep tones, dispersion — and which
-  is what the Dock, Finder and the Home Screen draw;
+**The icon exists in the built app three times over**, and they are not the same
+picture — which matters because FR-8.8 forbids showing "a second, subtly
+different version" of it:
+- the compiled composition in `Assets.car` (`CFBundleIconName`), rendered *live*
+  by the system — glass, deep tones, dispersion — and what the Dock, Finder and
+  Home Screen draw;
 - `Contents/Resources/AppIcon.icns` (`CFBundleIconFile`), which `actool` bakes
-  from the same composition as a flat compatibility fallback, and which comes
-  out lighter and hazier than the live rendering. It is *not* what any surface
-  here was observed to use, so it is left in place — removing it means
-  `ASSETCATALOG_COMPILER_STANDALONE_ICON_BEHAVIOR = none`, which risks the
+  from the same composition as a flat fallback, lighter and hazier than the live
+  rendering. No surface here was observed to use it, so it stays — removing it
+  means `ASSETCATALOG_COMPILER_STANDALONE_ICON_BEHAVIOR = none`, risking the
   silent no-icon failures above for no proven gain;
-- on iOS, the rendered `AppIcon60x60@2x.png` / `AppIcon76x76@2x~ipad.png` files
-  listed under `CFBundleIcons`. Comparing one against a Home Screen screenshot
-  at the same size, they visibly differ (mean channel difference ≈ 22/255) —
-  SpringBoard composes the layers live rather than blitting the file. There is
-  no iOS API that hands back the composed icon, which is why `AboutFooter`
-  shows no icon at all.
+- on iOS, rendered `AppIcon60x60@2x.png` / `AppIcon76x76@2x~ipad.png` under
+  `CFBundleIcons`. These visibly differ from a Home Screen screenshot at the
+  same size (mean channel difference ≈ 22/255) — SpringBoard composes the layers
+  live. No iOS API hands back the composed icon, which is why `AboutFooter` shows
+  no icon at all.
 
-Only on macOS can code ask for *the* icon: `NSApp.applicationIconImage` is the
-image the Dock tile draws, and passing it as the About panel's
-`applicationIcon` option is the one way to guarantee the two agree.
+Only on macOS can code ask for *the* icon: `NSApp.applicationIconImage` is what
+the Dock tile draws, and passing it as the About panel's `applicationIcon` is the
+one way to guarantee the two agree.
 
 **IconServices caches a rendered icon per bundle path, and the cache goes
-stale.** Seen here: the app at its DerivedData path rendered the icon design
-from *weeks* earlier through `NSWorkspace.icon(forFile:)` while its Dock tile
-drew the empty Icon Composer placeholder grid — with the current artwork
-sitting correctly in the same bundle's `.icns`. Rebuilding does not clear it,
-and neither does `lsregister -f -R -trusted <app>` — which every build already
-runs anyway, as Xcode's own `RegisterWithLaunchServices` phase. The tell is
-that the *identical* bundle copied to a fresh path renders correctly; that copy
-is also the way to check what the icon really looks like in situ:
+stale.** Seen here: the app at its DerivedData path rendered the icon design from
+*weeks* earlier through `NSWorkspace.icon(forFile:)` while its Dock tile drew the
+empty placeholder grid — with current artwork sitting correctly in the same
+bundle's `.icns`. Neither rebuilding nor `lsregister -f -R -trusted <app>` clears
+it (every build already runs the latter, as Xcode's `RegisterWithLaunchServices`
+phase). The tell is that the identical bundle copied to a fresh path renders
+correctly — which is also how to check the icon in situ:
+
 ```bash
 cp -R "$(...)/Build/Products/Debug/Firnlight.app" /tmp/iconcheck/ && open /tmp/iconcheck/Firnlight.app
 ```
+
 Deleting the icon store is what actually shifts it. `build-and-run.sh` does that
-for you, but only when the contents of `AppIcon.icon` changed — the deletion is
-machine-wide and the Dock restart blinks every tile, so routine builds stay
-quiet. Outside the script, by hand:
+when `AppIcon.icon` changed — the deletion is machine-wide and the Dock restart
+blinks every tile, so routine builds stay quiet. By hand:
+
 ```bash
 # -exec, not a bare glob: under zsh an unmatched glob aborts the whole command.
-# (2>/dev/null swallows the permission noise from unrelated sandboxed caches.)
+# (2>/dev/null swallows permission noise from unrelated sandboxed caches.)
 find "$(getconf DARWIN_USER_CACHE_DIR)" -maxdepth 1 -name 'com.apple.iconservices*' \
   -exec rm -rf {} + 2>/dev/null
 killall iconservicesagent; killall Dock
 ```
 
-Validate and preview from the command line — there is no need to open the GUI:
+Validate and preview without opening the GUI:
+
 ```bash
 ICT="/Applications/Xcode<version>.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool"
 # Diagnostics (empty array == valid):
@@ -368,20 +282,24 @@ ICT="/Applications/Xcode<version>.app/Contents/Applications/Icon Composer.app/Co
   --platform macOS --rendition Default --width 512 --height 512 --scale 1
 ```
 
+### Logs and the Simulator
+
 Runtime logs go to the unified logging system under subsystem
-`space.remco.Firnlight` (categories per component). Filter in Console.app or:
+`space.remco.Firnlight` (categories per component):
+
 ```bash
 log stream --predicate 'subsystem == "space.remco.Firnlight"'
 ```
+
 For a simulator, the same predicate works through `xcrun simctl spawn <udid> log show`.
 
 **Simulator screenshots need no permission**: `xcrun simctl io <udid> screenshot
-shot.png` reads the simulator's framebuffer, so it needs neither Simulator.app
-open nor the Screen Recording grant `screencapture` requires — without that grant
-`screencapture` silently returns solid black. Load test photos with
-`xcrun simctl addmedia <udid> *.jpg`.
+shot.png` reads the framebuffer, needing neither Simulator.app open nor the
+Screen Recording grant `screencapture` requires — without that grant
+`screencapture` silently returns solid black. Load test photos with `xcrun
+simctl addmedia <udid> *.jpg`.
 
-**Vision does not run in the iOS simulator**: every request fails with `Failed to
-create espresso context`, so analysis accepts nothing there and the grid, duels
-and album preview stay empty however many photos are loaded. Scanning is
+**Vision does not run in the iOS simulator**: every request fails with `Failed
+to create espresso context`, so analysis accepts nothing there and the grid,
+duels and album preview stay empty however many photos are loaded. Scanning is
 unaffected; anything downstream of `ImageAnalyzer` needs a real device or the Mac.
