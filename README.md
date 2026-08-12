@@ -68,10 +68,8 @@ the pipeline:
 
 ## Building from source
 
-Requires the full Xcode 26+ toolchain (not just the Command Line Tools) —
-Xcode 26 is what CI builds against; see [CLAUDE.md](CLAUDE.md) for why the
-project still targets 26 while running on 27, and why its own development
-machine runs a newer beta:
+Requires the full Xcode 27+ toolchain (not just the Command Line Tools),
+matching the app's macOS/iOS 27+ target:
 
 ```bash
 git clone --recurse-submodules <this-repo-url>
