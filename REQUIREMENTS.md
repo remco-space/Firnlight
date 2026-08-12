@@ -5,13 +5,11 @@ finds high-resolution nature photos without people, learns the user's personal
 taste from quick pairwise comparisons, and maintains a Photos album that System
 Settings can rotate as wallpaper.
 
-It runs on macOS 26+ and, on iPhone and iPad, iOS 26+ — but it is designed
-for the newest: its look and feel follow the current design language (the
-27 era and beyond), rendered as faithfully as each supported system can.
-The Mac
-is where wallpaper happens: only there does the album become
-the desktop. On iPhone and iPad Firnlight is a companion — the same finding,
-learning and curating, feeding the same album — but it never sets wallpaper.
+It runs on macOS 27+ and, on iPhone and iPad, iOS 27+, and follows the
+current system design language. The Mac is where wallpaper happens: only
+there does the album become the desktop. On iPhone and iPad Firnlight is a
+companion — the same finding, learning and curating, feeding the same album —
+but it never sets wallpaper.
 Requirements apply everywhere unless marked *(macOS)* or *(iPhone and iPad)*.
 
 This document is the product brief: WHAT the user experiences and WHY, in
@@ -83,11 +81,14 @@ The app has three tabs matching the three stages of the journey:
 
 ## 3. Analysis (Library tab)
 
-- **FR-3.1** The app examines each candidate on-device to keep only nature
-  photos without people, or cityscapes without a lot of people; screenshots and
-  utility images are set aside too.
-- **FR-3.2** After analysis, the user sees a breakdown of why photos were set
-  aside: contains people, utility image, not nature, or waiting on iCloud.
+- **FR-3.1** The app examines each candidate on-device and keeps only what
+  could actually hang on a desktop: nature or cityscape scenes, with no person
+  prominent enough to be the subject and no crowd, and free of the flaws that
+  rule a photo out however good the scene — a finger over the lens, a badly
+  blurred or smeared frame. Screenshots and other utility images are set aside
+  too.
+- **FR-3.2** After analysis, the user sees how many photos were set aside and
+  why, each reason named in the user's own terms.
 - **FR-3.3** Analysis can be interrupted at any time.
 - **FR-3.4** Photos stored only in iCloud are deferred, not skipped: the app
   finishes everything local first, then comes back to download and examine the
@@ -99,14 +100,21 @@ The app has three tabs matching the three stages of the journey:
   and offers only stopping it — and resuming, if the user stopped it. Work the
   app should be doing anyway is never gated behind a button the user has to
   find.
-- **FR-3.6** *(iPhone and iPad)* A long run needs no babysitting: it carries on
-  with the screen locked while the device is charging, and the user can stop it
-  at any moment. If continuing would cost too much battery or run
-  the device hot, it pauses and says that it is waiting.
+- **FR-3.6** A long run needs no babysitting: it keeps going while the user is
+  away — screen asleep, lid closed, device locked — as long as the device is on
+  power, and the user can stop it at any moment. If continuing would cost too
+  much battery or run the device hot, it pauses and says it is waiting.
 - **FR-3.7** The app obeys the user's system-wide choices about which networks
   may carry data, rather than inventing a rule of its own. When photos must come
   down from iCloud and the network does not allow it, the app says what it is
   waiting for.
+- **FR-3.8** A photo that records less than others — where or when it was
+  taken, or anything the app could not determine from it — is never set aside
+  for the gap: it is ranked on what is known, and counts as the user's own
+  choices imply (FR-5.2). A device that cannot examine photos as deeply still
+  finds, learns and curates; it simply knows less. *(Why: a library spans
+  decades, cameras and devices, and the photos carrying the least about
+  themselves are often the best ones.)*
 
 ## 4. The ranked grid (Library tab)
 
@@ -116,8 +124,7 @@ The app has three tabs matching the three stages of the journey:
   isn't cluttered with the same view repeated. *(Why: re-takes of one vista
   should compete as one wallpaper, not crowd out variety.)*
 - **FR-4.3** When duplicates are collapsed, the app keeps the best of the
-  bunch — preferring a Photos favorite, then the one with the visibly
-  straighter horizon.
+  bunch by the same standards it ranks by.
 - **FR-4.4** Favorites show a heart badge, and every thumbnail shows its
   current score.
 - **FR-4.5** The grid re-orders itself live as the app learns the user's taste
@@ -192,14 +199,19 @@ The app has three tabs matching the three stages of the journey:
   learned ranking judges that same crop, not the whole photo — important for
   panoramas, where the crop can look very different from the full photo. Both
   photos are fully visible at once, however small the screen.
-- **FR-5.2** Ranking is learned entirely from the user's choices. Nothing is
-  hard-coded: a low-resolution or tilted photo is penalized only as much as
-  the user's own decisions imply.
+- **FR-5.2** Ranking is learned entirely from the user's choices, over
+  everything the app can observe about a photo — how it looks, and what the
+  photo records of when and where it was taken. Nothing is hard-coded: no trait
+  counts for more or less than the user's own decisions imply. The same library
+  and the same judgments always produce the same ranking, and photos are always
+  compared on equal terms: when the app's understanding of photos changes, it
+  re-examines what it must, in the background, without costing the user a single
+  judgment.
 - **FR-5.3** Every choice and verdict is remembered permanently — the user's
   invested judgment is never lost.
-- **FR-5.4** Ranking starts from the user's existing Photos favorites, so
-  recommendations feel personal from the very first duel. *(Why: no cold
-  start.)*
+- **FR-5.4** Ranking starts from what the user has already said about their
+  photos in Photos, so recommendations feel personal from the very first duel.
+  *(Why: no cold start.)*
 - **FR-5.5** The app picks pairs it is most unsure about, avoids re-asking
   decided pairs, avoids near-identical pairs, and randomizes sides. *(Why:
   every click should teach the app as much as possible, without position
@@ -221,6 +233,12 @@ The app has three tabs matching the three stages of the journey:
   anywhere in the app. A pair already on screen when a judgment changes
   elsewhere may predate it — judging it is still valid, since the user judges
   the photos in front of them, not the bookkeeping behind them.
+- **FR-5.11** Taste is learned from few choices: within a session's worth of
+  duels the ranking visibly improves for photos the user has never been shown,
+  not only for the ones they judged. How much the app can tell about a photo
+  bounds how fast it can learn, so it looks as deeply as the device allows
+  (FR-3.8). *(Why: a curator the user must train for a thousand clicks before it
+  is useful is one they abandon at fifty.)*
 
 ## 6. The wallpaper album (Export tab)
 
@@ -279,9 +297,11 @@ The app has three tabs matching the three stages of the journey:
 
 ## 7. Durability
 
-- **FR-7.1** All of the user's invested effort — scan results, analysis,
-  choices, verdicts, exclusions — survives quitting, relaunching, and app
-  updates. Long-running work always resumes where it stopped.
+- **FR-7.1** The user's judgments — every choice, verdict and exclusion —
+  survive quitting, relaunching, and app updates; they are the one thing the app
+  cannot rebuild for itself. What it can rebuild from the library, it may redo
+  when it needs to, at no cost but time. Long-running work always resumes where
+  it stopped.
 - **FR-7.2** Rebuilding, upgrading, or installing a downloaded release never
   requires the user to re-grant Photos access.
 - **FR-7.3** An update never costs the user accumulated work. A version that
