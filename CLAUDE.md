@@ -35,9 +35,10 @@ For any UI/UX, HIG, Liquid Glass, or accessibility work, prefer these skills:
 **`liquid-glass`** is authoritative for the glass API and its design rules
 (`.glassEffect()`, not `.background(.material)`); **`ui-review-tahoe`** is the
 review checklist for macOS UI and defers to it on glass; **`swiftui-specialist`**
-covers native SwiftUI generally. These are native-focused and current. Do not use
-the third-party `apple-hig-designer-skill-2026` — it is a web/CSS generation skill
-targeting the older 26 era, not a native macOS reviewer.
+covers native SwiftUI generally, and **`swiftui-whats-new-27`** carries what the
+27 SDK changed. These are native-focused and current. Do not use the third-party
+`apple-hig-designer-skill-2026` — it is a web/CSS generation skill, targeting an
+era older still, not a native macOS reviewer.
 
 A change that adds or alters UI is not done until it has been reviewed against
 the **`ui-review-tahoe`** checklist and against section 8 of `REQUIREMENTS.md`
@@ -120,10 +121,27 @@ right-click → Open, or `xattr -cr Firnlight.app`.
 
 CI: release builds come from GitHub Actions `macos-26` runners (Xcode
 26.x), so what ships is built against the SDK generation users run, and
-that run is also the authoritative proof the project builds with Xcode 26.
-A machine on a newer macOS/Xcode beta can only build *for* 26 (a newer
-macOS refuses to launch older Xcodes, `xcodebuild` included), never prove
-it.
+that run is also the authoritative proof the project builds with that
+Xcode. A machine on a newer macOS/Xcode beta can only build *for* an older
+generation (a newer macOS refuses to launch older Xcodes, `xcodebuild`
+included), never prove it.
+
+**The 27 floor is declared but not yet enforced, and this is the one place
+that says so.** REQUIREMENTS.md's opening puts the app on macOS/iOS 27+, and
+0.15.0 was published as the last release for the 26 generation (announced in
+its own changelog entry, which is the only place the users it strands ever
+see it — no later release will install for them). The build settings still
+say `MACOSX_DEPLOYMENT_TARGET`/`IPHONEOS_DEPLOYMENT_TARGET = 26.0`, because
+GitHub Actions has no macOS 27 runner and no image carrying Xcode 27:
+`macos-26` is still `macos-latest`, with Xcode 26.0.1–26.6 only. A
+deployment target cannot exceed the SDK building it, so raising the two
+settings today would stop CI compiling the project at all — taking releases
+(FR-10.1) with it, to buy a floor no user is asking for yet. Raise both
+settings, and both workflows' `runs-on` and Xcode-selection steps, in one
+change the moment an image with Xcode 27 exists; until then an app targeting
+26 satisfies "runs on 27+" by running there, and this note is the standing
+record of the gap. Re-check the runner images before assuming it still
+holds.
 
 File formats to use, once built: `LICENSE` follows
 [choosealicense.com/licenses/mit](https://choosealicense.com/licenses/mit/);
@@ -211,11 +229,11 @@ xcodebuild -project Firnlight.xcodeproj -scheme Firnlight -configuration Debug b
 open Firnlight.xcodeproj
 ```
 
-Requires the full **Xcode 26+** toolchain (matching the app's macOS/iOS 26+
-target — see REQUIREMENTS.md's opening and the Release process section
-above), not the Command Line Tools. A newer Xcode/macOS beta builds *for* 26
-just as well (see the CI paragraph above) if that's what a given machine has
-installed instead. If `xcodebuild` errors with *"requires Xcode, but active
+Requires the full **Xcode 26+** toolchain (matching the deployment target the
+project still carries — see the CI paragraph above for why that is 26 while
+REQUIREMENTS.md's opening says 27+), not the Command Line Tools. A newer
+Xcode/macOS beta builds *for* 26 just as well if that's what a given machine
+has installed instead. If `xcodebuild` errors with *"requires Xcode, but active
 developer directory … is a command line tools instance"*, the CLT are
 selected. The exact install path depends on how Xcode is managed on the
 machine (Xcodes app, direct download, App Store) — select the full Xcode
