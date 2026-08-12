@@ -138,6 +138,7 @@ nonisolated struct AnalysisStatistics: Sendable, Equatable {
     var pending = 0
     var accepted = 0
     var utility = 0
+    var flawed = 0
     var people = 0
     var notNature = 0
     var skipped = 0
@@ -238,6 +239,7 @@ actor AnalysisQueue {
             case .analyzed(let id, let outcome):
                 guard let record = byIdentifier[id] else { continue }
                 record.isUtility = outcome.isUtility
+                record.isFlawed = outcome.isFlawed
                 record.hasPeople = outcome.hasPeople
                 record.isNature = outcome.isNature
                 record.aestheticsScore = outcome.aestheticsScore
@@ -309,11 +311,12 @@ actor AnalysisQueue {
         stats.pending = try count(#Predicate { $0.analysisVersion < version })
         stats.accepted = try count(#Predicate { $0.isNature })
         stats.utility = try count(#Predicate { $0.isUtility })
+        stats.flawed = try count(#Predicate { $0.isFlawed })
         stats.people = try count(#Predicate { $0.hasPeople })
         // `analysisFailed` is excluded here too: a photo Vision couldn't read
         // was never judged "not nature" — the app has no opinion about it.
         stats.notNature = try count(#Predicate {
-            $0.analysisVersion == version && !$0.isNature && !$0.isUtility && !$0.hasPeople && !$0.isSkipped && !$0.analysisFailed
+            $0.analysisVersion == version && !$0.isNature && !$0.isUtility && !$0.isFlawed && !$0.hasPeople && !$0.isSkipped && !$0.analysisFailed
         })
         stats.skipped = try count(#Predicate { $0.isSkipped })
         stats.failed = try count(#Predicate { $0.analysisFailed })

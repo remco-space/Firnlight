@@ -41,6 +41,16 @@ final class PhotoRecord {
     var isNature: Bool
     var hasPeople: Bool
     var isUtility: Bool
+
+    /// Severely blurred, smeared, or obstructed — a finger over the lens and
+    /// the like (FR-3.1). Set only when `aestheticsScore` falls below
+    /// `Thresholds.severelyFlawedAestheticsScore`; see `ImageAnalyzer`'s type
+    /// doc comment. Added after `isNature`/`hasPeople`/`isUtility`, so it
+    /// follows the later fields' pattern of an inline default rather than an
+    /// init assignment — SwiftData's lightweight migration adds the column
+    /// with that default for existing rows.
+    var isFlawed: Bool = false
+
     var aestheticsScore: Float
 
     /// Raw Float array from GenerateImageFeaturePrintRequest; nil until analyzed.

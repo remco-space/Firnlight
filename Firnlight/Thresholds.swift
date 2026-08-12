@@ -87,7 +87,11 @@ nonisolated enum Thresholds {
     /// happened to be, so records analyzed on a 16:9 display measured a
     /// different rectangle than the fixed `desktopAspectRatio` crop the ranker
     /// now assumes — and than the same photo would measure on another device.
-    static let currentAnalysisVersion = 3 // v3 analyzes the fixed desktopAspectRatio center crop
+    /// v4 is required too: it adds the flawed-photo rejection (FR-3.1), so a
+    /// badly blurred or smeared photo accepted under v3 must be re-scored
+    /// against `severelyFlawedAestheticsScore` before it can keep counting as
+    /// a candidate.
+    static let currentAnalysisVersion = 4 // v4 rejects severely flawed (blurred/smeared/obstructed) photos
 
     /// Records analyzed and saved per batch; a killed app loses at most one batch.
     static let analysisBatchSize = 32
@@ -183,6 +187,20 @@ nonisolated enum Thresholds {
 
     /// Minimum classification confidence for a label to count toward the nature check.
     static let natureConfidenceThreshold: Float = 0.4
+
+    /// `CalculateImageAestheticsScoresRequest.overallScore` (range -1…1; Apple
+    /// documents it as reflecting how well taken the image is, blur and
+    /// exposure among its factors) below which a photo is rejected as flawed
+    /// — FR-3.1's "finger over the lens, a badly blurred or smeared frame" —
+    /// rather than merely ranked lower. Set well under the neutral midpoint
+    /// (0) so an ordinarily mediocre but intact photo is never caught: this
+    /// gate is for photos too damaged to use "however good the scene," not a
+    /// second aesthetics cutoff. No dedicated blur/obstruction request exists
+    /// in Vision, so this reuses the one score Apple documents as folding
+    /// technical quality in; unverified against real flawed photos, so tune
+    /// from real library data the same way `natureLabels` is tuned, via the
+    /// ImageAnalyzer debug log.
+    static let severelyFlawedAestheticsScore: Float = -0.5
 
     // MARK: Candidate grid (Phase 4)
 
