@@ -30,11 +30,11 @@ import os
 /// `season`/`latitude` value, on every device, at every library size, so
 /// `weights.time`/`weights.location` mean the same thing for as long as they
 /// exist — the same property `resolution`/`levelness` already had. A photo
-/// missing a date or location gets the neutral midpoint (0.5) for that
-/// feature — not a penalty (FR-3.8) — and `sgdStep` additionally skips the
-/// gradient term entirely for any duel where either side lacks it, so an
-/// unknown date/location never itself becomes a trained signal, only ever a
-/// genuinely uninformative one.
+/// missing a date or location gets that feature's own neutral midpoint — 0.5
+/// for `season`'s 0…1 scale, 0 for `latitude`'s −1…1 one — not a penalty
+/// (FR-3.8), and `sgdStep` additionally skips the gradient term entirely for
+/// any duel where either side lacks it, so an unknown date/location never
+/// itself becomes a trained signal, only ever a genuinely uninformative one.
 /// Choice model: P(winner beats loser) = sigmoid(s_winner − s_loser)
 /// One SGD step per recorded choice; `PhotoRecord.preferenceScore` caches the
 /// raw score s after every update so the grid can re-rank live. A bad
@@ -123,8 +123,17 @@ actor PreferenceRanker {
         let time: Float
         let hasTime: Bool
         /// FR-5.2's "where": the record's latitude ÷ 90 (fixed scale, −1…1);
-        /// 0.5 and `hasLocation == false` when the record has no location.
-        /// See the type doc comment.
+        /// 0 (this scale's own neutral midpoint — NOT 0.5, which belongs to
+        /// `time`'s 0…1 scale) and `hasLocation == false` when the record has
+        /// no location. Longitude is captured on `PhotoRecord` but
+        /// deliberately not folded in here: a fixed linear encoding of it
+        /// (e.g. ÷180) wraps discontinuously at the ±180° antimeridian —
+        /// two photos taken meters apart on either side of that line would
+        /// read as maximally far apart on this feature, a false signal no
+        /// duel choice produced. Latitude has no equivalent seam (it runs
+        /// −90…90 with no wraparound), so it stands alone as the "where"
+        /// feature; see the type doc comment for the general fixed-scale
+        /// rationale this follows.
         let location: Float
         let hasLocation: Bool
         var score: Float = 0 // raw, pre-sigmoid
@@ -366,7 +375,7 @@ actor PreferenceRanker {
                 location = Float(lat / 90) // -1 (south pole) … 1 (north pole)
                 hasLocation = true
             } else {
-                location = 0.5 // neutral — no location (FR-3.8)
+                location = 0 // neutral midpoint of the -1…1 scale — no location (FR-3.8)
                 hasLocation = false
             }
 
@@ -673,9 +682,9 @@ actor PreferenceRanker {
         weights.resolution += gradient * (winner.resolution - loser.resolution)
         // FR-3.8: a duel where either side has no known date/location trains
         // nothing on that dimension — the difference is forced to 0 rather
-        // than comparing a real value against the other side's neutral 0.5,
-        // which would otherwise treat "unknown" as if it meant "average" and
-        // let the gap itself become a trained signal.
+        // than comparing a real value against the other side's neutral
+        // midpoint, which would otherwise treat "unknown" as if it meant
+        // "average" and let the gap itself become a trained signal.
         weights.time += gradient * (winner.hasTime && loser.hasTime ? winner.time - loser.time : 0)
         weights.location += gradient * (winner.hasLocation && loser.hasLocation ? winner.location - loser.location : 0)
     }
