@@ -12,6 +12,17 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Fixed
+
+- A duel could resume, or be served, showing the same photo on both sides.
+  Resuming after a relaunch trusted two persisted photo IDs without checking
+  they were different, and the pair itself was persisted as two separate
+  writes that a crash between them could leave mismatched or duplicated; both
+  are now guarded, and the duel pair is written atomically as one value.
+  Separately, the pair-draw fallback used when the sample budget finds no
+  valid pair could serve a near-duplicate (visually identical) pair; it now
+  applies the same distance guard the primary sampling loop already does.
+
 ### Removed
 
 - Support for macOS 26 and iOS 26. Firnlight now needs macOS 27 or iOS 27;

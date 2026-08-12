@@ -250,14 +250,19 @@ actor PreferenceRanker {
     /// Reconstructs a `DuelPair` from two persisted local identifiers — used
     /// to resume the exact pair the user was looking at on the previous
     /// launch (FR-8.1). Returns nil if either photo is no longer a live
-    /// candidate (deleted, edited out, ignored, etc.), or if the pair was
+    /// candidate (deleted, edited out, ignored, etc.), if the pair was
     /// already judged — a choice can persist before the next pair's
     /// identifiers do (process death in the window between them), and
-    /// re-serving a judged pair would double-count its SGD step — in either
-    /// case the caller should fall back to `nextPair()` as if this were a
-    /// fresh start.
+    /// re-serving a judged pair would double-count its SGD step — or if the
+    /// two identifiers are the same photo: the persisted state is meant to
+    /// name two distinct candidates, and corrupted resume state (a process
+    /// kill between the two `UserDefaults` writes that used to back this,
+    /// leaving one stale ID under both keys) must not hand back a same-photo
+    /// pair (FR-5.1's "shown two photos"). In every one of these cases the
+    /// caller falls back to `nextPair()` as if this were a fresh start.
     func pair(first: String, second: String) -> DuelPair? {
-        guard let firstIndex = indexByID[first], let secondIndex = indexByID[second],
+        guard first != second,
+              let firstIndex = indexByID[first], let secondIndex = indexByID[second],
               !judgedPairs.contains(Self.pairKey(first, second)) else {
             return nil
         }
@@ -368,16 +373,20 @@ actor PreferenceRanker {
         }
 
         // All samples judged or near-duplicates: fall back to the first
-        // still-unjudged pair. Re-serving a judged pair would double-count its
-        // SGD step. If every pair is judged, return nil (view has an empty state).
+        // still-unjudged, non-near-duplicate pair — the same two guards the
+        // sampling loop above applies, so a small pool can't degrade into
+        // serving a visually-identical pair just because the fallback found
+        // it before a properly-distinct one (FR-5.5). Re-serving a judged
+        // pair would double-count its SGD step. If every remaining pair is
+        // judged or near-duplicate, return nil (view has an empty state).
         if best == nil {
             let shuffled = pool.shuffled()
             outer: for i in shuffled.indices {
                 for j in shuffled.indices[(i + 1)...] {
-                    if !judgedPairs.contains(Self.pairKey(shuffled[i].id, shuffled[j].id)) {
-                        best = (shuffled[i], shuffled[j], 0)
-                        break outer
-                    }
+                    guard !judgedPairs.contains(Self.pairKey(shuffled[i].id, shuffled[j].id)) else { continue }
+                    guard vDSP.distanceSquared(shuffled[i].vector, shuffled[j].vector) >= thresholdSquared else { continue }
+                    best = (shuffled[i], shuffled[j], 0)
+                    break outer
                 }
             }
         }

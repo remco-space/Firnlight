@@ -38,8 +38,28 @@ final class DuelModel {
     // SwiftData model, per the task): this is UI-restoration state, not
     // durable app data — losing it just means falling back to a fresh pair,
     // never data loss (choices themselves are the durable record, FR-5.3).
-    private static let duelPairFirstKey = "duelPairFirst"
-    private static let duelPairSecondKey = "duelPairSecond"
+    //
+    // Stored as one JSON-encoded value under one key, not two separate
+    // `UserDefaults.set` calls under two keys: a process kill between two
+    // separate writes could leave one stale identifier under both keys
+    // (including, degenerately, the same photo under both), and
+    // `UserDefaults.set` for one value is the atomic unit here — there is no
+    // window in which a reader can observe half of it. `PreferenceRanker.pair`
+    // still guards `first != second` and liveness independently, so even a
+    // still-corrupt read (e.g. an interrupted write to `duelPairKey` itself,
+    // which `.atomic`-writes the whole plist file) can only ever fall back to
+    // `nextPair()`, never serve a broken pair.
+    private static let duelPairKey = "duelPair"
+    // Superseded two-key format. Read once, as a best-effort migration for
+    // anyone resuming right after upgrading, then deleted — see
+    // `loadPersistedPair`. Never written again.
+    private static let legacyDuelPairFirstKey = "duelPairFirst"
+    private static let legacyDuelPairSecondKey = "duelPairSecond"
+
+    private struct PersistedPair: Codable {
+        let first: String
+        let second: String
+    }
 
     func start(container: ModelContainer) async {
         guard ranker == nil else { return }
@@ -141,27 +161,47 @@ final class DuelModel {
     /// Looks up the persisted pair from last launch, if any, and hands back a
     /// live `DuelPair` only if both photos are still candidates.
     private func restoredPair(ranker: PreferenceRanker) async -> PreferenceRanker.DuelPair? {
-        let defaults = UserDefaults.standard
-        guard let first = defaults.string(forKey: Self.duelPairFirstKey),
-              let second = defaults.string(forKey: Self.duelPairSecondKey) else {
+        guard let (first, second) = Self.loadPersistedPair(UserDefaults.standard) else {
             return nil
         }
         return await ranker.pair(first: first, second: second)
     }
 
+    /// Reads the persisted in-progress pair. Prefers the current one-key
+    /// format; if that is absent, falls back once to the superseded two-key
+    /// format (best effort — a kill between those two old writes could still
+    /// hand back a mixed or same-photo pair, which `PreferenceRanker.pair`
+    /// rejects) and deletes those keys so this fallback never fires again.
+    private static func loadPersistedPair(_ defaults: UserDefaults) -> (first: String, second: String)? {
+        if let data = defaults.data(forKey: duelPairKey),
+           let persisted = try? JSONDecoder().decode(PersistedPair.self, from: data) {
+            return (persisted.first, persisted.second)
+        }
+        if let first = defaults.string(forKey: legacyDuelPairFirstKey),
+           let second = defaults.string(forKey: legacyDuelPairSecondKey) {
+            defaults.removeObject(forKey: legacyDuelPairFirstKey)
+            defaults.removeObject(forKey: legacyDuelPairSecondKey)
+            return (first, second)
+        }
+        return nil
+    }
+
     /// Sets `pair` and keeps the persisted identifiers in lockstep: written
     /// whenever a new pair is served (covers choice/skip/verdict/ignore, all
     /// of which route through here), cleared when the pair becomes nil (no
-    /// more candidates to compare) so a stale pair is never resumed.
+    /// more candidates to compare) so a stale pair is never resumed. Written
+    /// as one JSON value under one key — see `duelPairKey`'s doc comment for
+    /// why that matters for FR-8.1's resume correctness.
     private func setPair(_ newPair: PreferenceRanker.DuelPair?) {
         pair = newPair
         let defaults = UserDefaults.standard
         if let newPair {
-            defaults.set(newPair.first.localIdentifier, forKey: Self.duelPairFirstKey)
-            defaults.set(newPair.second.localIdentifier, forKey: Self.duelPairSecondKey)
+            let persisted = PersistedPair(first: newPair.first.localIdentifier, second: newPair.second.localIdentifier)
+            if let data = try? JSONEncoder().encode(persisted) {
+                defaults.set(data, forKey: Self.duelPairKey)
+            }
         } else {
-            defaults.removeObject(forKey: Self.duelPairFirstKey)
-            defaults.removeObject(forKey: Self.duelPairSecondKey)
+            defaults.removeObject(forKey: Self.duelPairKey)
         }
     }
 }
