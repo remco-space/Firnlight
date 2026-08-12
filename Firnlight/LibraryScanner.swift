@@ -117,6 +117,16 @@ final class LibraryScanner {
                             unsavedChanges += 1
                             contentChanged = true // favorite feeds ranking (FeatureStore)
                         }
+                        // Photos lets a location be assigned or corrected after
+                        // import, so this is re-synced the same way favorite is
+                        // rather than captured once at insert (FR-5.2).
+                        if record.latitude != asset.location?.coordinate.latitude
+                            || record.longitude != asset.location?.coordinate.longitude {
+                            record.latitude = asset.location?.coordinate.latitude
+                            record.longitude = asset.location?.coordinate.longitude
+                            unsavedChanges += 1
+                            contentChanged = true // location feeds ranking (PreferenceRanker)
+                        }
                         // Edited since analysis (crop, adjustments, …): refresh
                         // metadata and queue for re-analysis. Only this photo
                         // re-runs Vision — never the whole library. Clear the old
@@ -149,6 +159,7 @@ final class LibraryScanner {
                             pixelWidth: asset.pixelWidth,
                             pixelHeight: asset.pixelHeight,
                             creationDate: asset.creationDate,
+                            location: asset.location,
                             isFavorite: asset.isFavorite
                         ))
                         newlyAdded += 1

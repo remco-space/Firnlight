@@ -14,15 +14,18 @@ import os
 /// there is a crowd (count ≥ `crowdFaceCount`), or when a confident human
 /// rectangle is that prominent. Tiny background people no longer reject.
 ///
-/// Flaw rule (FR-3.1): Vision has no dedicated blur/obstruction request, but
-/// `CalculateImageAestheticsScoresRequest`'s `overallScore` is documented by
-/// Apple to fold in "how well taken" the image is — blur and exposure among
-/// its factors — distinct from `isUtility`, which is about content type
-/// (screenshots, documents), not technical quality. A score below
-/// `Thresholds.severelyFlawedAestheticsScore` is treated as the technical
-/// flaw FR-3.1 names (finger over the lens, a badly blurred or smeared
-/// frame), and rejects the photo before it is ever scored for nature content
-/// — "however good the scene" in the requirement's own words.
+/// Flaw rule (FR-3.1): two independent signals gate this, either sufficient on
+/// its own. `CalculateImageAestheticsScoresRequest`'s `overallScore` is
+/// documented by Apple to fold in "how well taken" the image is — blur and
+/// exposure among its factors — distinct from `isUtility`, which is about
+/// content type (screenshots, documents), not technical quality. A score
+/// below `Thresholds.severelyFlawedAestheticsScore` is treated as the
+/// technical flaw FR-3.1 names. Separately, `DetectLensSmudgeRequest`
+/// (macOS/iOS 26+) is Vision's dedicated detector for exactly the flaw FR-3.1
+/// names first — "a finger over the lens" — and catches a smudge an otherwise
+/// well-exposed, sharp frame's aesthetics score alone would miss. Either gate
+/// rejects the photo before it is ever scored for nature content — "however
+/// good the scene" in the requirement's own words.
 /// `nonisolated`: must run off the main actor inside the AnalysisQueue's task group.
 nonisolated enum ImageAnalyzer {
     struct Outcome: Sendable {
@@ -47,11 +50,19 @@ nonisolated enum ImageAnalyzer {
         if outcome.isUtility { return outcome }
 
         // 1.5. Flawed — a badly blurred, smeared, or obstructed frame, however
-        // good the scene would otherwise be (FR-3.1). See the type doc comment.
+        // good the scene would otherwise be (FR-3.1). Two independent gates;
+        // see the type doc comment for why neither alone is redundant.
         if outcome.aestheticsScore < Thresholds.severelyFlawedAestheticsScore {
             outcome.isFlawed = true
             // Debug-level so severelyFlawedAestheticsScore can be tuned from real library data.
             log.debug("Rejected as flawed; overallScore: \(outcome.aestheticsScore, format: .fixed(precision: 2))")
+            return outcome
+        }
+        let smudge = try await DetectLensSmudgeRequest().perform(on: image)
+        if smudge.confidence >= Thresholds.lensSmudgeConfidenceThreshold {
+            outcome.isFlawed = true
+            // Debug-level so lensSmudgeConfidenceThreshold can be tuned from real library data.
+            log.debug("Rejected as flawed; lens smudge confidence: \(smudge.confidence, format: .fixed(precision: 2))")
             return outcome
         }
 

@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import SwiftData
 
@@ -35,6 +36,18 @@ final class PhotoRecord {
     var pixelWidth: Int
     var pixelHeight: Int
     var creationDate: Date?
+
+    /// `PHAsset.location`'s coordinate, split into two `Double?`s rather than
+    /// stored as `CLLocation` because SwiftData attributes need a directly
+    /// storable type; `CLLocation` isn't one. Nil together whenever the asset
+    /// carries no location — most photos with Location Services off, or
+    /// imported without EXIF GPS — which is the common case, not an error:
+    /// `PreferenceRanker` treats the gap as neutral, never a penalty (FR-3.8),
+    /// same as a photo with no visible horizon. Refreshed on every scan like
+    /// `isFavorite`, since Photos lets the user assign or correct a location
+    /// after the fact.
+    var latitude: Double?
+    var longitude: Double?
 
     /// 0 = not yet analyzed. Compared against the current pipeline version.
     var analysisVersion: Int
@@ -105,11 +118,13 @@ final class PhotoRecord {
     /// True once horizon detection ran, so the backfill pass can resume.
     var horizonMeasured: Bool = false
 
-    init(localIdentifier: String, pixelWidth: Int, pixelHeight: Int, creationDate: Date?, isFavorite: Bool) {
+    init(localIdentifier: String, pixelWidth: Int, pixelHeight: Int, creationDate: Date?, location: CLLocation?, isFavorite: Bool) {
         self.localIdentifier = localIdentifier
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
         self.creationDate = creationDate
+        self.latitude = location?.coordinate.latitude
+        self.longitude = location?.coordinate.longitude
         self.analysisVersion = 0
         self.isNature = false
         self.hasPeople = false
