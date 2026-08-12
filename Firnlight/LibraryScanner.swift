@@ -135,6 +135,7 @@ final class LibraryScanner {
                             record.isNature = false
                             record.hasPeople = false
                             record.isUtility = false
+                            record.isFlawed = false
                             record.aestheticsScore = 0
                             record.featurePrint = nil
                             record.horizonAngleDegrees = nil

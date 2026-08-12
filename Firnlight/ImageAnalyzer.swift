@@ -5,17 +5,29 @@ import os
 /// Runs the Vision pipeline on a single analysis bitmap.
 ///
 /// Rejection order is cheapest-exit-first per the pipeline rules:
-/// utility → people (a lot of people, or a prominent person) → not nature.
-/// The feature print is generated only for images that survive all rejections.
+/// utility → flawed (blur/smear/obstruction) → people (a lot of people, or a
+/// prominent person) → not nature. The feature print is generated only for
+/// images that survive all rejections.
 ///
 /// People rule (FR-3.1): cityscapes admit distant figures, so a face only
 /// rejects when it dominates the frame (height ≥ `personProminenceHeight`), when
 /// there is a crowd (count ≥ `crowdFaceCount`), or when a confident human
 /// rectangle is that prominent. Tiny background people no longer reject.
+///
+/// Flaw rule (FR-3.1): Vision has no dedicated blur/obstruction request, but
+/// `CalculateImageAestheticsScoresRequest`'s `overallScore` is documented by
+/// Apple to fold in "how well taken" the image is — blur and exposure among
+/// its factors — distinct from `isUtility`, which is about content type
+/// (screenshots, documents), not technical quality. A score below
+/// `Thresholds.severelyFlawedAestheticsScore` is treated as the technical
+/// flaw FR-3.1 names (finger over the lens, a badly blurred or smeared
+/// frame), and rejects the photo before it is ever scored for nature content
+/// — "however good the scene" in the requirement's own words.
 /// `nonisolated`: must run off the main actor inside the AnalysisQueue's task group.
 nonisolated enum ImageAnalyzer {
     struct Outcome: Sendable {
         var isUtility = false
+        var isFlawed = false
         var hasPeople = false
         var isNature = false
         var aestheticsScore: Float = 0
@@ -33,6 +45,15 @@ nonisolated enum ImageAnalyzer {
         outcome.aestheticsScore = aesthetics.overallScore
         outcome.isUtility = aesthetics.isUtility
         if outcome.isUtility { return outcome }
+
+        // 1.5. Flawed — a badly blurred, smeared, or obstructed frame, however
+        // good the scene would otherwise be (FR-3.1). See the type doc comment.
+        if outcome.aestheticsScore < Thresholds.severelyFlawedAestheticsScore {
+            outcome.isFlawed = true
+            // Debug-level so severelyFlawedAestheticsScore can be tuned from real library data.
+            log.debug("Rejected as flawed; overallScore: \(outcome.aestheticsScore, format: .fixed(precision: 2))")
+            return outcome
+        }
 
         // 2. People — a crowd, a frame-dominating face, or a prominent confident
         // human rectangle. Distant tiny figures in a cityscape are allowed.

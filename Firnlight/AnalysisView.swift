@@ -361,6 +361,8 @@ struct AnalysisView: View {
                     help: "Rejected: people were detected in these photos.")
             statRow("doc.viewfinder", .secondary, "Utility images", stats.utility,
                     help: "Rejected: these look like documents, screenshots, or other utility images.")
+            statRow("photo.trianglebadge.exclamationmark", .secondary, "Blurred or obstructed", stats.flawed,
+                    help: "Rejected: these are badly blurred or smeared, or something like a finger blocked the lens.")
             // Plain leaf: the row label carries the negation (no leaf.slash
             // exists, and the arrow variant is the recycling symbol).
             statRow("leaf", .secondary, "Not nature", stats.notNature,

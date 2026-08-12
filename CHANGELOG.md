@@ -12,6 +12,14 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Added
+
+- Analysis now rejects severely flawed photos — a finger over the lens, a
+  badly blurred or smeared frame — rather than only ranking them lower,
+  whatever the scene (FR-3.1). The Library tab's breakdown gains a matching
+  "Blurred or obstructed" count (FR-3.2). Photos already accepted before this
+  change are re-examined the next time analysis runs.
+
 ### Fixed
 
 - A duel could resume, or be served, showing the same photo on both sides.
