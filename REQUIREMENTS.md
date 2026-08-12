@@ -100,10 +100,12 @@ The app has three tabs matching the three stages of the journey:
   and offers only stopping it — and resuming, if the user stopped it. Work the
   app should be doing anyway is never gated behind a button the user has to
   find.
-- **FR-3.6** A long run needs no babysitting: it keeps going while the user is
-  away — screen asleep, lid closed, device locked — as long as the device is on
-  power, and the user can stop it at any moment. If continuing would cost too
-  much battery or run the device hot, it pauses and says it is waiting.
+- **FR-3.6** A long run needs no babysitting: it keeps going unattended, on
+  power, for as long as the system allows it to — and where the platform would
+  suspend it in a way the app cannot prevent, that limit is disclosed rather
+  than presented as still working (FR-8.12). The user can stop it at any
+  moment. If continuing would cost too much battery or run the device hot, it
+  pauses and says it is waiting.
 - **FR-3.7** The app obeys the user's system-wide choices about which networks
   may carry data, rather than inventing a rule of its own. When photos must come
   down from iCloud and the network does not allow it, the app says what it is
