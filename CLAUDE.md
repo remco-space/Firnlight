@@ -97,8 +97,13 @@ Open, or `xattr -cr Firnlight.app`.
 
 Releases are cut by pushing a `vX.Y.Z` tag matching `MARKETING_VERSION`; CI
 builds and publishes, taking the release body from the matching `CHANGELOG.md`
-section. The deployment targets and CI runner images still say 26 — move both
-to 27 together once GitHub ships an Xcode 27 image.
+section.
+
+**Both build workflows are dormant** (manual dispatch only), because GitHub's
+runner images carry Xcode 26 at the newest and cannot compile a 27 target. No
+binary is produced and tagging publishes nothing; v0.15.0 stays the current
+download. Each workflow's header says what to restore. The personal-data check
+keeps running on every push — FR-10.4 admits no gap.
 
 File formats: `LICENSE` follows
 [choosealicense.com/licenses/mit](https://choosealicense.com/licenses/mit/);
@@ -156,7 +161,7 @@ xcodebuild -project Firnlight.xcodeproj -scheme Firnlight -configuration Debug b
 open Firnlight.xcodeproj   # or just this
 ```
 
-Requires the full **Xcode 26+** toolchain, not the Command Line Tools. If
+Requires the full **Xcode 27+** toolchain, not the Command Line Tools. If
 `xcodebuild` errors with *"requires Xcode, but active developer directory … is
 a command line tools instance"*, the CLT are selected. Select the full Xcode
 permanently with

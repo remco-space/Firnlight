@@ -1,9 +1,15 @@
 name: Release
 
-# Builds the distributable, ad-hoc-signed app (FR-10.2) on the macos-26
-# runner image — the same SDK generation the brief promises users (macOS/iOS
-# 26+) — and publishes it to GitHub Releases (FR-10.1), never gated behind a
-# build step the user has to run themselves.
+# Builds the distributable, ad-hoc-signed app (FR-10.2) and publishes it to
+# GitHub Releases (FR-10.1), never gated behind a build step the user has to
+# run themselves.
+#
+# DORMANT — manual dispatch only, so no binary is produced and pushing a tag
+# publishes nothing. The app targets macOS/iOS 27 and GitHub's runner images
+# carry Xcode 26 at the newest; a deployment target may not exceed the SDK
+# building it. v0.15.0 remains the current download until this is restored:
+# put back the tag trigger below, and move runs-on and the Xcode-selection
+# step from 26 to 27, once a 27 image exists.
 #
 # Ad-hoc signing (CODE_SIGN_IDENTITY=-, no team) is deliberate, not a
 # shortcut: this project has no Developer ID and no notarization (see
@@ -18,9 +24,7 @@ name: Release
 # build setting says (FR-10.3).
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  workflow_dispatch:
 
 jobs:
   release:

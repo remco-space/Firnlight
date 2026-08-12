@@ -12,6 +12,11 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Removed
+
+- Support for macOS 26 and iOS 26. Firnlight now needs macOS 27 or iOS 27;
+  0.15.0 remains available for 26 and is the last release that runs there.
+
 ## [0.15.0] - 2026-08-12
 
 ### Changed
