@@ -258,7 +258,18 @@ nonisolated enum Thresholds {
     /// their learned coefficients — a v5 weights file has no opinion about
     /// either, so only a full rebuild (re-seed + full choice/verdict replay)
     /// folds them in, same reasoning as v5's bad-verdict backlog.
-    static let rankerAlgorithmVersion = 6 // v6: learns from creation date and location (FR-5.2)
+    /// v7 is required too: v6's `time`/`location` were normalized against the
+    /// current candidate set (oldest/newest dated photo, distance from the
+    /// location centroid), which meant an ordinary library scan could shift
+    /// those denominators and silently rescale every already-trained
+    /// `weights.time`/`weights.location` coefficient's meaning — a v6 weights
+    /// file may have been fit to a scale that no longer matches what
+    /// `PreferenceRanker.loadEntries()` now computes, so it must be discarded
+    /// and rebuilt rather than reused. v7 replaces both with fixed,
+    /// library-independent scales (`PreferenceRanker.seasonFraction`,
+    /// latitude ÷ 90) that never move under a growing library — see
+    /// `PreferenceRanker`'s type doc comment.
+    static let rankerAlgorithmVersion = 7 // v7: time/location use fixed scales, not candidate-set-relative ones (FR-5.2)
 
     /// SGD learning rate for the online Bradley–Terry ranker.
     static let rankerLearningRate: Float = 0.5

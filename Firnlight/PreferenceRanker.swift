@@ -1,5 +1,4 @@
 import Accelerate
-import CoreLocation
 import Foundation
 import SwiftData
 import os
@@ -7,21 +6,35 @@ import os
 /// Online logistic (Bradley–Terry) preference ranker over Vision feature prints.
 ///
 /// Raw score: s = w·featurePrint + b₁·aesthetics + b₂·levelness + b₃·resolution
-///                + b₄·recency + b₅·homeDistance
+///                + b₄·season + b₅·latitude
 /// (every b weight is learned from duels, never hard-coded — low-resolution,
-/// tilted, recently-taken, or far-from-home photos are penalized, or favored,
-/// only as much as choices imply). `recency` and `homeDistance` are FR-5.2's
-/// "when and where": the first a photo's creation date normalized against the
-/// oldest/newest dated photo in the current candidate set, the second its
-/// distance from the centroid of every located photo, normalized against the
-/// farthest such distance in that same set — both computed once per
-/// `loadEntries()`, so they read as "earlier/later than the rest of this
-/// library" and "closer to/farther from home than the rest of it" rather than
-/// carrying any absolute, hand-picked scale. A photo missing a date or
-/// location gets the neutral midpoint (0.5) for that feature — not a penalty
-/// (FR-3.8) — and `sgdStep` additionally skips the gradient term entirely for
-/// any duel where either side lacks it, so an unknown date/location never
-/// itself becomes a trained signal, only ever a genuinely uninformative one.
+/// tilted, or seasonally/geographically atypical photos are penalized, or
+/// favored, only as much as choices imply). `season` and `latitude` are
+/// FR-5.2's "when and where": `season` is `Self.seasonFraction`, a photo's
+/// time of year (0…1, wrapping); `latitude` is its stored latitude ÷ 90
+/// (−1…1). Both are computed from the record alone — **never** from where it
+/// falls in the current candidate set. That gives them the same
+/// library-independent, fixed-scale property `resolution`/`levelness` already
+/// have via their `Thresholds` constants, just without needing one of their
+/// own: a calendar has 12 months and a globe has 90° of latitude either way,
+/// so there is nothing here to tune. This is deliberate, not merely simple:
+/// an earlier revision normalized
+/// "when" against the oldest/newest dated photo in the live candidate set and
+/// "where" against distance from that set's location centroid, both of which
+/// silently rescaled every already-trained weight's effective meaning the
+/// moment an ordinary library scan added one new extreme-dated or
+/// off-centroid photo — reshuffling the whole ranking with zero new user
+/// judgment behind it, which is exactly what FR-5.2 ("no trait counts for
+/// more or less than the user's own decisions imply") forbids. A fixed scale
+/// has no such moving target: the same photo always maps to the same
+/// `season`/`latitude` value, on every device, at every library size, so
+/// `weights.time`/`weights.location` mean the same thing for as long as they
+/// exist — the same property `resolution`/`levelness` already had. A photo
+/// missing a date or location gets the neutral midpoint (0.5) for that
+/// feature — not a penalty (FR-3.8) — and `sgdStep` additionally skips the
+/// gradient term entirely for any duel where either side lacks it, so an
+/// unknown date/location never itself becomes a trained signal, only ever a
+/// genuinely uninformative one.
 /// Choice model: P(winner beats loser) = sigmoid(s_winner − s_loser)
 /// One SGD step per recorded choice; `PhotoRecord.preferenceScore` caches the
 /// raw score s after every update so the grid can re-rank live. A bad
@@ -102,16 +115,16 @@ actor PreferenceRanker {
         /// (log scale). Its ranking weight is learned from duels, so old
         /// low-resolution photos are penalized only as much as choices imply.
         let resolution: Float
-        /// FR-5.2's "when": creation date linearly normalized against the
-        /// oldest (0) and newest (1) dated photo in the current set; 0.5 and
-        /// `hasTime == false` when the record has no creation date. See the
-        /// type doc comment.
+        /// FR-5.2's "when": `Self.seasonFraction` of the record's creation
+        /// date (fixed calendar scale, 0…1); 0.5 and `hasTime == false` when
+        /// the record has no creation date. See the type doc comment for why
+        /// this is a fixed scale rather than normalized against the current
+        /// candidate set.
         let time: Float
         let hasTime: Bool
-        /// FR-5.2's "where": distance from the centroid of every located photo
-        /// in the current set, normalized against the farthest such distance
-        /// (0 = at the centroid, 1 = farthest); 0.5 and `hasLocation == false`
-        /// when the record has no location. See the type doc comment.
+        /// FR-5.2's "where": the record's latitude ÷ 90 (fixed scale, −1…1);
+        /// 0.5 and `hasLocation == false` when the record has no location.
+        /// See the type doc comment.
         let location: Float
         let hasLocation: Bool
         var score: Float = 0 // raw, pre-sigmoid
@@ -322,28 +335,6 @@ actor PreferenceRanker {
         let minWidth = Float(Thresholds.minimumCandidatePixelWidth)
         let resolutionRange = log2(Thresholds.resolutionFullScoreWidth / minWidth)
 
-        // FR-5.2's "when": normalize creation date against the oldest/newest
-        // dated photo in *this* set, computed once here rather than against
-        // any fixed calendar epoch — see the type doc comment for why that
-        // keeps the feature meaningful (and deterministic) regardless of how
-        // old the library is.
-        let timestamps = records.compactMap { $0.creationDate?.timeIntervalSinceReferenceDate }
-        let minTime = timestamps.min()
-        let timeRange = timestamps.max().flatMap { max in minTime.map { max - $0 } } ?? 0
-
-        // FR-5.2's "where": centroid of every located photo in this set, and
-        // the farthest distance from it, both computed once here — see the
-        // type doc comment.
-        let located = records.compactMap { record -> CLLocation? in
-            guard let lat = record.latitude, let lon = record.longitude else { return nil }
-            return CLLocation(latitude: lat, longitude: lon)
-        }
-        let centroid: CLLocation? = located.isEmpty ? nil : CLLocation(
-            latitude: located.map(\.coordinate.latitude).reduce(0, +) / Double(located.count),
-            longitude: located.map(\.coordinate.longitude).reduce(0, +) / Double(located.count)
-        )
-        let maxHomeDistance = centroid.map { home in located.map { $0.distance(from: home) }.max() ?? 0 } ?? 0
-
         // Fetched once here, not per entry, for the same reason
         // `FeatureStore.latestBadVerdictKeys()` is fetched once per query
         // rather than per candidate (FR-8.2).
@@ -361,21 +352,21 @@ actor PreferenceRanker {
 
             let time: Float
             let hasTime: Bool
-            if let created = record.creationDate?.timeIntervalSinceReferenceDate, let minTime, timeRange > 0 {
-                time = Float((created - minTime) / timeRange)
+            if let created = record.creationDate {
+                time = Self.seasonFraction(of: created)
                 hasTime = true
             } else {
-                time = 0.5 // neutral — no date, or every dated photo in this set shares one instant (FR-3.8)
+                time = 0.5 // neutral — no date (FR-3.8)
                 hasTime = false
             }
 
             let location: Float
             let hasLocation: Bool
-            if let lat = record.latitude, let lon = record.longitude, let centroid, maxHomeDistance > 0 {
-                location = Float(CLLocation(latitude: lat, longitude: lon).distance(from: centroid) / maxHomeDistance)
+            if let lat = record.latitude {
+                location = Float(lat / 90) // -1 (south pole) … 1 (north pole)
                 hasLocation = true
             } else {
-                location = 0.5 // neutral — no location, or every located photo in this set is at the centroid (FR-3.8)
+                location = 0.5 // neutral — no location (FR-3.8)
                 hasLocation = false
             }
 
@@ -897,5 +888,27 @@ actor PreferenceRanker {
 
     private static func pairKey(_ a: String, _ b: String) -> String {
         a < b ? "\(a)|\(b)" : "\(b)|\(a)"
+    }
+
+    /// FR-5.2's "when", as a fixed, library-independent 0…1 reading of a
+    /// date's position in the calendar year — day-of-year over the year's
+    /// actual length (365 or 366), so Dec 31 in a leap year isn't quietly
+    /// treated as 0.3% short of the year. A fixed UTC calendar, not
+    /// `Calendar.current`: the same photo must map to the same value on
+    /// every device regardless of its time zone (FR-5.2's "same library and
+    /// same judgments always produce the same ranking" — a Mac in Berlin and
+    /// an iPhone in Los Angeles training the same shared weights file must
+    /// compute the exact same feature for it). Deliberately linear rather
+    /// than a cyclical (sin/cos) encoding: Dec 31 and Jan 1 sit at opposite
+    /// ends of the 0…1 range despite being adjacent in the calendar, which
+    /// costs the feature some precision right at the year boundary but keeps
+    /// it a single scalar with a single learned weight, matching every other
+    /// feature here — not worth two dimensions for one edge case.
+    private static func seasonFraction(of date: Date) -> Float {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let dayOfYear = calendar.ordinality(of: .day, in: .year, for: date) ?? 1
+        let daysInYear = calendar.range(of: .day, in: .year, for: date)?.count ?? 365
+        return Float(dayOfYear - 1) / Float(daysInYear)
     }
 }

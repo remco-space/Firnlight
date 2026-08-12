@@ -45,7 +45,11 @@ final class PhotoRecord {
     /// `PreferenceRanker` treats the gap as neutral, never a penalty (FR-3.8),
     /// same as a photo with no visible horizon. Refreshed on every scan like
     /// `isFavorite`, since Photos lets the user assign or correct a location
-    /// after the fact.
+    /// after the fact. Both are stored even though `PreferenceRanker`
+    /// currently only learns from `latitude` (see its type doc comment for
+    /// why longitude isn't a fixed-scale linear feature the same way); the
+    /// full coordinate is what FR-5.2 asks the app to observe, and keeping it
+    /// costs nothing.
     var latitude: Double?
     var longitude: Double?
 
