@@ -98,7 +98,8 @@ enum AppIdentity {
 /// from AppKit, and if that ever went stale the panel and the Dock would agree
 /// on the same stale icon. Apple documents the Dock tile as downstream of this
 /// property, so agreement is the strongest contract on offer.)
-/// See CLAUDE.md's icon notes for the cache trap itself.
+/// See `build-and-run.sh` for the cache trap itself, and the one thing that
+/// clears it.
 struct AboutCommand: Commands {
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {

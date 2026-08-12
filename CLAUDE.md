@@ -230,51 +230,12 @@ succeeds:
 - Moving the `.icon` inside an `.xcassets`. It must stay a sibling of the Swift
   sources; the target's synchronized file group picks it up with no pbxproj edit.
 
-**The icon exists in the built app three times over**, and they are not the same
-picture — which matters because FR-8.8 forbids showing "a second, subtly
-different version" of it:
-- the compiled composition in `Assets.car` (`CFBundleIconName`), rendered *live*
-  by the system — glass, deep tones, dispersion — and what the Dock, Finder and
-  Home Screen draw;
-- `Contents/Resources/AppIcon.icns` (`CFBundleIconFile`), which `actool` bakes
-  from the same composition as a flat fallback, lighter and hazier than the live
-  rendering. No surface here was observed to use it, so it stays — removing it
-  means `ASSETCATALOG_COMPILER_STANDALONE_ICON_BEHAVIOR = none`, risking the
-  silent no-icon failures above for no proven gain;
-- on iOS, rendered `AppIcon60x60@2x.png` / `AppIcon76x76@2x~ipad.png` under
-  `CFBundleIcons`. These visibly differ from a Home Screen screenshot at the
-  same size (mean channel difference ≈ 22/255) — SpringBoard composes the layers
-  live. No iOS API hands back the composed icon, which is why `AboutFooter` shows
-  no icon at all.
-
-Only on macOS can code ask for *the* icon: `NSApp.applicationIconImage` is what
-the Dock tile draws, and passing it as the About panel's `applicationIcon` is the
-one way to guarantee the two agree.
-
-**IconServices caches a rendered icon per bundle path, and the cache goes
-stale.** Seen here: the app at its DerivedData path rendered the icon design from
-*weeks* earlier through `NSWorkspace.icon(forFile:)` while its Dock tile drew the
-empty placeholder grid — with current artwork sitting correctly in the same
-bundle's `.icns`. Neither rebuilding nor `lsregister -f -R -trusted <app>` clears
-it (every build already runs the latter, as Xcode's `RegisterWithLaunchServices`
-phase). The tell is that the identical bundle copied to a fresh path renders
-correctly — which is also how to check the icon in situ:
-
-```bash
-cp -R "$(...)/Build/Products/Debug/Firnlight.app" /tmp/iconcheck/ && open /tmp/iconcheck/Firnlight.app
-```
-
-Deleting the icon store is what actually shifts it. `build-and-run.sh` does that
-when `AppIcon.icon` changed — the deletion is machine-wide and the Dock restart
-blinks every tile, so routine builds stay quiet. By hand:
-
-```bash
-# -exec, not a bare glob: under zsh an unmatched glob aborts the whole command.
-# (2>/dev/null swallows permission noise from unrelated sandboxed caches.)
-find "$(getconf DARWIN_USER_CACHE_DIR)" -maxdepth 1 -name 'com.apple.iconservices*' \
-  -exec rm -rf {} + 2>/dev/null
-killall iconservicesagent; killall Dock
-```
+`actool` also bakes a flat `AppIcon.icns` fallback into the bundle. Nothing here
+was observed to use it, and it stays: removing it means
+`ASSETCATALOG_COMPILER_STANDALONE_ICON_BEHAVIOR = none`, which risks the silent
+failures above for no proven gain. (Why the bundle's several icon renderings are
+not interchangeable, and what each surface actually draws, is in `About.swift`;
+the IconServices cache trap and its only cure are in `build-and-run.sh`.)
 
 Validate and preview without opening the GUI:
 
@@ -287,24 +248,5 @@ ICT="/Applications/Xcode<version>.app/Contents/Applications/Icon Composer.app/Co
   --platform macOS --rendition Default --width 512 --height 512 --scale 1
 ```
 
-### Logs and the Simulator
-
 Runtime logs go to the unified logging system under subsystem
-`space.remco.Firnlight` (categories per component):
-
-```bash
-log stream --predicate 'subsystem == "space.remco.Firnlight"'
-```
-
-For a simulator, the same predicate works through `xcrun simctl spawn <udid> log show`.
-
-**Simulator screenshots need no permission**: `xcrun simctl io <udid> screenshot
-shot.png` reads the framebuffer, needing neither Simulator.app open nor the
-Screen Recording grant `screencapture` requires — without that grant
-`screencapture` silently returns solid black. Load test photos with `xcrun
-simctl addmedia <udid> *.jpg`.
-
-**Vision does not run in the iOS simulator**: every request fails with `Failed
-to create espresso context`, so analysis accepts nothing there and the grid,
-duels and album preview stay empty however many photos are loaded. Scanning is
-unaffected; anything downstream of `ImageAnalyzer` needs a real device or the Mac.
+`space.remco.Firnlight`, a category per component.
