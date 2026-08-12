@@ -34,6 +34,7 @@ cover the obtained ones:
 
 | Skill | Source | License | Notes |
 |-------|--------|---------|-------|
+| `blind-build` | First-party, written for this project | MIT (repo license) | The requirements-first blind-build workflow for changing app behavior. Tracked in git — the only non-obtained skill here. |
 | `swiftui-specialist` | Apple, exported from Xcode 27 (`xcrun agent skills export`) | Apple toolchain | Authoritative SwiftUI patterns/perf. Obtained at session start, gitignored. |
 | `swiftui-whats-new-27` | Apple, exported from Xcode 27 | Apple toolchain | SDK 27 SwiftUI changes (e.g. `@State` → macro). Obtained at session start, gitignored. |
 | `ui-review-tahoe` | [rshankras/claude-code-apple-skills](https://github.com/rshankras/claude-code-apple-skills), `skills/macos/ui-review-tahoe` | MIT | macOS UI/UX + HIG-compliance review. Submodule symlink, auto-updates. |

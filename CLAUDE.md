@@ -66,6 +66,12 @@ See `.claude/skills/README.md` for the provenance table and how to pin a
 revision if a release regresses, and `THIRD_PARTY_NOTICES.md` for license
 notices.
 
+When dispatching any agent that will touch Swift or the SDK, instruct it
+explicitly — in its prompt — to load the relevant framework skills and use
+XcodeBuildMCP, and to pass the same instruction to its own subagents. Never
+rely on auto-triggering: over-loading is cheap; a missed `swiftui-whats-new-27`
+or `vision-framework` load is not.
+
 The upstream repo has ~86 skills; only the ones this app touches were added.
 **When a change adds a framework or platform capability** (a new `import`, a
 new App Store surface), check that repo for a matching skill before writing the
@@ -151,6 +157,15 @@ not `wip2`), branched from `main` and merged back whole once verified; delete
 the branch after. Merges use `--no-ff`, so each body of work stays legible as
 one unit. Plain GitHub-flow trunk development — if a branch structure needs
 explaining, it's wrong.
+
+## Changing what the app does
+
+Any change to user-visible behavior starts in `REQUIREMENTS.md` and runs
+through the **`blind-build`** skill: brief iterated with the user, then built
+and validated by agents that see only the brief. Direct fixes bypass it only
+when the current brief already forbids the behavior (or it's a crash / data
+loss) — if the brief is silent, that silence is the defect. The skill holds
+the procedure; nothing here restates it.
 
 ## Build & run
 
