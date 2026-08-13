@@ -10,7 +10,10 @@ final class AnalysisModel {
     private(set) var stats: AnalysisStatistics?
     private(set) var isRunning = false
     private(set) var lastError: String?
-    /// Whether the run that isn't going was stopped by the user.
+    /// Whether the run that isn't going was stopped rather than finished — by
+    /// the user, or (iPhone and iPad) by whatever ended a continued background
+    /// run, which the app cannot tell apart from the user stopping it there.
+    /// Either way the app must not start it again by itself.
     ///
     /// FR-3.5 offers exactly two controls — stopping a run, and resuming one
     /// the user stopped — so this is the difference between "nothing to
@@ -26,6 +29,20 @@ final class AnalysisModel {
     /// The run stays running: this is a pause the user can see and stop, not
     /// a silent stall.
     private(set) var waitingReason: AnalysisWait?
+    /// Non-nil while the run is actually working, saying what this device
+    /// cannot promise about carrying on unattended (FR-3.6, FR-8.12). Cleared
+    /// whenever the run is only waiting — nothing is being continued then, so
+    /// there is nothing to disclaim.
+    private(set) var unattendedLimit: UnattendedRunLimit?
+    #if os(iOS)
+    /// Whether the run that isn't going ended in the background rather than at
+    /// the user's press of Stop — as far as the app can tell, which is not far
+    /// (see `UnattendedRunLimit.endedInBackground`). Kept apart from
+    /// `isStoppedByUser` because it answers a different question: that one
+    /// decides whether the app may start a run again by itself, this one
+    /// decides what the card says about the one that ended.
+    private var stoppedInBackground = false
+    #endif
 
     private var queue: AnalysisQueue?
     private var runTask: Task<Void, Never>?
@@ -43,11 +60,15 @@ final class AnalysisModel {
     /// analysis to finish" is not a thing a caller can meaningfully do any
     /// more. The task is returned for the re-entry chaining alone.
     ///
-    /// This is where FR-3.6 *(iPhone and iPad)* is implemented in full: a run
-    /// can be stopped at any moment, it pauses with a stated reason when the
-    /// device is warm or saving power (see `RunConditions`), and it asks the
-    /// system to keep going once the app leaves the foreground
-    /// (`ContinuedAnalysisTask`).
+    /// This is where FR-3.6 is implemented in full: a run can be stopped at any
+    /// moment, it pauses with a stated reason when the machine is warm or
+    /// saving power (see `RunConditions`), and it keeps going while
+    /// nobody is watching — by asking the system to continue it once the app
+    /// leaves the foreground (`ContinuedAnalysisTask`, iPhone and iPad) and by
+    /// holding the Mac out of idle sleep for as long as it works
+    /// (`UnattendedRun`). Neither guarantee is total, and the same object
+    /// publishes the limit for the card to state (FR-8.12) rather than letting
+    /// the app look like it is still working when the platform has stopped it.
     ///
     /// **The continue-while-locked part is shipped unverified.** Its only API
     /// is `BGContinuedProcessingTask` (iOS 26+), and Apple DTS confirmed the
@@ -82,7 +103,8 @@ final class AnalysisModel {
         // loop below is unchanged and simply only advances in the foreground.
         // The shared owner, not a fresh one per run: see ContinuedAnalysisTask.
         let continued = ContinuedAnalysisTask.shared
-        Task { await continued.begin(onCancel: { [weak self] in self?.stop() }) }
+        stoppedInBackground = false
+        Task { await continued.begin(onCancel: { [weak self] in self?.stopFromBackground() }) }
         #endif
 
         let task = Task {
@@ -121,6 +143,7 @@ final class AnalysisModel {
                     // even mid-wait (FR-3.3).
                     if let pause = RunConditions.pauseReason() {
                         waitingReason = pause
+                        setUnattended(false)
                         try await Task.sleep(for: Thresholds.analysisPauseRecheckInterval)
                         continue
                     }
@@ -129,6 +152,11 @@ final class AnalysisModel {
                     // user's network settings allow it.
                     let networkWait = RunConditions.iCloudDownloadWait
                     waitingReason = nil
+                    // FR-3.6: about to do real work, so claim the machine for
+                    // it — and re-read the power source, so unplugging a laptop
+                    // mid-run changes both what is held and what the user is
+                    // told, within one batch.
+                    setUnattended(true)
 
                     guard let processed = try await queue.processNextBatch(allowNetworkDownloads: networkWait == nil),
                           processed > 0 else {
@@ -176,6 +204,15 @@ final class AnalysisModel {
                             RankingClock.shared.bump()
                         }
                         waitingReason = networkWait ?? .iCloudRetryPending
+                        // Nothing is being analyzed from here on, only waited
+                        // for — possibly for a long time, if a download stays
+                        // stuck. Holding a Mac awake through that would be the
+                        // app spending the user's machine on nothing, and
+                        // saying it "keeps going while you're away" would be
+                        // claiming work that isn't happening (FR-8.12). The
+                        // same reasoning hands the iOS continued task back, a
+                        // few lines above.
+                        setUnattended(false)
                         if networkWait != nil {
                             try await Task.sleep(for: Thresholds.analysisPauseRecheckInterval)
                         } else {
@@ -203,6 +240,16 @@ final class AnalysisModel {
             lastError = runError
             #if os(iOS)
             if !continuedReleased { continued.end(success: runError == nil) }
+            #endif
+            // However the run ended — finished, stopped, or thrown out of —
+            // the machine goes back to sleeping when it likes.
+            setUnattended(false)
+            #if os(iOS)
+            // A run the app didn't end and the user may not have either: say
+            // so where the run's other unattended statements are said, rather
+            // than leave a Resume button standing there implying the user
+            // asked for the stop (FR-3.6, FR-8.12).
+            if stoppedInBackground { unattendedLimit = .endedInBackground }
             #endif
             waitingReason = nil
             stats = try? await queue.statistics()
@@ -238,8 +285,33 @@ final class AnalysisModel {
     /// both writing the weights file and the score cache.
     func stop() {
         isStoppedByUser = true
+        #if os(iOS)
+        // This one the app *does* know the author of, so the card must not go
+        // on hedging about it.
+        stoppedInBackground = false
+        #endif
         runTask?.cancel()
     }
+
+    #if os(iOS)
+    /// The end of a continued background run — the system reclaiming it, or
+    /// the user cancelling it from the system's own progress UI. The two are
+    /// indistinguishable at this API, so this stops the run exactly as the
+    /// user's Stop does (never restarting something the user may have just
+    /// cancelled — FR-3.3) and records that the app cannot say which happened,
+    /// which is what the card then tells the user instead of picking one
+    /// (FR-3.6, FR-8.12).
+    ///
+    /// A stop the user made *in the app* moments earlier wins: it is the one
+    /// version of events that isn't a guess, and the expiration handler firing
+    /// afterwards is just the task being torn down as a result.
+    func stopFromBackground() {
+        guard !isStoppedByUser else { return }
+        stoppedInBackground = true
+        isStoppedByUser = true
+        runTask?.cancel()
+    }
+    #endif
 
     /// Starts a run unless the user has stopped one (FR-3.5's "work the app
     /// should be doing anyway is never gated behind a button", held against
@@ -273,6 +345,17 @@ final class AnalysisModel {
         guard let runTask else { return }
         runTask.cancel()
         await runTask.value
+    }
+
+    /// FR-3.6: tells the unattended-run owner whether this run is working right
+    /// now, and republishes what it says this device can't promise.
+    ///
+    /// Both halves in one call because they are one fact: the disclosure has to
+    /// describe the assertion actually being held, or the card would explain a
+    /// state the app isn't in.
+    private func setUnattended(_ isWorking: Bool) {
+        UnattendedRun.shared.update(isRunning: isWorking)
+        unattendedLimit = UnattendedRun.shared.limit
     }
 
     private func ensureQueue(_ container: ModelContainer) -> AnalysisQueue {
@@ -469,6 +552,43 @@ struct AnalysisView: View {
             waitingLabel(model.waitingReason?.message ?? "")
                 .shownWhileWaiting(model.waitingReason != nil)
         }
+
+        // FR-3.6, second half: a run that carries on unattended says where it
+        // stops carrying on, instead of leaving the user to find out that the
+        // sleeping Mac (or the locked phone) got nothing done — which is the
+        // silent-failure FR-8.12 rules out.
+        //
+        // Same reserved-slot construction as the waiting label above, and for
+        // the same reason: the message changes with the power source on a
+        // laptop, and appears and goes as runs start and end, so the slot is
+        // stacked behind hidden copies of every message it can hold and is
+        // already as tall as the longest before anything runs (FR-8.7). It sits
+        // last in the card so nothing but the card's own edge is below it.
+        ZStack(alignment: .topLeading) {
+            ForEach(UnattendedRunLimit.allCases, id: \.self) { limit in
+                unattendedLimitLabel(limit)
+                    .hidden()
+            }
+            unattendedLimitLabel(model.unattendedLimit)
+                .shownWhileWaiting(model.unattendedLimit != nil)
+        }
+    }
+
+    /// Secondary, not orange: this is a standing statement about the run, not
+    /// something gone wrong or something being waited for, and it must not read
+    /// as the more urgent of the two lines it sits under. The whole of the
+    /// explanation is one hover away, where the breakdown above keeps its own.
+    ///
+    /// Takes the limit rather than its text so the hidden copies that reserve
+    /// the slot are built exactly like the live one — nil renders the same
+    /// empty label, which is what keeps the reservation honest.
+    private func unattendedLimitLabel(_ limit: UnattendedRunLimit?) -> some View {
+        Text(limit?.message ?? "")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .help(limit?.detail ?? "")
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func waitingLabel(_ message: String) -> some View {

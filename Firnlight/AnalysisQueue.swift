@@ -37,7 +37,13 @@ nonisolated enum AnalysisWait: Sendable, Equatable, CaseIterable {
     var message: String {
         switch self {
         case .deviceHot:
+            // Named for the machine the user is looking at: "device" is what
+            // an iPhone is called and what a Mac is not.
+            #if os(macOS)
+            "Waiting — the Mac is too warm to keep analyzing."
+            #else
             "Waiting — the device is too warm to keep analyzing."
+            #endif
         case .lowPowerMode:
             "Waiting — Low Power Mode is on."
         case .systemBusy:
@@ -94,33 +100,41 @@ nonisolated final class NetworkPolicy: Sendable {
 /// whether it may pull originals down from iCloud.
 @MainActor
 enum RunConditions {
-    /// FR-3.6 *(iPhone and iPad)*: a long run shouldn't cost the user battery
-    /// or a hot device. Checked between batches, which is already the loop's
-    /// natural checkpoint — analysis is saved per batch, so pausing there
-    /// costs nothing and resumes exactly where it stopped.
+    /// FR-3.6: a long run shouldn't cost the user battery or a hot device.
+    /// Checked between batches, which is already the loop's natural
+    /// checkpoint — analysis is saved per batch, so pausing there costs
+    /// nothing and resumes exactly where it stopped.
     ///
-    /// iOS only, because the requirement is: a Mac pausing its own analysis
-    /// because it is warm would be surprising behaviour no requirement asks
-    /// for. `systemPrefersReducedResourceUsage` is checked first, as the
-    /// system's own aggregate judgement; thermal state and Low Power Mode
+    /// Every platform, because the requirement carries no platform marker and
+    /// REQUIREMENTS.md's opening says an unmarked requirement applies
+    /// everywhere. A Mac was once left out here on the grounds that pausing
+    /// would surprise the user, which was reading a preference into a brief
+    /// that states the opposite — and it stopped being even arguable once
+    /// `UnattendedRun` began holding the Mac awake through a long run: a
+    /// laptop the app keeps from sleeping, on Low Power Mode, warm on the
+    /// user's knees, is precisely the case the clause was written for. The
+    /// two signals it names are `ProcessInfo`'s, which reports both on macOS
+    /// and iOS.
+    ///
+    /// `systemPrefersReducedResourceUsage` is checked first where it exists,
+    /// as the system's own aggregate judgement; it is genuinely iPhone- and
+    /// iPad-only, being `UIApplication`'s. Thermal state and Low Power Mode
     /// follow as the specific conditions FR-3.6 names, since the aggregate
     /// signal is not documented to cover both. All three are unconditional —
-    /// the deployment floor is iOS 27 (REQUIREMENTS.md's opening), which is
-    /// where `systemPrefersReducedResourceUsage` was introduced.
+    /// the deployment floor is macOS/iOS 27 (REQUIREMENTS.md's opening), which
+    /// is at or past every one of their introductions.
     static func pauseReason() -> AnalysisWait? {
         #if os(iOS)
         if UIApplication.shared.systemPrefersReducedResourceUsage {
             return .systemBusy
         }
+        #endif
         switch ProcessInfo.processInfo.thermalState {
         case .serious, .critical: return .deviceHot
         default: break
         }
         if ProcessInfo.processInfo.isLowPowerModeEnabled { return .lowPowerMode }
         return nil
-        #else
-        return nil
-        #endif
     }
 
     /// FR-3.7: nil when iCloud downloads may proceed. Applies on every
