@@ -206,14 +206,23 @@ The app has three tabs matching the three stages of the journey:
   photo records of when and where it was taken. Nothing is hard-coded: no trait
   counts for more or less than the user's own decisions imply. The same library
   and the same judgments always produce the same ranking, and photos are always
-  compared on equal terms: when the app's understanding of photos changes, it
-  re-examines what it must, in the background, without costing the user a single
-  judgment.
+  compared on equal terms: no ranking or duel sets a photo examined the app's
+  current way against one still examined an older way as though they had been
+  examined alike. When the app's understanding of photos changes, it
+  re-examines what it must, in the background, without costing the user a
+  single judgment. The app notices such changes itself — including ones that
+  arrive with a system update rather than with the app — never assuming its
+  understanding stands still.
 - **FR-5.3** Every choice and verdict is remembered permanently — the user's
   invested judgment is never lost.
 - **FR-5.4** Ranking starts from what the user has already said about their
   photos in Photos, so recommendations feel personal from the very first duel.
-  *(Why: no cold start.)*
+  What the user has said is folded in whenever the app learns of it — a
+  favorite found by a later scan counts the same as one found by the first.
+  Until the user has said anything at all — in Photos or in the app — the app
+  orders by its own best reading of the photos, an opening guess only, which
+  anything the user then says fully supersedes (FR-5.2). *(Why: no cold
+  start.)*
 - **FR-5.5** The app picks pairs it is most unsure about, avoids re-asking
   decided pairs, avoids near-identical pairs, and randomizes sides. *(Why:
   every click should teach the app as much as possible, without position
