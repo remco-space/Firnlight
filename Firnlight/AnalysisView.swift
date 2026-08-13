@@ -10,7 +10,10 @@ final class AnalysisModel {
     private(set) var stats: AnalysisStatistics?
     private(set) var isRunning = false
     private(set) var lastError: String?
-    /// Whether the run that isn't going was stopped by the user.
+    /// Whether the run that isn't going was stopped rather than finished — by
+    /// the user, or (iPhone and iPad) by whatever ended a continued background
+    /// run, which the app cannot tell apart from the user stopping it there.
+    /// Either way the app must not start it again by itself.
     ///
     /// FR-3.5 offers exactly two controls — stopping a run, and resuming one
     /// the user stopped — so this is the difference between "nothing to
@@ -31,6 +34,15 @@ final class AnalysisModel {
     /// whenever the run is only waiting — nothing is being continued then, so
     /// there is nothing to disclaim.
     private(set) var unattendedLimit: UnattendedRunLimit?
+    #if os(iOS)
+    /// Whether the run that isn't going ended in the background rather than at
+    /// the user's press of Stop — as far as the app can tell, which is not far
+    /// (see `UnattendedRunLimit.endedInBackground`). Kept apart from
+    /// `isStoppedByUser` because it answers a different question: that one
+    /// decides whether the app may start a run again by itself, this one
+    /// decides what the card says about the one that ended.
+    private var stoppedInBackground = false
+    #endif
 
     private var queue: AnalysisQueue?
     private var runTask: Task<Void, Never>?
@@ -49,8 +61,8 @@ final class AnalysisModel {
     /// more. The task is returned for the re-entry chaining alone.
     ///
     /// This is where FR-3.6 is implemented in full: a run can be stopped at any
-    /// moment, it pauses with a stated reason when the device is warm or saving
-    /// power (see `RunConditions`, iPhone and iPad), and it keeps going while
+    /// moment, it pauses with a stated reason when the machine is warm or
+    /// saving power (see `RunConditions`), and it keeps going while
     /// nobody is watching — by asking the system to continue it once the app
     /// leaves the foreground (`ContinuedAnalysisTask`, iPhone and iPad) and by
     /// holding the Mac out of idle sleep for as long as it works
@@ -91,7 +103,8 @@ final class AnalysisModel {
         // loop below is unchanged and simply only advances in the foreground.
         // The shared owner, not a fresh one per run: see ContinuedAnalysisTask.
         let continued = ContinuedAnalysisTask.shared
-        Task { await continued.begin(onCancel: { [weak self] in self?.stop() }) }
+        stoppedInBackground = false
+        Task { await continued.begin(onCancel: { [weak self] in self?.stopFromBackground() }) }
         #endif
 
         let task = Task {
@@ -231,6 +244,13 @@ final class AnalysisModel {
             // However the run ended — finished, stopped, or thrown out of —
             // the machine goes back to sleeping when it likes.
             setUnattended(false)
+            #if os(iOS)
+            // A run the app didn't end and the user may not have either: say
+            // so where the run's other unattended statements are said, rather
+            // than leave a Resume button standing there implying the user
+            // asked for the stop (FR-3.6, FR-8.12).
+            if stoppedInBackground { unattendedLimit = .endedInBackground }
+            #endif
             waitingReason = nil
             stats = try? await queue.statistics()
             // Analysis is over at this point — what follows is the ranking
@@ -265,8 +285,33 @@ final class AnalysisModel {
     /// both writing the weights file and the score cache.
     func stop() {
         isStoppedByUser = true
+        #if os(iOS)
+        // This one the app *does* know the author of, so the card must not go
+        // on hedging about it.
+        stoppedInBackground = false
+        #endif
         runTask?.cancel()
     }
+
+    #if os(iOS)
+    /// The end of a continued background run — the system reclaiming it, or
+    /// the user cancelling it from the system's own progress UI. The two are
+    /// indistinguishable at this API, so this stops the run exactly as the
+    /// user's Stop does (never restarting something the user may have just
+    /// cancelled — FR-3.3) and records that the app cannot say which happened,
+    /// which is what the card then tells the user instead of picking one
+    /// (FR-3.6, FR-8.12).
+    ///
+    /// A stop the user made *in the app* moments earlier wins: it is the one
+    /// version of events that isn't a guess, and the expiration handler firing
+    /// afterwards is just the task being torn down as a result.
+    func stopFromBackground() {
+        guard !isStoppedByUser else { return }
+        stoppedInBackground = true
+        isStoppedByUser = true
+        runTask?.cancel()
+    }
+    #endif
 
     /// Starts a run unless the user has stopped one (FR-3.5's "work the app
     /// should be doing anyway is never gated behind a button", held against

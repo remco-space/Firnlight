@@ -43,6 +43,20 @@ nonisolated enum UnattendedRunLimit: Sendable, Equatable, CaseIterable {
     /// foreground, and the system decides how long that lasts. It is not the
     /// app's to guarantee, so it isn't presented as one.
     case deviceMayPauseWhenLocked
+    /// The continued run ended while the app was away, and *which* of the two
+    /// possible reasons it was cannot be known: `BGContinuedProcessingTask`
+    /// delivers a system reclaim and the user's own cancel from the system's
+    /// progress UI through the same expiration handler, with nothing to tell
+    /// them apart.
+    ///
+    /// The app therefore does neither of the two things that would require
+    /// knowing. It does not restart the run — that would undo a cancel the
+    /// user may well have just made, and FR-3.3 says an interruption the app
+    /// immediately undoes is not one. And it does not quietly file it as the
+    /// user's doing and wait to be noticed, which is how a system-ended run
+    /// turned into the babysitting FR-3.6 rules out. It says what happened, in
+    /// the terms it actually knows it in, beside the Resume that acts on it.
+    case endedInBackground
     #endif
 
     /// One short line — this sits under a run that is working, and a paragraph
@@ -59,6 +73,8 @@ nonisolated enum UnattendedRunLimit: Sendable, Equatable, CaseIterable {
         #else
         case .deviceMayPauseWhenLocked:
             "Continues after you leave the app, for as long as the system allows."
+        case .endedInBackground:
+            "Analysis stopped while you were away — by you, or by the system."
         #endif
         }
     }
@@ -75,6 +91,8 @@ nonisolated enum UnattendedRunLimit: Sendable, Equatable, CaseIterable {
         #else
         case .deviceMayPauseWhenLocked:
             "Firnlight asks the system to continue the run once you leave the app, and the system decides how long that lasts — locking the device may end it. Analyzing carries on where it left off when you come back."
+        case .endedInBackground:
+            "Either you stopped it from the system's progress banner or the system reclaimed it; Firnlight is told the same thing both ways, so it neither restarts a run you meant to stop nor pretends one is still going. Nothing is lost — Resume carries on where it left off."
         #endif
         }
     }
@@ -165,9 +183,18 @@ final class UnattendedRun {
     /// An unreadable snapshot answers "on power": the failure then costs a
     /// machine that stays awake through a run it would have finished anyway,
     /// rather than a long run that silently stops being unattended.
+    ///
+    /// The two `Unmanaged` results follow opposite Core Foundation rules and
+    /// must be taken differently: `IOPSCopyPowerSourcesInfo` is a *Copy*
+    /// function and hands over a reference this code owns
+    /// (`takeRetainedValue`), while `IOPSGetProvidingPowerSourceType` is a
+    /// *Get* function whose result is owned by the snapshot
+    /// (`takeUnretainedValue`). Taking the second as retained over-releases a
+    /// string this code never owned — a use-after-free that only shows up as a
+    /// crash once the snapshot's own reference goes.
     private static var isOnExternalPower: Bool {
         guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let source = IOPSGetProvidingPowerSourceType(snapshot)?.takeRetainedValue()
+              let source = IOPSGetProvidingPowerSourceType(snapshot)?.takeUnretainedValue()
         else { return true }
         return (source as String) == kIOPMACPowerKey
     }

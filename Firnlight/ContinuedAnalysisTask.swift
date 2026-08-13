@@ -133,9 +133,15 @@ final class ContinuedAnalysisTask {
         task.progress.totalUnitCount = pendingTotal
         task.progress.completedUnitCount = pendingCompleted
         // Fired both when the user cancels from the system's UI and when the
-        // system reclaims the task. Either way the honest response is the same
-        // one the in-app Stop button gives: end the run. Analysis saves per
-        // batch, so nothing is lost and it resumes where it stopped (FR-3.3).
+        // system reclaims the task, with nothing in the API to tell the two
+        // apart — the task is simply gone. Ending the run is the only response
+        // that is right in both cases: restarting it would undo a cancel the
+        // user may have just made (FR-3.3). What the app must *not* do is file
+        // that away as the user's doing, so this calls the caller's
+        // background-specific stop rather than the one the in-app Stop button
+        // uses, and the card states the ambiguity instead of resolving it by
+        // guess (FR-3.6, FR-8.12). Analysis saves per batch, so nothing is
+        // lost either way and Resume carries on where it stopped.
         task.expirationHandler = { [weak self] in
             Self.log.info("Background analysis ended by the system or the user")
             self?.onCancel?()

@@ -32,6 +32,19 @@ heading when that version is released (FR-10.3).
 
 ### Fixed
 
+- A long run now also pauses on the Mac when the machine is too warm or Low
+  Power Mode is on, saying which it is waiting for, as it already did on
+  iPhone and iPad (FR-3.6). The Mac was left out of that on the view that
+  pausing would surprise; it matters all the more now that Firnlight holds the
+  Mac awake for a run.
+- *(iPhone and iPad)* A background run ended by the system used to look
+  exactly like one the user had stopped: the Library tab offered Resume and
+  said nothing, so a run nobody stopped waited to be noticed. iOS reports a
+  system reclaim and the user's own cancel identically, so Firnlight now says
+  so — "Analysis stopped while you were away — by you, or by the system" —
+  rather than guessing. It still never restarts the run by itself, because
+  that would undo a stop the user may have just made (FR-3.3, FR-3.6,
+  FR-8.12).
 - A duel could resume, or be served, showing the same photo on both sides.
   Resuming after a relaunch trusted two persisted photo IDs without checking
   they were different, and the pair itself was persisted as two separate
