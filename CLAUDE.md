@@ -75,6 +75,25 @@ to pass the same instructions to its own subagents. Never rely on
 auto-triggering: over-loading is cheap; a missed `swiftui-whats-new-27` or
 `vision-framework` load is not.
 
+The **`xcode`** MCP server (`xcrun mcpbridge` — see
+[Giving external agents access to Xcode](https://developer.apple.com/documentation/xcode/giving-external-agents-access-to-xcode))
+exposes Xcode 27's own tools, including live Apple Developer Documentation
+search against the exact SDK in use. Prefer it over WebFetch/WebSearch against
+`developer.apple.com` for API/framework documentation lookups — it reflects
+the installed SDK rather than a possibly newer or older public doc page. It's
+registered local-scope per developer machine, not in the checked-in
+`.mcp.json` — it needs a locally running Xcode with a valid `mcpbridge`,
+which a fresh clone or CI can't assume. It requires Xcode running with
+Settings → Intelligence → Model Context Protocol → "Allow external agents to
+use Xcode tools" enabled; if `claude mcp list` shows it failing to connect
+with that toggle already on, `xcode-select -p` is very likely pointing at the
+Command Line Tools rather than the Xcode beta app (`xcrun mcpbridge` then
+can't resolve the binary — same class of issue as the `xcodebuild` note
+above). Fix it on the MCP entry, not system-wide, by pinning `DEVELOPER_DIR`:
+`claude mcp add --transport stdio xcode --env
+DEVELOPER_DIR=/Applications/Xcode<version>.app/Contents/Developer -- xcrun
+mcpbridge`.
+
 The upstream repo has ~86 skills; only the ones this app touches were added.
 **When a change adds a framework or platform capability** (a new `import`, a
 new App Store surface), check that repo for a matching skill before writing the

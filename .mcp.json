@@ -1,15 +1,5 @@
 {
   "mcpServers": {
-    "xcode": {
-      "type": "stdio",
-      "command": "xcrun",
-      "args": [
-        "mcpbridge"
-      ],
-      "env": {
-        "DEVELOPER_DIR": "${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
-      }
-    },
     "XcodeBuildMCP": {
       "type": "stdio",
       "command": "npx",
