@@ -217,8 +217,10 @@ The app has three tabs matching the three stages of the journey:
   understanding stands still. Equal terms cuts both ways: photos examined
   alike may always be weighed together, so a change in the app's
   understanding never empties what the user sees — the app keeps serving the
-  best picture its previous understanding supports until the new one is
-  ready to take over.
+  best picture its previous understanding supports until the new
+  understanding is at least as complete, and every part of the app hands
+  over together. A change that doesn't alter how photos are examined
+  re-examines nothing: already-current analysis stays current.
 - **FR-5.3** Every choice and verdict is remembered permanently — the user's
   invested judgment is never lost.
 - **FR-5.4** Ranking starts from what the user has already said about their
