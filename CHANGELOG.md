@@ -64,6 +64,22 @@ heading when that version is released (FR-10.3).
   well-exposed, sharp frame's aesthetics score alone would miss. Both changes
   re-examine already-analyzed photos in the background, at no cost to any
   recorded judgment.
+- FR-5.2's "equal terms" guarantee — no ranking or duel sets a photo examined
+  the app's current way against one still examined an older way — was only
+  enforced for the ranker's own algorithm version, not for the Vision analysis
+  itself: a photo still carrying an earlier analysis pass's feature print and
+  aesthetics score could be ranked and dueled directly against ones just
+  re-examined the current way while a background re-analysis pass (FR-3.5,
+  triggered by a Vision revision change) was still catching up. The Library
+  grid, Export album, and Duel tab now hold such a photo out of ranking and
+  duels until it is re-examined, at no cost to any recorded judgment (FR-5.3).
+- FR-5.4's "a favorite found by a later scan counts the same as one found by
+  the first" did not hold once the ranker's learned weights already existed:
+  favorites were only ever folded in as pseudo-choices while building those
+  weights from scratch, so a favorite Photos revealed on a later scan — or one
+  removed — was silently never learned from (or un-learned) afterward. The
+  ranker now notices when the favorite set has changed and rebuilds from it,
+  the same way it already does for new choices and verdicts.
 
 ### Removed
 

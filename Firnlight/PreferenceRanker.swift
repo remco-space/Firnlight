@@ -164,6 +164,20 @@ actor PreferenceRanker {
         /// `applicableJudgmentCount`. Optional so weights written before this
         /// existed decode, and simply trigger one rebuild.
         var judgmentCount: Int?
+        /// Fingerprint of the favorite set these weights were last seeded
+        /// from — see `favoriteFingerprint(of:)`. FR-5.4: "What the user has
+        /// said [in Photos] is folded in whenever the app learns of it — a
+        /// favorite found by a later scan counts the same as one found by the
+        /// first." `seedFromFavorites()` only runs during a rebuild, so a
+        /// change to the favorite set has to be detected the same way a
+        /// change to the judgment set already is (`judgmentCount`) — by
+        /// comparing against what these weights were built from — or a
+        /// favorite discovered after the first rebuild would never be
+        /// seeded. Optional so weights written before this existed decode,
+        /// and simply trigger one rebuild (favorites already folded into
+        /// them get re-seeded exactly the same way a version bump's full
+        /// replay always does — deterministic, so this costs nothing new).
+        var favoriteFingerprint: String?
     }
 
     private static let log = Logger(subsystem: "space.remco.Firnlight", category: "PreferenceRanker")
@@ -202,12 +216,14 @@ actor PreferenceRanker {
             FetchDescriptor<VerdictRecord>(sortBy: [SortDescriptor(\.timestamp)])
         ))
         let applicable = applicableJudgmentCount(choices: choices, badVerdicts: badVerdicts)
+        let currentFavorites = Self.favoriteFingerprint(of: entries)
 
         let dimension = entries.first?.vector.count ?? 0
         if let stored = loadWeights(),
            stored.algorithmVersion == Thresholds.rankerAlgorithmVersion,
            stored.feature.count == dimension,
-           stored.judgmentCount == applicable {
+           stored.judgmentCount == applicable,
+           stored.favoriteFingerprint == currentFavorites {
             weights = stored
         } else {
             weights = Weights(
@@ -217,7 +233,8 @@ actor PreferenceRanker {
                 horizon: 0,
                 resolution: 0,
                 seededWithFavorites: false,
-                judgmentCount: applicable
+                judgmentCount: applicable,
+                favoriteFingerprint: currentFavorites
             )
             seedFromFavorites()
             // Choices and bad verdicts both train the ranker (FR-5.7), so a
@@ -277,7 +294,14 @@ actor PreferenceRanker {
         // the difference in — SGD has no way to add one historical step after
         // the fact. Rebuilding from scratch is the same path a version bump
         // takes and is what makes an arriving photo's judgments count.
-        if weights.judgmentCount != applicableJudgmentCount(choices: choices, badVerdicts: badVerdicts) {
+        //
+        // Same for the favorite set (FR-5.4): `seedFromFavorites()` only ever
+        // runs as part of a rebuild, so a favorite Photos discovers after the
+        // weights were last built — or one a rescan un-favorites — needs the
+        // same rebuild trigger `judgmentCount` already gives explicit choices,
+        // or it would never be folded in (or un-folded) at all.
+        if weights.judgmentCount != applicableJudgmentCount(choices: choices, badVerdicts: badVerdicts)
+            || weights.favoriteFingerprint != Self.favoriteFingerprint(of: entries) {
             isPrepared = false
             try prepare()
             return
@@ -335,10 +359,27 @@ actor PreferenceRanker {
 
     /// Fetches the current nature, non-excluded candidates into `entries` and
     /// rebuilds `indexByID`. Weights are untouched.
+    ///
+    /// Restricted to `analysisVersion == currentAnalysisVersion` — FR-5.2's
+    /// "photos are always compared on equal terms: no ranking or duel sets a
+    /// photo examined the app's current way against one still examined an
+    /// older way as though they had been examined alike." A record whose
+    /// `featurePrint`/`aestheticsScore`/etc. were extracted under an earlier
+    /// Vision pipeline (`Thresholds.currentAnalysisVersion`) isn't on the same
+    /// footing as one just analyzed the current way — their feature vectors
+    /// aren't dot-product-comparable — so it simply sits out of ranking and
+    /// duels until `AnalysisQueue`'s background pass re-examines it (FR-3.8,
+    /// FR-3.5), at which point it rejoins on equal terms. This costs the user
+    /// no judgment: choices already recorded about it stay durable (FR-5.3)
+    /// and take effect via `applicableJudgmentCount`'s rebuild trigger once
+    /// the photo is back in `entries`.
     private func loadEntries() {
+        let version = Thresholds.currentAnalysisVersion
         // Sorted by identifier so the deterministic favorite seeding never
         // depends on SwiftData's unspecified default fetch order.
-        var descriptor = FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature && !$0.isExcluded })
+        var descriptor = FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.analysisVersion == version }
+        )
         descriptor.sortBy = [SortDescriptor(\.localIdentifier)]
         let records = (try? modelContext.fetch(descriptor)) ?? []
         let minWidth = Float(Thresholds.minimumCandidatePixelWidth)
@@ -897,6 +938,31 @@ actor PreferenceRanker {
 
     private static func pairKey(_ a: String, _ b: String) -> String {
         a < b ? "\(a)|\(b)" : "\(b)|\(a)"
+    }
+
+    /// Deterministic fingerprint of which candidates are currently Photos
+    /// favorites — FR-5.4's rebuild trigger (see `Weights.favoriteFingerprint`).
+    /// Sorted judgment keys, not `Set`/`Dictionary` order, which Swift leaves
+    /// unspecified and would make this fingerprint (and so whether a rebuild
+    /// fires) depend on hash-seed randomization rather than the favorite set
+    /// itself. Hashed with a fixed, non-randomized algorithm (FNV-1a) rather
+    /// than `Hasher` — `Hasher`'s per-process random seed (`hashValue`/
+    /// `Hasher` are explicitly documented as varying between runs) would make
+    /// two identical favorite sets fingerprint differently across launches or
+    /// devices, permanently forcing a rebuild every single `prepare()`/
+    /// `reload()` rather than only when the set actually changed.
+    private static func favoriteFingerprint(of entries: [Entry]) -> String {
+        let keys = entries.filter(\.isFavorite).map(\.key).sorted()
+        var hash: UInt64 = 0xcbf29ce484222325 // FNV-1a 64-bit offset basis
+        for key in keys {
+            for byte in key.utf8 {
+                hash ^= UInt64(byte)
+                hash = hash &* 0x100000001b3 // FNV prime
+            }
+            hash ^= 0xA // separator, so ["ab","c"] and ["a","bc"] don't collide
+            hash = hash &* 0x100000001b3
+        }
+        return String(hash, radix: 16)
     }
 
     /// FR-5.2's "when", as a fixed, library-independent 0…1 reading of a

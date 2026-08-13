@@ -157,8 +157,16 @@ actor FeatureStore {
     }
 
     private func rankedCore(limit: Int) throws -> (kept: [Candidate], vectors: [[Float]], accepted: Int, suppressed: Int) {
+        // Same `analysisVersion == currentAnalysisVersion` restriction as
+        // `PreferenceRanker.loadEntries()`, and for the same reason (FR-5.2):
+        // this walk ranks candidates against one another by score, so a
+        // photo still carrying an older Vision pipeline's feature print and
+        // aesthetics score can't be compared "on equal terms" against one
+        // just re-examined the current way. It rejoins the grid/album once
+        // `AnalysisQueue` re-examines it in the background.
+        let version = Thresholds.currentAnalysisVersion
         let descriptor = FetchDescriptor<PhotoRecord>(
-            predicate: #Predicate { $0.isNature && !$0.isExcluded }
+            predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.analysisVersion == version }
         )
         let fetched = try modelContext.fetch(descriptor)
         let badVerdictKeys = try latestBadVerdictKeys()
