@@ -67,17 +67,22 @@ revision if a release regresses, and `THIRD_PARTY_NOTICES.md` for license
 notices.
 
 When dispatching any agent that will touch Swift or the SDK, instruct it
-explicitly — in its prompt — to load the relevant framework skills and use
-XcodeBuildMCP, and to pass the same instruction to its own subagents. Never
-rely on auto-triggering: over-loading is cheap; a missed `swiftui-whats-new-27`
-or `vision-framework` load is not.
+explicitly — in its prompt — to load the relevant framework skills, run
+**`sdk-capability-scan`** for every framework it touches (skill loaded or
+not — pinned skills and hosted docs both lag the SDK; an unskilled framework
+is the case with nothing else to trigger a check), and use XcodeBuildMCP; and
+to pass the same instructions to its own subagents. Never rely on
+auto-triggering: over-loading is cheap; a missed `swiftui-whats-new-27` or
+`vision-framework` load is not.
 
 The upstream repo has ~86 skills; only the ones this app touches were added.
 **When a change adds a framework or platform capability** (a new `import`, a
 new App Store surface), check that repo for a matching skill before writing the
 feature from scratch; if it fits, symlink
 `.claude/skills-src/swift-ios-skills/skills/<name>` into `.claude/skills/<name>`
-and add its provenance row. No speculative skills for unused frameworks.
+and add its provenance row. No speculative skills for unused frameworks. An
+`sdk-capability-scan` result naming a framework with no matching skill is
+exactly this trigger.
 
 ## Versioning (FR-8.9)
 

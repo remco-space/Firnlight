@@ -112,6 +112,12 @@ fixed and content-free about intent, which is why it is not a hint):
   `swiftui-patterns`, …). Any UI work: `liquid-glass` and the
   `ui-review-tahoe` checklist. Build/run/simulator work: XcodeBuildMCP. Load
   on plausible relevance — do not wait for a trigger to fire on its own.
+- **For each framework the code imports or is about to import — whether or
+  not a skill is loaded for it — run `sdk-capability-scan`** against the
+  deployment target. Pinned skill content lags the SDK, and some frameworks
+  have no skill at all; the scan is the only check that fires on the
+  unskilled case. Report gaps or unskilled frameworks in your findings; never
+  silently build against undocumented capability without saying so.
 - Before finishing, re-check that **all** FRs still hold — not just the ones
   you were pointed at — and report any you cannot verify.
 
