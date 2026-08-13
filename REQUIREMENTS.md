@@ -206,9 +206,10 @@ The app has three tabs matching the three stages of the journey:
   photo records of when and where it was taken. Nothing is hard-coded: no trait
   counts for more or less than the user's own decisions imply. The same library
   and the same judgments always produce the same ranking, and photos are always
-  compared on equal terms: no ranking or duel sets a photo examined the app's
-  current way against one still examined an older way as though they had been
-  examined alike. When the app's understanding of photos changes, it
+  compared on equal terms: nowhere — in a ranking, a duel, or any tally or
+  threshold built from photos' standings — is a photo examined the app's
+  current way weighed against one still examined an older way as though they
+  had been examined alike. When the app's understanding of photos changes, it
   re-examines what it must, in the background, without costing the user a
   single judgment. The app notices such changes itself — including ones that
   arrive with a system update rather than with the app — never assuming its
