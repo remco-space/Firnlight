@@ -152,7 +152,8 @@ The app has three tabs matching the three stages of the journey:
   verdict as "Both Are Bad" (FR-5.7): a judgment of the photo's visible,
   weighable merits. It does **not** remove the photo — it stays in the grid,
   future duels, and the album-size suggestion, but sinks in the ranking over
-  time and so out of the album. Clearing the verdict (FR-4.6) returns the photo
+  time and so out of the album, subject only to FR-5.2's equal-terms window.
+  Clearing the verdict (FR-4.6) returns the photo
   to normal standing, as if it had never been marked. Using it mid-duel
   advances to a fresh pair. *(Why: this verdict teaches the app what bad looks
   like, so it must be given for reasons visible in the photo — a flaw the app
