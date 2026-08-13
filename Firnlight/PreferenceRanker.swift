@@ -110,7 +110,6 @@ actor PreferenceRanker {
         let isFavorite: Bool
         /// 1 = level horizon or none detected (neutral); 0 = tilted ≥ horizonMaxTiltDegrees.
         let levelness: Float
-        let tiltDegrees: Float
         /// 0 at the minimum candidate width, 1 at resolutionFullScoreWidth
         /// (log scale). Its ranking weight is learned from duels, so old
         /// low-resolution photos are penalized only as much as choices imply.
@@ -360,21 +359,28 @@ actor PreferenceRanker {
     /// Fetches the current nature, non-excluded candidates into `entries` and
     /// rebuilds `indexByID`. Weights are untouched.
     ///
-    /// Restricted to `analysisVersion == currentAnalysisVersion` — FR-5.2's
-    /// "photos are always compared on equal terms: no ranking or duel sets a
-    /// photo examined the app's current way against one still examined an
-    /// older way as though they had been examined alike." A record whose
-    /// `featurePrint`/`aestheticsScore`/etc. were extracted under an earlier
-    /// Vision pipeline (`Thresholds.currentAnalysisVersion`) isn't on the same
-    /// footing as one just analyzed the current way — their feature vectors
-    /// aren't dot-product-comparable — so it simply sits out of ranking and
-    /// duels until `AnalysisQueue`'s background pass re-examines it (FR-3.8,
-    /// FR-3.5), at which point it rejoins on equal terms. This costs the user
-    /// no judgment: choices already recorded about it stay durable (FR-5.3)
-    /// and take effect via `applicableJudgmentCount`'s rebuild trigger once
-    /// the photo is back in `entries`.
+    /// Restricted to the serving analysis generation — FR-5.2's "photos are
+    /// always compared on equal terms: no ranking or duel sets a photo
+    /// examined the app's current way against one still examined an older way
+    /// as though they had been examined alike." A record whose
+    /// `featurePrint`/`aestheticsScore`/etc. were extracted under a different
+    /// Vision pipeline isn't on the same footing as one examined the serving
+    /// generation's way — their feature vectors aren't dot-product-comparable
+    /// — so it simply sits out of ranking and duels until `AnalysisQueue`'s
+    /// background pass re-examines it (FR-3.8, FR-3.5), at which point it
+    /// rejoins on equal terms. This costs the user no judgment: choices
+    /// already recorded about it stay durable (FR-5.3) and take effect via
+    /// `applicableJudgmentCount`'s rebuild trigger once the photo is back in
+    /// `entries`.
+    ///
+    /// The serving generation is `Thresholds.currentAnalysisVersion` in every
+    /// ordinary case, and the previous one only while a re-examination is
+    /// still less complete than what it is replacing — see
+    /// `AnalysisGeneration`, which is also why this reads it per call instead
+    /// of holding onto it: the ranker, grid, calibration and album all derive
+    /// it from the same rows, so they hand over together.
     private func loadEntries() {
-        let version = Thresholds.currentAnalysisVersion
+        let version = AnalysisGeneration.servingVersion(in: modelContext)
         // Sorted by identifier so the deterministic favorite seeding never
         // depends on SwiftData's unspecified default fetch order.
         var descriptor = FetchDescriptor<PhotoRecord>(
@@ -427,7 +433,6 @@ actor PreferenceRanker {
                 aesthetics: record.aestheticsScore,
                 isFavorite: record.isFavorite,
                 levelness: 1 - min(tilt, Thresholds.horizonMaxTiltDegrees) / Thresholds.horizonMaxTiltDegrees,
-                tiltDegrees: tilt,
                 resolution: resolution,
                 time: time,
                 hasTime: hasTime,
@@ -785,7 +790,6 @@ actor PreferenceRanker {
             aesthetics: 0,
             isFavorite: false,
             levelness: entry.levelness,
-            tiltDegrees: 0,
             resolution: entry.resolution,
             time: entry.time,
             hasTime: entry.hasTime,
@@ -929,7 +933,6 @@ actor PreferenceRanker {
             aestheticsScore: entry.aesthetics,
             isFavorite: entry.isFavorite,
             preferenceScore: entry.score,
-            tiltDegrees: entry.tiltDegrees,
             // isIgnored stays at its default (false): `loadEntries()` already
             // excludes ignored photos, so a duel `Entry` is never one.
             isNotWallpaperMaterial: entry.isNotWallpaperMaterial

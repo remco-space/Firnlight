@@ -32,6 +32,22 @@ heading when that version is released (FR-10.3).
 
 ### Fixed
 
+- A change in how Firnlight examines photos no longer empties the app while it
+  catches up. Re-examining the library used to set every not-yet-re-examined
+  photo aside at once, so the grid, the duels and the album suggestion could
+  stand nearly empty for as long as the re-examination took. Firnlight now
+  keeps showing the best picture its previous examination supports, and hands
+  the grid, duels, album and album-size suggestion over to the new one
+  together, at the point where the new one covers at least as much (FR-5.2). A
+  change that doesn't alter how photos are examined still re-examines nothing.
+
+- When near-duplicate shots of the same scene are collapsed in the grid, the
+  one kept is now the best of them by the ranking itself. It could previously
+  be taken over by a lower-ranked photo in the group for being a Photos
+  favorite, or for having a more level horizon — standards the ranking already
+  weighs for itself, as much as the user's own choices imply and no more
+  (FR-4.3, FR-5.2).
+
 - The wallpaper album's suggested size — the "both great"/"both bad" verdict
   calibration — no longer weighs an ignored photo, a non-nature one, or a
   photo whose cached preference score dates from an earlier Vision pipeline

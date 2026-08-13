@@ -10,8 +10,6 @@ nonisolated struct Candidate: Sendable, Identifiable, Equatable {
     let isFavorite: Bool
     /// Raw (pre-sigmoid) preference score; nil until the ranker has scored it.
     let preferenceScore: Float?
-    /// Horizon tilt in degrees; 0 when level or no horizon detected.
-    let tiltDegrees: Float
     /// FR-4.8's "Ignore This Photo" state — `PhotoRecord.isExcluded` — carried
     /// on the candidate itself, rather than looked up per cell, so the grid's
     /// thumbnail overlay can render the toggle's current state without a
@@ -80,12 +78,14 @@ actor FeatureStore {
         let suppressedCount: Int
     }
 
-    /// Top candidates ranked by aesthetics score, with greedy near-duplicate
-    /// suppression: walking the ranked list, a candidate is dropped when its
+    /// Top candidates in rank order, with greedy near-duplicate suppression:
+    /// walking the ranked list best-first, a candidate is dropped when its
     /// feature-print distance to any already-kept candidate is below
-    /// `Thresholds.nearDuplicateDistance` — unless the candidate is a Photos
-    /// favorite and the kept one isn't, in which case the favorite takes over
-    /// that cluster's slot.
+    /// `Thresholds.nearDuplicateDistance`. The walk's order *is* the ranking,
+    /// so the first member of a cluster it reaches is already that cluster's
+    /// best by the standard everything else here ranks by, and nothing later
+    /// ever takes the slot from it — FR-4.3, "the app keeps the best of the
+    /// bunch by the same standards it ranks by".
     func rankedCandidates(limit: Int = Thresholds.gridMaxCandidates) throws -> RankedResult {
         let core = try rankedCore(limit: limit)
         return RankedResult(
@@ -157,14 +157,15 @@ actor FeatureStore {
     }
 
     private func rankedCore(limit: Int) throws -> (kept: [Candidate], vectors: [[Float]], accepted: Int, suppressed: Int) {
-        // Same `analysisVersion == currentAnalysisVersion` restriction as
+        // Same serving-generation restriction as
         // `PreferenceRanker.loadEntries()`, and for the same reason (FR-5.2):
-        // this walk ranks candidates against one another by score, so a
-        // photo still carrying an older Vision pipeline's feature print and
-        // aesthetics score can't be compared "on equal terms" against one
-        // just re-examined the current way. It rejoins the grid/album once
-        // `AnalysisQueue` re-examines it in the background.
-        let version = Thresholds.currentAnalysisVersion
+        // this walk ranks candidates against one another by score, so a photo
+        // carrying a different Vision pipeline's feature print and aesthetics
+        // score can't be compared "on equal terms" against one examined the
+        // serving generation's way. It rejoins the grid/album once
+        // `AnalysisQueue` re-examines it in the background and the new
+        // generation takes over — see `AnalysisGeneration`.
+        let version = AnalysisGeneration.servingVersion(in: modelContext)
         let descriptor = FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.analysisVersion == version }
         )
@@ -191,35 +192,35 @@ actor FeatureStore {
         var keptVectors: [[Float]] = []
         var suppressed = 0
 
-        // The walk continues past `limit` so a favorite ranked below the
-        // cutoff can still claim its duplicate cluster's slot. Non-favorites
-        // past the limit are skipped before the costly vector decode — a
-        // deliberate trade: `suppressed` counts only duplicates found down to
-        // the cutoff, and a below-cutoff non-favorite no longer displaces a
-        // slightly more tilted twin, in exchange for the walk not being
+        // The walk stops at the cutoff. Nothing below it can change the
+        // result any more: it can neither be kept (the grid is full) nor take
+        // a cluster slot from something ranked above it, since FR-4.3 hands
+        // every cluster to its best-ranked member and the walk has already
+        // passed it. `suppressed` therefore counts the duplicates found down
+        // to the cutoff, which is also what keeps the walk off
         // O(library × limit × dims) on every load.
         for record in records {
-            if kept.count >= limit && !record.isFavorite { continue }
+            if kept.count >= limit { break }
             guard let data = record.featurePrint else { continue }
             let vector = data.floatVector
 
             let clusterIndex = keptVectors.firstIndex {
                 $0.count == vector.count && vDSP.distanceSquared($0, vector) < thresholdSquared
             }
-            if let clusterIndex {
-                // Cluster preference: favorite beats non-favorite; on equal
-                // favorite status, the clearly more level image wins.
-                let kept0 = kept[clusterIndex]
-                let tilt = abs(record.horizonAngleDegrees ?? 0)
-                let favoriteWins = record.isFavorite && !kept0.isFavorite
-                let levelnessWins = record.isFavorite == kept0.isFavorite
-                    && tilt + Thresholds.duplicateTiltMargin < kept0.tiltDegrees
-                if favoriteWins || levelnessWins {
-                    kept[clusterIndex] = candidate(for: record, badVerdictKeys: badVerdictKeys)
-                    keptVectors[clusterIndex] = vector
-                }
+            if clusterIndex != nil {
+                // The cluster already holds its best member: `records` is
+                // sorted best-first by `rankKey`, the same standard the whole
+                // app ranks by, so whatever was kept first outranks this.
+                // Nothing is swapped in over it on a standard ranking itself
+                // doesn't use — an earlier revision handed the slot to a
+                // Photos favorite, or to the more level of the two, either of
+                // which could demote a higher-ranked photo on grounds the
+                // user's own choices never asked for (FR-4.3, and FR-5.2's
+                // "no trait counts for more or less than the user's own
+                // decisions imply" — favoriteness and levelness both already
+                // reach the ranking through learned weights).
                 suppressed += 1
-            } else if kept.count < limit {
+            } else {
                 kept.append(candidate(for: record, badVerdictKeys: badVerdictKeys))
                 keptVectors.append(vector)
             }
@@ -290,14 +291,18 @@ actor FeatureStore {
         // than as a `#Predicate`: `judgmentKey` is computed, and the two models
         // live in different stores, neither of which a predicate can span.
         //
-        // Same `isNature && !isExcluded && analysisVersion == currentAnalysisVersion`
-        // restriction `rankedCore`/`dedupedCount` already apply, and for the same
-        // reason (FR-5.2): this is a threshold built from photos' standings, so an
-        // ignored photo or one still carrying a stale `preferenceScore` from an
-        // older Vision pipeline (never cleared once its `analysisVersion` falls
-        // behind — see `PreferenceRanker.writePreferenceCache`) must not be
-        // weighed into the split as though it were examined the current way.
-        let version = Thresholds.currentAnalysisVersion
+        // Same `isNature && !isExcluded` + serving-generation restriction
+        // `rankedCore`/`dedupedCount` already apply, and for the same reason
+        // (FR-5.2): this is a threshold built from photos' standings, so an
+        // ignored photo or one carrying a `preferenceScore` from a different
+        // Vision pipeline (never cleared once its `analysisVersion` falls out
+        // of the serving generation — see
+        // `PreferenceRanker.writePreferenceCache`) must not be weighed into
+        // the split as though it were on equal terms. Resolved once here and
+        // handed to `dedupedCount` rather than re-read there, so both halves
+        // of one calibration pass judge the same generation even if a
+        // handover lands between them (see `AnalysisGeneration`).
+        let version = AnalysisGeneration.servingVersion(in: modelContext)
         let latest = VerdictCalibration.latestByPhoto(verdicts)
         let records = try modelContext.fetch(FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.analysisVersion == version }
@@ -318,7 +323,7 @@ actor FeatureStore {
         let bestThreshold = VerdictCalibration.optimalSplitThreshold(good: good, bad: bad)
         let bestErrors = good.count(where: { $0 <= bestThreshold }) + bad.count(where: { $0 > bestThreshold })
 
-        let above = try dedupedCount(aboveBar: bestThreshold)
+        let above = try dedupedCount(aboveBar: bestThreshold, analysisVersion: version)
         let clamped = max(Thresholds.albumSuggestionMinimum, above)
         let suggestion = ((clamped + 5) / 10) * 10
         Self.log.info("Album suggestion (verdicts): good=\(good.count) bad=\(bad.count) threshold=\(String(format: "%.3f", bestThreshold), privacy: .public) errors=\(bestErrors) above=\(above) suggested=\(suggestion)")
@@ -328,12 +333,13 @@ actor FeatureStore {
     /// Deduplicated candidates scoring above the bar — walks the ranked list
     /// and stops at the bar, so cost scales with album size, not library size.
     ///
-    /// Same `analysisVersion == currentAnalysisVersion` restriction as
-    /// `rankedCore`/`verdictCalibratedSize` (FR-5.2): a photo carrying a
-    /// stale, out-of-version `preferenceScore` must not be counted toward
-    /// the bar as though it were examined the current way.
-    private func dedupedCount(aboveBar bar: Float) throws -> Int {
-        let version = Thresholds.currentAnalysisVersion
+    /// Same serving-generation restriction as
+    /// `rankedCore`/`verdictCalibratedSize` (FR-5.2): a photo carrying an
+    /// out-of-generation `preferenceScore` must not be counted toward the bar
+    /// as though it were on equal terms with the rest. The generation is the
+    /// caller's already-resolved one (`verdictCalibratedSize` is the only
+    /// caller), not re-derived here — see there.
+    private func dedupedCount(aboveBar bar: Float, analysisVersion version: Int) throws -> Int {
         let fetched = try modelContext.fetch(FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.analysisVersion == version }
         ))
@@ -404,7 +410,6 @@ actor FeatureStore {
             aestheticsScore: record.aestheticsScore,
             isFavorite: record.isFavorite,
             preferenceScore: record.preferenceScore,
-            tiltDegrees: abs(record.horizonAngleDegrees ?? 0),
             // preferenceScore is the record's raw cached score (nil = unscored).
             isIgnored: record.isExcluded,
             isNotWallpaperMaterial: badVerdictKeys.contains(record.judgmentKey)

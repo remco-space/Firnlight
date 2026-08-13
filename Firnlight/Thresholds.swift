@@ -340,10 +340,6 @@ nonisolated enum Thresholds {
     /// Tilt (degrees) at which the ranker's levelness feature bottoms out at 0.
     static let horizonMaxTiltDegrees: Float = 45
 
-    /// A near-duplicate only displaces its cluster's kept image on levelness
-    /// grounds when it is at least this much more level (degrees).
-    static let duplicateTiltMargin: Float = 0.5
-
     // MARK: Wallpaper album (Phase 6)
 
     /// Name of the Photos album the app keeps in sync with top candidates.
