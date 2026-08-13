@@ -289,8 +289,19 @@ actor FeatureStore {
         // keyed locally, so the join runs in memory over the photo table rather
         // than as a `#Predicate`: `judgmentKey` is computed, and the two models
         // live in different stores, neither of which a predicate can span.
+        //
+        // Same `isNature && !isExcluded && analysisVersion == currentAnalysisVersion`
+        // restriction `rankedCore`/`dedupedCount` already apply, and for the same
+        // reason (FR-5.2): this is a threshold built from photos' standings, so an
+        // ignored photo or one still carrying a stale `preferenceScore` from an
+        // older Vision pipeline (never cleared once its `analysisVersion` falls
+        // behind — see `PreferenceRanker.writePreferenceCache`) must not be
+        // weighed into the split as though it were examined the current way.
+        let version = Thresholds.currentAnalysisVersion
         let latest = VerdictCalibration.latestByPhoto(verdicts)
-        let records = try modelContext.fetch(FetchDescriptor<PhotoRecord>())
+        let records = try modelContext.fetch(FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.analysisVersion == version }
+        ))
         var good: [Float] = []
         var bad: [Float] = []
         for record in records {
@@ -316,8 +327,16 @@ actor FeatureStore {
 
     /// Deduplicated candidates scoring above the bar — walks the ranked list
     /// and stops at the bar, so cost scales with album size, not library size.
+    ///
+    /// Same `analysisVersion == currentAnalysisVersion` restriction as
+    /// `rankedCore`/`verdictCalibratedSize` (FR-5.2): a photo carrying a
+    /// stale, out-of-version `preferenceScore` must not be counted toward
+    /// the bar as though it were examined the current way.
     private func dedupedCount(aboveBar bar: Float) throws -> Int {
-        let fetched = try modelContext.fetch(FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.isNature && !$0.isExcluded }))
+        let version = Thresholds.currentAnalysisVersion
+        let fetched = try modelContext.fetch(FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.analysisVersion == version }
+        ))
         // Unscored records sort to the bottom and break the walk at the bar.
         let records = fetched.sorted { ($0.preferenceScore ?? -.greatestFiniteMagnitude) > ($1.preferenceScore ?? -.greatestFiniteMagnitude) }
         let thresholdSquared = Thresholds.nearDuplicateDistance * Thresholds.nearDuplicateDistance

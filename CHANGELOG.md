@@ -32,6 +32,12 @@ heading when that version is released (FR-10.3).
 
 ### Fixed
 
+- The wallpaper album's suggested size — the "both great"/"both bad" verdict
+  calibration — no longer weighs an ignored photo, a non-nature one, or a
+  photo whose cached preference score dates from an earlier Vision pipeline
+  against the current library on equal footing. It could previously mix a
+  stale, out-of-version score into the good/bad split as though the photo had
+  been examined the current way (FR-5.2).
 - A long run now also pauses on the Mac when the machine is too warm or Low
   Power Mode is on, saying which it is waiting for, as it already did on
   iPhone and iPad (FR-3.6). The Mac was left out of that on the view that
