@@ -13,6 +13,13 @@ import os
 /// rejects when it dominates the frame (height ≥ `personProminenceHeight`), when
 /// there is a crowd (count ≥ `crowdFaceCount`), or when a confident human
 /// rectangle is that prominent. Tiny background people no longer reject.
+/// A third, independent signal backs the two geometric ones: a
+/// classification label from `Thresholds.peopleLabels` at high confidence
+/// rejects too, because a person can defeat both detectors at once — a
+/// reclining subject's face stays under the prominence bar while the body
+/// rectangle comes back at low confidence — yet still dominate the scene.
+/// It runs on the classification results the nature gate needs anyway, so it
+/// sits with them, after the geometric exits.
 ///
 /// Flaw rule (FR-3.1): two independent signals gate this, either sufficient on
 /// its own. `CalculateImageAestheticsScoresRequest`'s `overallScore` is
@@ -83,8 +90,20 @@ nonisolated enum ImageAnalyzer {
             return outcome
         }
 
-        // 3. Nature — any allowlisted label meeting the confidence threshold.
+        // 2.5. People, by classification — the label-based signal described in
+        // the type doc comment, on the same request the nature gate consumes.
         let labels = try await ClassifyImageRequest().perform(on: image)
+        if let person = labels.first(where: {
+            Thresholds.peopleLabels.contains($0.identifier.lowercased())
+                && $0.confidence >= Thresholds.peopleLabelConfidenceThreshold
+        }) {
+            outcome.hasPeople = true
+            // Debug-level so peopleLabelConfidenceThreshold can be tuned from real library data.
+            log.debug("Rejected as people; label: \(person.identifier) \(person.confidence, format: .fixed(precision: 2))")
+            return outcome
+        }
+
+        // 3. Nature — any allowlisted label meeting the confidence threshold.
         let confident = labels.filter { $0.confidence >= Thresholds.natureConfidenceThreshold }
         outcome.isNature = confident.contains { Thresholds.natureLabels.contains($0.identifier.lowercased()) }
         guard outcome.isNature else {
