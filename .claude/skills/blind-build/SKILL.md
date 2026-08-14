@@ -130,8 +130,19 @@ allowed; have a separate adversarial subagent vet each round's diff). Then:
   defect, draft the FR amendment whose wording would have forced the right
   outcome, and report it to the main session. The user approves or edits every
   amendment before it lands.
-- After the amendment lands, dispatch a **fresh** implementer (Phase 3 again)
-  against the amended brief — never the contaminated one.
+- After the amendment lands, **continue the same implementer** against the
+  amended brief by default — same agent, worktree, and branch. An amended
+  brief is not a hint; it is the artifact under test, and a maintainer
+  revisiting old code under new wording is exactly the real-world case. The
+  re-dispatch carries what a first dispatch would and nothing more: the FR
+  pointers, the new commit, the standing ground rules. Never the validation
+  findings, the defect, or why the wording moved — if the new words cannot
+  redirect the implementer on their own, the amendment is not done, and that
+  failure is itself the next finding.
+- Dispatch a **fresh** implementer (Phase 3 from scratch) only when the
+  previous one is actually contaminated — a hint or defect detail reached it —
+  or its worktree/branch state is unsound, or the user asks for a clean
+  measurement of the new wording against an unprejudiced reader.
 - If the implementer misses a known case, the wording — not the agent — needs
   another turn. If the same build fails on capability across rounds with sound
   wording, surface the Opus escape hatch to the user.
