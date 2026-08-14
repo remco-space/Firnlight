@@ -285,7 +285,8 @@ The app has three tabs matching the three stages of the journey:
   like those judged bad never count toward the suggestion, even where the two
   kinds of judgment disagree; photos scoring like those judged great
   otherwise always do; where the judgments reach neither way, the shape of
-  the user's own ranking decides. Neither kind of judgment is ever without
+  the user's own ranking decides — and where that shape is too slight to
+  decide, the doubtful stretch stays out of the suggestion. Neither kind of judgment is ever without
   effect: each shapes the estimate from the first one given, without waiting
   for the other kind to exist. The suggestion is marked on the
   slider's scale; adopting it is moving the thumb onto the mark — there is no
