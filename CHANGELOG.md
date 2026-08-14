@@ -12,6 +12,8 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+## [0.19.4] - 2026-08-14
+
 ### Added
 
 - A long analysis run now keeps going while nobody is watching on the Mac: for
