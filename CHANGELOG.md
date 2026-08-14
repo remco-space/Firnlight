@@ -32,6 +32,14 @@ heading when that version is released (FR-10.3).
 
 ### Fixed
 
+- Indoor still lifes — a vase of tulips on the table, a houseplant — no longer
+  count as nature. A flower or plant close-up now only qualifies when the
+  photo also reads as taken outdoors; real scenes (mountains, water, sky,
+  cityscapes) are untouched by the extra test. And a person the detectors see
+  only weakly — a swimmer mid-frame whose body and "people" signals each fell
+  just short on their own — is now caught by the two signals corroborating
+  each other. Already-examined photos are re-examined in the background
+  automatically.
 - Photos with a person plainly the subject no longer slip into the candidates.
   A reclining subject could defeat both detectors at once — the face too small
   to trip the prominence check, the body detected but a hair under the old

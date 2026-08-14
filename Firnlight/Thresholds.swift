@@ -104,7 +104,13 @@ nonisolated enum Thresholds {
     /// reclining bodies, and the classification-label people check
     /// (`peopleLabels`) added — so a photo accepted under v5 must be re-judged
     /// before it can keep counting as a candidate.
-    static let currentAnalysisVersion = 6 // v6 tightens the people gate: lower rectangle confidence + label check
+    /// v7 is required too: it adds the corroborated people check
+    /// (`corroboratedPeopleLabelThreshold`) and splits the nature allowlist
+    /// into scene and object labels with `outdoor` corroboration
+    /// (`natureObjectLabels`), so a photo accepted under v6 — a weakly
+    /// detected prominent person, or an indoor still life — must be re-judged
+    /// before it can keep counting as a candidate.
+    static let currentAnalysisVersion = 7 // v7: corroborated people check; object labels need outdoor
 
     /// Records analyzed and saved per batch; a killed app loses at most one batch.
     static let analysisBatchSize = 32
@@ -211,6 +217,22 @@ nonisolated enum Thresholds {
     /// figures should not. One real data point so far — tune from real library
     /// data via the ImageAnalyzer debug log, like `natureLabels`.
     static let peopleLabelConfidenceThreshold: Float = 0.75
+
+    /// Minimum `peopleLabels` confidence that rejects when *corroborated* by a
+    /// human rectangle at least `personProminenceHeight` tall — the fourth
+    /// people signal (FR-3.1), for the photo that defeats every standalone
+    /// gate at once. The motivating escape (IMG_0232, a swimmer mid-frame):
+    /// body rectangle 16% of frame height at confidence 0.18, `people` label
+    /// 0.46 — each under its standalone bar, together unambiguous. Distant
+    /// figures FR-3.1 admits stay safe: their rectangles fail the prominence
+    /// test, so no label confidence alone can trip this.
+    static let corroboratedPeopleLabelThreshold: Float = 0.4
+
+    /// Rectangle-confidence floor inside the corroborated check above — low on
+    /// purpose (the label carries the certainty; the rectangle only has to
+    /// locate a prominent figure), non-zero so a pure-noise detection cannot
+    /// combine with an incidental label.
+    static let corroboratedHumanConfidenceThreshold: Float = 0.1
 
     /// A face (or confident human rectangle) taller than this fraction of the
     /// analysis frame height reads as a foreground portrait subject, not a
@@ -498,14 +520,16 @@ nonisolated enum Thresholds {
     static let albumSizeDetentReach: CGFloat = 12
 
 
-    /// A photo is "nature" if any label in this allowlist meets the confidence threshold.
+    /// A photo is "nature" if any label in this allowlist meets the confidence
+    /// threshold. These are *scene* labels — places, not things — so any one
+    /// of them is evidence of a scene on its own.
     /// Every entry is verified to exist in ClassifyImageRequest().supportedIdentifiers
     /// (1303 identifiers on this SDK; all lowercase, multi-word joined by underscores —
     /// e.g. "sunset_sunrise", NOT "sunset"/"sunrise").
     /// Tune from real library data via the ImageAnalyzer debug log of rejected labels.
-    /// If false positives appear, the broad umbrella labels ("land", "water_body",
-    /// "vegetation", "plant") are the first candidates to remove.
-    static let natureLabels: Set<String> = [
+    /// If false positives appear, the broad umbrella labels ("land", "water_body")
+    /// are the first candidates to remove.
+    static let natureSceneLabels: Set<String> = [
         // Landforms
         "mountain", "hill", "cliff", "canyon", "cave", "desert",
         "sand_dune", "sand", "rocks", "island", "volcano", "lava",
@@ -525,18 +549,8 @@ nonisolated enum Thresholds {
         "sunset_sunrise", "storm", "thunderstorm", "lightning",
         "blizzard", "haze",
 
-        // Forest & vegetation
-        "forest", "jungle", "tree", "evergreen", "palm_tree",
-        "maple_tree", "oak_tree", "eucalyptus_tree", "sequoia",
-        "willow", "mangrove", "foliage", "branch", "vegetation",
-        "plant", "grass", "moss", "ferns", "shrub", "ivy", "clover",
-        "cactus", "blossom", "wheat",
-
-        // Flowers
-        "flower", "rose", "tulip", "sunflower", "orchid", "lily",
-        "daisy", "daffodil", "dahlia", "dandelion", "carnation",
-        "chrysanthemum", "cornflower", "begonia", "petunia",
-        "marigold", "snapdragon",
+        // Forest
+        "forest", "jungle",
 
         // Scenic cultivated landscapes & trails
         "vineyard", "orchard", "rice_field", "trail",
@@ -545,4 +559,39 @@ nonisolated enum Thresholds {
         "cityscape", "skyscraper", "bridge", "castle", "lighthouse",
         "harbour", "monument", "belltower", "clock_tower",
     ]
+
+    /// Nature labels that name a *thing*, not a place — a tulip, a potted
+    /// plant, a tree — and so admit a photo only when the classifier also saw
+    /// `outdoor` at `outdoorCorroborationThreshold` or better. A vase of
+    /// tulips on a dining table classifies exactly like a garden bed
+    /// (plant/flower/tulip all ≥ 0.6 on the escape that split this list out,
+    /// IMG_0962) — the scene-versus-still-life difference lives entirely in
+    /// the `outdoor` label, which fired at 0.86–0.90 on real scenes and under
+    /// 0.1 on the vase. Splitting rather than gating everything on `outdoor`
+    /// keeps the risk contained: underwater or night-sky scenes, where
+    /// `outdoor` may plausibly stay quiet, all admit through scene labels and
+    /// never pay this test. Same identifier-verification and tuning rules as
+    /// `natureSceneLabels`.
+    static let natureObjectLabels: Set<String> = [
+        // Trees & vegetation (houseplants and cut branches are the indoor risk)
+        "tree", "evergreen", "palm_tree", "maple_tree", "oak_tree",
+        "eucalyptus_tree", "sequoia", "willow", "mangrove", "foliage",
+        "branch", "vegetation", "plant", "grass", "moss", "ferns",
+        "shrub", "ivy", "clover", "cactus", "blossom", "wheat",
+
+        // Flowers (bouquets and vases are the indoor risk)
+        "flower", "rose", "tulip", "sunflower", "orchid", "lily",
+        "daisy", "daffodil", "dahlia", "dandelion", "carnation",
+        "chrysanthemum", "cornflower", "begonia", "petunia",
+        "marigold", "snapdragon",
+    ]
+
+    /// Minimum `outdoor` classification confidence that lets a
+    /// `natureObjectLabels` match count as a scene. Below the general 0.4
+    /// label bar on purpose: a flower macro with a blurred background may
+    /// classify `outdoor` only weakly, and a false rejection silently removes
+    /// a candidate the user never sees, while everything indoors observed so
+    /// far sits under 0.1. One real still life and two real scenes as data
+    /// points — tune from real library data via the ImageAnalyzer debug log.
+    static let outdoorCorroborationThreshold: Float = 0.25
 }
