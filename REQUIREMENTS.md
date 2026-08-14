@@ -281,9 +281,11 @@ The app has three tabs matching the three stages of the journey:
 - **FR-6.4** The app suggests a count: its estimate of how many photos are
   genuinely good enough to hang on the desktop, learned from the user's own
   judgments. A photo counts toward the suggestion when those judgments speak
-  for it — it ranks with what the user called great — not merely because it
-  beats what the user called bad. As judgments accumulate or change, the
-  suggestion follows, in either direction. The suggestion is marked on the
+  for it: it scores like the photos the user called great, not merely better
+  than the ones called bad. When both kinds of judgment exist, calling more
+  photos great moves the suggestion just as surely as calling more photos
+  bad. As judgments accumulate or change, the suggestion follows, in either
+  direction. The suggestion is marked on the
   slider's scale; adopting it is moving the thumb onto the mark — there is no
   separate button. It is followed automatically until the user first sets a
   size of their own — by slider or by typing — and never overrides them after
