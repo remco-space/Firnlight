@@ -399,23 +399,28 @@ nonisolated enum Thresholds {
     /// Name of the Photos album the app keeps in sync with top candidates.
     static let wallpaperAlbumName = "Firnlight"
 
-    /// Default number of top-ranked photos synced into the wallpaper album
-    /// (used when the quality curve is too flat or small to suggest from).
+    /// Placeholder top-N shown only before the first real suggestion and pool
+    /// size have arrived (`ExportModel.isReady` is false) — never a fallback
+    /// suggestion value itself. FR-6.4 forbids the estimate a floor or
+    /// default of its own; this is UI scaffolding for the moment before there
+    /// is an estimate to show at all.
     static let defaultWallpaperCount = 50
 
-    /// Ranked candidates examined for the KNEE fallback only. The verdict
-    /// calibration has no upper bound — if every photo clears the bar, the
-    /// album is the whole library.
+    /// Middle-zone candidates the knee may sample when no bad verdict caps
+    /// the walk early (`FeatureStore.zoneScores`) — the knee needs a sample of
+    /// the curve's shape, not the whole library. The great zone (FR-6.4) has
+    /// no such cap: if every candidate clears it, the album is the whole
+    /// library.
     static let albumSuggestionScanLimit = 500
-
-    /// Suggested album size never drops below this.
-    static let albumSuggestionMinimum = 20
 
     /// Minimum normalized score spread required to trust the knee detection.
     static let albumSuggestionMinimumSpread: Float = 0.05
 
-    /// "Both bad" verdicts needed before they calibrate the album size
-    /// (below that, the knee heuristic is used).
+    /// "Both bad" verdicts needed before they calibrate the duel pool's
+    /// quality bar (`PreferenceRanker.verdictBar`) — below that, the pool
+    /// falls back to a plain top fraction. Unrelated to the album-size
+    /// suggestion (FR-6.4), which a single verdict of either kind already
+    /// shapes with no minimum count.
     static let albumCalibrationMinimumBadVerdicts = 2
 
     /// Album ordering maximizes the minimum feature-print distance to this

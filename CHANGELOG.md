@@ -32,6 +32,18 @@ heading when that version is released (FR-10.3).
 
 ### Fixed
 
+- The suggested album size (FR-6.4) now actually reflects "Both Are Great" and
+  "Not Wallpaper Material"/"Both Are Bad" verdicts as soon as either exists,
+  instead of requiring two bad verdicts before either kind had any effect.
+  Photos scoring like an explicit bad verdict are now always excluded, photos
+  scoring like an explicit great verdict are now always included with no
+  upper bound, and only the doubtful stretch between the two is left to the
+  shape of the ranking — the same rule whichever kind of verdict exists, or
+  both, or neither. The estimate itself is no longer floored at 20 or rounded
+  to the nearest ten: a small or zero suggestion is now reported as it comes
+  out, with the album-size slider still never dropping below its own working
+  minimum and labeling that mark "Minimum" rather than "Suggested" when the
+  true estimate falls below it (FR-6.3).
 - Indoor still lifes — a vase of tulips on the table, a houseplant — no longer
   count as nature. A flower or plant close-up now only qualifies when the
   photo also reads as taken outdoors; real scenes (mountains, water, sky,

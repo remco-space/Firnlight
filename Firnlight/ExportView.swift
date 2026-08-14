@@ -220,7 +220,17 @@ final class ExportModel {
     /// arrives this stands in for it, so the preview has a limit to load with
     /// and the pool's real size can be learned; `isReady` keeps that
     /// provisional number off the screen in the meantime (FR-6.5).
-    private var suggestionBase: Int { max(1, suggestion ?? Thresholds.defaultWallpaperCount) }
+    ///
+    /// Floored at the album's working minimum: FR-6.4 makes an honest
+    /// suggestion of zero (or a handful) reachable, and a ratio measured
+    /// against so small a base loses its meaning — a user choosing 20 while
+    /// the suggestion reads 0 is not asking for twenty times whatever the
+    /// suggestion recovers to. The working minimum is the point the slider
+    /// actually marks in that state, so it is the yardstick the choice was
+    /// made against.
+    private var suggestionBase: Int {
+        max(Thresholds.minimumWallpaperCount, suggestion ?? Thresholds.defaultWallpaperCount)
+    }
 
     /// FR-6.3's exact count — what the number field shows, what a sync uses,
     /// and the only count the rest of the app knows about.
@@ -583,13 +593,21 @@ extension AlbumSizeScale {
         // suggestion, when the suggestion has landed exactly on it. FR-6.4
         // asks for the suggestion to be marked, not for a second mark in the
         // same place.
+        //
+        // The smallest end has a third possibility: an estimate below the
+        // album's working minimum is real and reported truthfully elsewhere
+        // (the "Suggested: N" caption), but the album — and so the slider —
+        // never shrinks past this end, so FR-6.4 asks the mark here to say
+        // "the minimum, not… the suggestion": it is standing in for a
+        // suggestion the track can't reach, not coinciding with one.
         func end(_ count: Int) -> AlbumSizeMark {
-            let isSuggestion = count == suggestion
-            return AlbumSizeMark(
-                position: position(of: count),
-                label: isSuggestion ? "Suggested" : count.formatted(),
-                rank: isSuggestion ? .suggestion : .end
-            )
+            if count == suggestion {
+                return AlbumSizeMark(position: position(of: count), label: "Suggested", rank: .suggestion)
+            }
+            if count == smallest, let suggestion, suggestion < smallest {
+                return AlbumSizeMark(position: position(of: count), label: "Minimum", rank: .suggestion)
+            }
+            return AlbumSizeMark(position: position(of: count), label: count.formatted(), rank: .end)
         }
 
         // The ends, and the suggestion with them: these are the marks that must
@@ -621,14 +639,14 @@ extension AlbumSizeScale {
 
         // One mark per place on the track, the highest-ranking one.
         //
-        // The suggestion is *usually* a round count, not rarely: both ways of
-        // arriving at one round to a multiple of ten (see
-        // `FeatureStore.suggestedAlbumSize`), and 10, 20, 50, 100, 200, 500 …
-        // are exactly the ladder. Left alone, the twins sit at the identical
-        // position and print "Suggested" across "50" — the ordinary state for
-        // a library nobody has judged yet, and the plainest possible breach of
-        // FR-8.11. It would also hand `ForEach` two marks with one id, since
-        // `AlbumSizeMark` is identified by its position.
+        // The suggestion can still land exactly on a round mark or an end —
+        // FR-6.4 no longer rounds it to one on purpose, but an unrounded
+        // estimate is free to coincide with one anyway (10, 100, or the pool's
+        // own size, say). Left alone, the twins would sit at the identical
+        // position and print "Suggested" across the round count's own label —
+        // the plainest possible breach of FR-8.11. It would also hand
+        // `ForEach` two marks with one id, since `AlbumSizeMark` is identified
+        // by its position.
         //
         // The same twinning happens at the ends when a library is smaller than
         // the smallest album and both ends land on the same count.
