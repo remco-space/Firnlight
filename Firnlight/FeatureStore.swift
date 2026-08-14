@@ -257,59 +257,62 @@ actor FeatureStore {
         return order.map { candidates[$0] }
     }
 
-    /// Suggests how many photos belong in the wallpaper album.
+    /// Suggests how many photos belong in the wallpaper album (FR-6.4).
     ///
-    /// Primary: calibration from "both great"/"both bad" duel verdicts — finds
-    /// the score threshold that best separates good from bad verdicts and
-    /// counts the deduplicated candidates above it, UNCAPPED: if the whole
-    /// library clears the bar, the album is the whole library. Fallback (too
-    /// few bad verdicts): the knee of the ranked score curve (Kneedle-style —
-    /// max deviation from the endpoint chord, per Satopää et al. 2011).
+    /// Three zones, by raw preference score, checked in this order:
+    ///
+    /// 1. **Bad zone** — scoring like those judged bad (FR-4.7/FR-5.7): at or
+    ///    below the highest score among photos explicitly judged bad. Never
+    ///    counted, even where this disagrees with the great zone below (a
+    ///    photo scoring in both would be a contradiction in the user's own
+    ///    verdicts; bad wins).
+    /// 2. **Great zone** — scoring like those judged great: at or above the
+    ///    lowest score among photos explicitly judged great. Always counted,
+    ///    with no cap — if the whole library clears it, the album is the
+    ///    whole library.
+    /// 3. **Middle** — everything neither judgment reaches. Decided by the
+    ///    shape of the ranked score curve (Kneedle-style — max deviation from
+    ///    the endpoint chord, per Satopää et al. 2011): a curve with enough
+    ///    of a knee donates its top stretch; too flat to show one (or too few
+    ///    points to show one at all) and the whole doubtful stretch stays out.
+    ///
+    /// A verdict of either kind shapes the estimate on its own, the moment it
+    /// exists — the bad zone needs no great verdicts to exclude, the great
+    /// zone needs no bad ones to include, and the middle's knee runs on
+    /// whichever zone (or the full curve) is left once the other two have
+    /// done their work. Nothing here floors or rounds the result: an honest
+    /// zero is reported as zero, never rewritten to something the judgments
+    /// or the curve's shape don't support.
     func suggestedAlbumSize() throws -> Int {
-        if let calibrated = try verdictCalibratedSize() {
-            return calibrated
-        }
-
-        let candidates = try rankedCandidates(limit: Thresholds.albumSuggestionScanLimit).candidates
-        let scores = candidates.map { $0.displayScore }
-        guard scores.count > Thresholds.albumSuggestionMinimum else {
-            return max(1, min(scores.count, Thresholds.defaultWallpaperCount))
-        }
-        return kneeSize(scores: scores)
-    }
-
-    /// Verdict scores → optimal split threshold → count of candidates above it.
-    private func verdictCalibratedSize() throws -> Int? {
         let verdicts = try modelContext.fetch(
             FetchDescriptor<VerdictRecord>(sortBy: [SortDescriptor(\.timestamp)])
         )
-        guard !verdicts.isEmpty else { return nil }
+        let latest = VerdictCalibration.latestByPhoto(verdicts)
 
-        // Latest verdict per photo wins, valued at the photo's current raw score.
-        // Verdicts are keyed device-independently (FR-9.1) while PhotoRecord is
-        // keyed locally, so the join runs in memory over the photo table rather
-        // than as a `#Predicate`: `judgmentKey` is computed, and the two models
-        // live in different stores, neither of which a predicate can span.
+        // Latest verdict per photo wins, valued at the photo's current raw
+        // score. Verdicts are keyed device-independently (FR-9.1) while
+        // PhotoRecord is keyed locally, so the join runs in memory over the
+        // photo table rather than as a `#Predicate`: `judgmentKey` is
+        // computed, and the two models live in different stores, neither of
+        // which a predicate can span.
         //
         // Same `isNature && !isExcluded` + serving-generation restriction
-        // `rankedCore`/`dedupedCount` already apply, and for the same reason
-        // (FR-5.2): this is a threshold built from photos' standings, so an
+        // `rankedCore` already applies, and for the same reason (FR-5.2): an
         // ignored photo or one carrying a `preferenceScore` from a different
         // Vision pipeline (never cleared once its `analysisVersion` falls out
         // of the serving generation — see
         // `PreferenceRanker.writePreferenceCache`) must not be weighed into
-        // the split as though it were on equal terms. Resolved once here and
-        // handed to `dedupedCount` rather than re-read there, so both halves
-        // of one calibration pass judge the same generation even if a
-        // handover lands between them (see `AnalysisGeneration`).
+        // the zones as though it were on equal terms. Resolved once here and
+        // handed to `zoneScores` rather than re-read there, so the whole pass
+        // judges one generation even if a handover lands mid-computation
+        // (see `AnalysisGeneration`).
         let version = AnalysisGeneration.servingVersion(in: modelContext)
-        let latest = VerdictCalibration.latestByPhoto(verdicts)
-        let records = try modelContext.fetch(FetchDescriptor<PhotoRecord>(
+        let judged = try modelContext.fetch(FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.analysisVersion == version }
         ))
         var good: [Float] = []
         var bad: [Float] = []
-        for record in records {
+        for record in judged {
             guard let score = record.preferenceScore,
                   let isGood = latest[record.judgmentKey] else { continue }
             if isGood {
@@ -318,61 +321,89 @@ actor FeatureStore {
                 bad.append(score)
             }
         }
-        guard bad.count >= Thresholds.albumCalibrationMinimumBadVerdicts else { return nil }
+        let badCeiling = bad.max()
+        let greatFloor = good.min()
 
-        let bestThreshold = VerdictCalibration.optimalSplitThreshold(good: good, bad: bad)
-        let bestErrors = good.count(where: { $0 <= bestThreshold }) + bad.count(where: { $0 > bestThreshold })
+        let (greatScores, middleScores) = try zoneScores(
+            badCeiling: badCeiling,
+            greatFloor: greatFloor,
+            analysisVersion: version
+        )
+        let middleCount = kneeCount(scores: middleScores)
+        let suggestion = greatScores.count + middleCount
 
-        let above = try dedupedCount(aboveBar: bestThreshold, analysisVersion: version)
-        let clamped = max(Thresholds.albumSuggestionMinimum, above)
-        let suggestion = ((clamped + 5) / 10) * 10
-        Self.log.info("Album suggestion (verdicts): good=\(good.count) bad=\(bad.count) threshold=\(String(format: "%.3f", bestThreshold), privacy: .public) errors=\(bestErrors) above=\(above) suggested=\(suggestion)")
+        Self.log.info("Album suggestion: good=\(good.count) bad=\(bad.count) badCeiling=\(badCeiling.map { String(format: "%.3f", $0) } ?? "none", privacy: .public) greatFloor=\(greatFloor.map { String(format: "%.3f", $0) } ?? "none", privacy: .public) great=\(greatScores.count) middle=\(middleCount)/\(middleScores.count) suggested=\(suggestion)")
         return suggestion
     }
 
-    /// Deduplicated candidates scoring above the bar — walks the ranked list
-    /// and stops at the bar, so cost scales with album size, not library size.
+    /// Walks the ranked, deduplicated candidates best-first, splitting them
+    /// into the great zone (score ≥ `greatFloor`, uncapped) and a middle
+    /// sample (everything else, down to but excluding `badCeiling`) for the
+    /// knee to judge. The walk stops the moment a score reaches `badCeiling`
+    /// — nothing at or below it is ever in either returned zone — so cost
+    /// scales with how far the bad verdicts reach into the ranking, not with
+    /// library size, whenever there is a bad verdict to stop at.
     ///
-    /// Same serving-generation restriction as
-    /// `rankedCore`/`verdictCalibratedSize` (FR-5.2): a photo carrying an
-    /// out-of-generation `preferenceScore` must not be counted toward the bar
-    /// as though it were on equal terms with the rest. The generation is the
-    /// caller's already-resolved one (`verdictCalibratedSize` is the only
-    /// caller), not re-derived here — see there.
-    private func dedupedCount(aboveBar bar: Float, analysisVersion version: Int) throws -> Int {
+    /// Without one, the walk has nothing to stop it early, so the middle
+    /// sample (which is all there is, when `greatFloor` is also nil) is
+    /// capped at `Thresholds.albumSuggestionScanLimit` — the knee needs a
+    /// sample of the curve's shape, not the whole library, and scanning it
+    /// all just to conclude the same knee is the O(n²) dedupe walk this
+    /// function's caller-facing doc comment (`FeatureStore`'s file header)
+    /// warns against running unbounded. The great zone is never capped: FR-6.4
+    /// asks for it uncounted only by a ceiling nobody's judgment drew.
+    private func zoneScores(
+        badCeiling: Float?,
+        greatFloor: Float?,
+        analysisVersion version: Int
+    ) throws -> (great: [Float], middle: [Float]) {
         let fetched = try modelContext.fetch(FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.analysisVersion == version }
         ))
-        // Unscored records sort to the bottom and break the walk at the bar.
+        // Unscored records sort to the bottom and simply never match `guard
+        // let score`, ending the walk there same as reaching `badCeiling`.
         let records = fetched.sorted { ($0.preferenceScore ?? -.greatestFiniteMagnitude) > ($1.preferenceScore ?? -.greatestFiniteMagnitude) }
         let thresholdSquared = Thresholds.nearDuplicateDistance * Thresholds.nearDuplicateDistance
+        let middleScanLimit = badCeiling == nil ? Thresholds.albumSuggestionScanLimit : Int.max
 
         var keptVectors: [[Float]] = []
+        var great: [Float] = []
+        var middle: [Float] = []
         for record in records {
-            guard let score = record.preferenceScore, score > bar else { break }
+            guard let score = record.preferenceScore else { break }
+            if let badCeiling, score <= badCeiling { break }
+            let isGreat = greatFloor.map { score >= $0 } ?? false
+            if !isGreat && middle.count >= middleScanLimit { break }
             guard let data = record.featurePrint else { continue }
             let vector = data.floatVector
             let isNearDuplicate = keptVectors.contains {
                 $0.count == vector.count && vDSP.distanceSquared($0, vector) < thresholdSquared
             }
-            if !isNearDuplicate {
-                keptVectors.append(vector)
+            guard !isNearDuplicate else { continue }
+            keptVectors.append(vector)
+            if isGreat {
+                great.append(score)
+            } else {
+                middle.append(score)
             }
         }
-        return keptVectors.count
+        return (great, middle)
     }
 
-    /// Knee of the ranked score curve, normalized to the unit square with the
-    /// chord running (0,1) → (1,0).
-    private func kneeSize(scores: [Float]) -> Int {
-        guard let first = scores.first, let last = scores.last else {
-            return Thresholds.defaultWallpaperCount
-        }
+    /// How much of a score-descending stretch the ranking's own shape marks
+    /// as included — FR-6.4's "where the judgments reach neither way, the
+    /// shape of the user's own ranking decides… and where that shape is too
+    /// slight to decide, the doubtful stretch stays out of the suggestion."
+    /// Knee of the curve, normalized to the unit square with the chord
+    /// running (0,1) → (1,0) (Kneedle-style — max deviation from the endpoint
+    /// chord, per Satopää et al. 2011). Too few points to show a shape, or a
+    /// curve too flat to carry one (e.g. a barely-trained ranker), and none
+    /// of the stretch counts — no default stands in for a shape that isn't
+    /// there.
+    private func kneeCount(scores: [Float]) -> Int {
+        guard scores.count > 1, let first = scores.first, let last = scores.last else { return 0 }
         let spread = first - last
-        guard spread >= Thresholds.albumSuggestionMinimumSpread else {
-            // Curve too flat to carry a signal (e.g. barely-trained ranker).
-            return Thresholds.defaultWallpaperCount
-        }
+        guard spread >= Thresholds.albumSuggestionMinimumSpread else { return 0 }
 
         var kneeIndex = 0
         var bestDeviation: Float = 0
@@ -386,17 +417,7 @@ actor FeatureStore {
                 kneeIndex = index
             }
         }
-
-        let clamped = max(Thresholds.albumSuggestionMinimum, kneeIndex + 1)
-        let suggestion = ((clamped + 5) / 10) * 10
-
-        // Curve diagnostics for threshold tuning against real library data.
-        let samples = stride(from: 0, to: scores.count, by: 25)
-            .map { "\($0):\(String(format: "%.3f", scores[$0]))" }
-            .joined(separator: " ")
-        Self.log.info("Album suggestion (knee): knee=\(kneeIndex + 1) deviation=\(String(format: "%.3f", bestDeviation), privacy: .public) spread=\(String(format: "%.3f", spread), privacy: .public) suggested=\(suggestion) curve[\(samples, privacy: .public)]")
-
-        return suggestion
+        return kneeIndex + 1
     }
 
     private static let log = Logger(subsystem: "space.remco.Firnlight", category: "FeatureStore")
