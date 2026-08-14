@@ -32,6 +32,13 @@ heading when that version is released (FR-10.3).
 
 ### Fixed
 
+- One extreme verdict no longer decides the whole album suggestion. What a
+  photo has to score to count as "like" the great- or bad-judged photos is
+  now measured against the bulk of those judgments, not the single most
+  extreme one — a lone "Both Are Bad" on a photo the ranking happened to love
+  used to collapse the suggestion to almost nothing, and a lone generous
+  "Both Are Great" could stretch it to almost everything. Every judgment now
+  shifts the estimate a little; none can overrule all the others.
 - The suggested album size (FR-6.4) now actually reflects "Both Are Great" and
   "Not Wallpaper Material"/"Both Are Bad" verdicts as soon as either exists,
   instead of requiring two bad verdicts before either kind had any effect.
