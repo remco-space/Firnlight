@@ -220,7 +220,17 @@ final class ExportModel {
     /// arrives this stands in for it, so the preview has a limit to load with
     /// and the pool's real size can be learned; `isReady` keeps that
     /// provisional number off the screen in the meantime (FR-6.5).
-    private var suggestionBase: Int { max(1, suggestion ?? Thresholds.defaultWallpaperCount) }
+    ///
+    /// Floored at the album's working minimum: FR-6.4 makes an honest
+    /// suggestion of zero (or a handful) reachable, and a ratio measured
+    /// against so small a base loses its meaning — a user choosing 20 while
+    /// the suggestion reads 0 is not asking for twenty times whatever the
+    /// suggestion recovers to. The working minimum is the point the slider
+    /// actually marks in that state, so it is the yardstick the choice was
+    /// made against.
+    private var suggestionBase: Int {
+        max(Thresholds.minimumWallpaperCount, suggestion ?? Thresholds.defaultWallpaperCount)
+    }
 
     /// FR-6.3's exact count — what the number field shows, what a sync uses,
     /// and the only count the rest of the app knows about.
