@@ -99,7 +99,12 @@ nonisolated enum Thresholds {
     /// every already-analyzed record for re-analysis in the background, with
     /// no judgment lost and no user action required (FR-5.2's "must
     /// re-examine what it must" — see `AnalysisQueue.processNextBatch`).
-    static let currentAnalysisVersion = 5 // v5 adds DetectLensSmudgeRequest to the flaw gate
+    /// v6 is required too: it tightens the people gate (FR-3.1) after a real
+    /// escape — `humanConfidenceThreshold` lowered to catch low-confidence
+    /// reclining bodies, and the classification-label people check
+    /// (`peopleLabels`) added — so a photo accepted under v5 must be re-judged
+    /// before it can keep counting as a candidate.
+    static let currentAnalysisVersion = 6 // v6 tightens the people gate: lower rectangle confidence + label check
 
     /// Records analyzed and saved per batch; a killed app loses at most one batch.
     static let analysisBatchSize = 32
@@ -178,7 +183,34 @@ nonisolated enum Thresholds {
     static let analysisPixelSize = 1024
 
     /// Minimum DetectHumanRectanglesRequest confidence that counts as a person.
-    static let humanConfidenceThreshold: Float = 0.3
+    ///
+    /// Tuning history: shipped at 0.3; lowered to 0.2 on 2026-08-14 after a
+    /// real escape (IMG_0259) — a reclining sunbather filling a third of the
+    /// frame came back at confidence 0.27, one hundredth under the old floor.
+    /// Vision's confidence drops on reclining or partially occluded bodies,
+    /// and this gate only fires together with the prominence test
+    /// (`personProminenceHeight`), so a lower floor cannot reject the distant
+    /// figures FR-3.1 admits — it only tightens the call on rectangles already
+    /// big enough to be the subject.
+    static let humanConfidenceThreshold: Float = 0.2
+
+    /// Classification labels that read as people being the subject of the
+    /// photo, checked against the same `ClassifyImageRequest` results the
+    /// nature gate uses (no extra Vision pass). This is the third, independent
+    /// people signal (FR-3.1): the rectangle detectors measure geometry, but a
+    /// person can defeat both — face too small when reclining, body confidence
+    /// low in unusual poses — while the whole-image classifier still calls the
+    /// scene "people" outright (0.85 on the escape that motivated this gate).
+    /// Every entry verified against `ClassifyImageRequest().supportedIdentifiers`.
+    static let peopleLabels: Set<String> = ["people", "adult", "child", "baby", "crowd"]
+
+    /// Minimum confidence on any `peopleLabels` entry that rejects the photo.
+    /// Higher than `natureConfidenceThreshold` on purpose: FR-3.1 admits
+    /// distant figures in a cityscape, and a scene-dominating person should
+    /// classify strongly (the motivating escape scored 0.85) while incidental
+    /// figures should not. One real data point so far — tune from real library
+    /// data via the ImageAnalyzer debug log, like `natureLabels`.
+    static let peopleLabelConfidenceThreshold: Float = 0.75
 
     /// A face (or confident human rectangle) taller than this fraction of the
     /// analysis frame height reads as a foreground portrait subject, not a

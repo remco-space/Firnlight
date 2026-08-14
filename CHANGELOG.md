@@ -32,6 +32,15 @@ heading when that version is released (FR-10.3).
 
 ### Fixed
 
+- Photos with a person plainly the subject no longer slip into the candidates.
+  A reclining subject could defeat both detectors at once — the face too small
+  to trip the prominence check, the body detected but a hair under the old
+  confidence bar — while grass and foliage carried the scene past the nature
+  check. The body-detection bar is lowered for frame-dominating figures, and a
+  third, independent signal now backs the two geometric ones: when the
+  on-device classifier itself calls the scene "people" with high confidence,
+  the photo is set aside. Already-examined photos are re-examined in the
+  background automatically.
 - A change in how Firnlight examines photos no longer empties the app while it
   catches up. Re-examining the library used to set every not-yet-re-examined
   photo aside at once, so the grid, the duels and the album suggestion could
