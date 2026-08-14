@@ -279,13 +279,15 @@ The app has three tabs matching the three stages of the journey:
   suggestion's mark gently catches the passing thumb (FR-6.4), so the one
   point that is easy to mean and hard to hit is easy to hit too.
 - **FR-6.4** The app suggests a count: its estimate of how many photos are
-  genuinely good enough to hang on the desktop, learned from the user's own
-  judgments. A photo counts toward the suggestion when those judgments speak
-  for it: it scores like the photos the user called great, not merely better
-  than the ones called bad. When both kinds of judgment exist, calling more
-  photos great moves the suggestion just as surely as calling more photos
-  bad. As judgments accumulate or change, the suggestion follows, in either
-  direction. The suggestion is marked on the
+  genuinely good enough to hang on the desktop, learned from the user's
+  explicit quality judgments (FR-5.7, FR-4.7) — a duel choice says only which
+  of two photos is the better one, and is no such judgment. Photos scoring
+  like those judged bad never count toward the suggestion, even where the two
+  kinds of judgment disagree; photos scoring like those judged great
+  otherwise always do; where the judgments reach neither way, the shape of
+  the user's own ranking decides. Neither kind of judgment is ever without
+  effect: each shapes the estimate from the first one given, without waiting
+  for the other kind to exist. The suggestion is marked on the
   slider's scale; adopting it is moving the thumb onto the mark — there is no
   separate button. It is followed automatically until the user first sets a
   size of their own — by slider or by typing — and never overrides them after
