@@ -289,7 +289,11 @@ The app has three tabs matching the three stages of the journey:
   decide, the doubtful stretch stays out of the suggestion. The estimate is
   reported as it comes out, however small — even zero: no floor, rounding
   step, or presentation nicety readmits photos the judgments or the ranking's
-  shape keep out, or hides a judgment's effect on the count. Neither kind of judgment is ever without
+  shape keep out, or hides a judgment's effect on the count. An estimate
+  below the album's working minimum (FR-6.3) is still reported truthfully,
+  but the album itself never shrinks below that minimum; the slider's mark
+  then sits at the minimum and is labeled as the minimum, not as the
+  suggestion. Neither kind of judgment is ever without
   effect: each shapes the estimate from the first one given, without waiting
   for the other kind to exist. The suggestion is marked on the
   slider's scale; adopting it is moving the thumb onto the mark — there is no
