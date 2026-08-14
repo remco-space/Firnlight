@@ -416,6 +416,31 @@ nonisolated enum Thresholds {
     /// Minimum normalized score spread required to trust the knee detection.
     static let albumSuggestionMinimumSpread: Float = 0.05
 
+    /// How far a verdict class's zone reaches beyond its mean, in standard
+    /// deviations of that class's own scores: the bad zone ends at
+    /// mean(bad) + this × σ(bad), the great zone starts at mean(great) −
+    /// this × σ(great) (`FeatureStore.classBoundary`).
+    ///
+    /// Mean-and-spread rather than the class extreme, because FR-6.4's
+    /// "scores like the photos the user called bad/great" describes
+    /// resemblance to the class, and an extreme lets one judgment overrule
+    /// the rest — observed on real library data (2026-08-14, 56 great / 26
+    /// bad verdicts): a single "Both Are Bad" on a photo the ranker scored
+    /// near the very top pushed `bad.max()` to +0.05 and the suggestion to 1,
+    /// while the bad class's bulk sat around −0.83 ± 0.26. A mean±σ boundary
+    /// also makes every judgment shift the estimate a little, which FR-6.4's
+    /// "neither kind of judgment is ever without effect" demands — under the
+    /// extreme statistic, every non-extreme judgment had none.
+    ///
+    /// 1.3 ≈ the 90th percentile of a roughly normal class: the zone covers
+    /// the class's bulk and tolerates its stragglers without letting them
+    /// rule. On the same real data it puts the bad ceiling near −0.5 —
+    /// about 640 of 7 153 candidates above it, in the range the user's own
+    /// estimate of the library ("roughly 400 album-worthy") points at, where
+    /// the extreme statistic gave 1–14. Tune against the Album suggestion
+    /// log line.
+    static let verdictClassSpread: Float = 1.3
+
     /// "Both bad" verdicts needed before they calibrate the duel pool's
     /// quality bar (`PreferenceRanker.verdictBar`) — below that, the pool
     /// falls back to a plain top fraction. Unrelated to the album-size

@@ -262,14 +262,14 @@ actor FeatureStore {
     /// Three zones, by raw preference score, checked in this order:
     ///
     /// 1. **Bad zone** — scoring like those judged bad (FR-4.7/FR-5.7): at or
-    ///    below the highest score among photos explicitly judged bad. Never
-    ///    counted, even where this disagrees with the great zone below (a
-    ///    photo scoring in both would be a contradiction in the user's own
-    ///    verdicts; bad wins).
+    ///    below the bad class's boundary (its mean reached up by
+    ///    `Thresholds.verdictClassSpread` σ — see `classBoundary` for why the
+    ///    bulk, never the extreme). Never counted, even where this disagrees
+    ///    with the great zone below (bad wins).
     /// 2. **Great zone** — scoring like those judged great: at or above the
-    ///    lowest score among photos explicitly judged great. Always counted,
-    ///    with no cap — if the whole library clears it, the album is the
-    ///    whole library.
+    ///    great class's boundary (its mean reached down the same way). Always
+    ///    counted, with no cap — if the whole library clears it, the album is
+    ///    the whole library.
     /// 3. **Middle** — everything neither judgment reaches. Decided by the
     ///    shape of the ranked score curve (Kneedle-style — max deviation from
     ///    the endpoint chord, per Satopää et al. 2011): a curve with enough
@@ -321,8 +321,14 @@ actor FeatureStore {
                 bad.append(score)
             }
         }
-        let badCeiling = bad.max()
-        let greatFloor = good.min()
+        // Class boundaries are mean ± spread, never the extreme: "scores like
+        // the photos the user called bad" (FR-6.4) is resemblance to the
+        // class, and an extreme lets one judgment overrule all the others —
+        // see `Thresholds.verdictClassSpread` for the observed failure and
+        // the tuning data. Mean and σ also give every judgment a small,
+        // real effect on the boundary, which the same FR demands.
+        let badCeiling = Self.classBoundary(bad, reachingUp: true)
+        let greatFloor = Self.classBoundary(good, reachingUp: false)
 
         let (greatScores, middleScores) = try zoneScores(
             badCeiling: badCeiling,
@@ -334,6 +340,19 @@ actor FeatureStore {
 
         Self.log.info("Album suggestion: good=\(good.count) bad=\(bad.count) badCeiling=\(badCeiling.map { String(format: "%.3f", $0) } ?? "none", privacy: .public) greatFloor=\(greatFloor.map { String(format: "%.3f", $0) } ?? "none", privacy: .public) great=\(greatScores.count) middle=\(middleCount)/\(middleScores.count) suggested=\(suggestion)")
         return suggestion
+    }
+
+    /// Where a verdict class's zone ends: its mean, reached out by
+    /// `Thresholds.verdictClassSpread` standard deviations toward the rest of
+    /// the ranking — up for the bad ceiling, down for the great floor. `nil`
+    /// when the class is empty; a single-verdict class has σ = 0, so its
+    /// boundary is that one score.
+    private static func classBoundary(_ scores: [Float], reachingUp: Bool) -> Float? {
+        guard !scores.isEmpty else { return nil }
+        let mean = scores.reduce(0, +) / Float(scores.count)
+        let variance = scores.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Float(scores.count)
+        let reach = Thresholds.verdictClassSpread * variance.squareRoot()
+        return reachingUp ? mean + reach : mean - reach
     }
 
     /// Walks the ranked, deduplicated candidates best-first, splitting them
