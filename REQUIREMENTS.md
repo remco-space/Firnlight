@@ -278,15 +278,21 @@ The app has three tabs matching the three stages of the journey:
   every count is reachable by dragging, with one deliberate exception: the
   suggestion's mark gently catches the passing thumb (FR-6.4), so the one
   point that is easy to mean and hard to hit is easy to hit too.
-- **FR-6.4** The app suggests a count — where quality drops off in the user's
-  own ranking, informed by their Great/Bad verdicts — and marks it on the
-  slider's scale. Adopting it is moving the thumb onto the mark; there is no
-  separate button. The suggestion is followed automatically until the user
-  first sets a size of their own — by slider or by typing — and never
-  overrides them after that (FR-6.12).
+- **FR-6.4** The app suggests a count: its estimate of how many photos are
+  genuinely good enough to hang on the desktop, learned from the user's own
+  judgments. A photo counts toward the suggestion when those judgments speak
+  for it — it ranks with what the user called great — not merely because it
+  beats what the user called bad. As judgments accumulate or change, the
+  suggestion follows, in either direction. The suggestion is marked on the
+  slider's scale; adopting it is moving the thumb onto the mark — there is no
+  separate button. It is followed automatically until the user first sets a
+  size of their own — by slider or by typing — and never overrides them after
+  that (FR-6.12).
 - **FR-6.12** The app remembers the choice **relative to the suggestion**,
-  not as a count: when the suggestion shifts with new analysis and judgments,
-  the set count shifts with it, preserving the user's strictness. A pool
+  not as a count — as the same fraction of it, so a choice of half the
+  suggested size stays half when the suggestion moves: when the suggestion
+  shifts with new analysis and judgments, the set count shifts with it,
+  preserving the user's strictness. A pool
   momentarily too small to honour that standard limits only what is shown,
   never what is remembered. The standard is the user's, not the device's: it
   counts on every device, like any other judgment (section 9). The album
