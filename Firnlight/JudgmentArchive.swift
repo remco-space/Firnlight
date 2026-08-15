@@ -80,6 +80,12 @@ nonisolated enum JudgmentArchive {
             var winnerKey: String
             var loserKey: String
             var timestamp: Date
+            /// FR-5.12's correction, carried the same way `Verdict.isCleared`
+            /// already is. Optional so an archive written before this field
+            /// existed decodes as `nil` — read as "not voided" — and an older
+            /// build reading a newer archive simply ignores the key, neither
+            /// direction earning a format-version bump per the note above.
+            var isVoided: Bool?
         }
 
         struct Verdict: Codable {
@@ -131,7 +137,7 @@ nonisolated enum JudgmentArchive {
         let context = ModelContext(container)
         var archive = Archive()
         archive.choices = try context.fetch(FetchDescriptor<ChoiceRecord>()).map {
-            Archive.Choice(winnerKey: $0.winnerKey, loserKey: $0.loserKey, timestamp: $0.timestamp)
+            Archive.Choice(winnerKey: $0.winnerKey, loserKey: $0.loserKey, timestamp: $0.timestamp, isVoided: $0.isVoided)
         }
         archive.verdicts = try context.fetch(FetchDescriptor<VerdictRecord>()).map {
             Archive.Verdict(photoKey: $0.photoKey, isGood: $0.isGood, isCleared: $0.isCleared, timestamp: $0.timestamp)
@@ -185,7 +191,12 @@ nonisolated enum JudgmentArchive {
         for choice in archive.choices {
             let key = identity(choice.winnerKey, choice.loserKey, choice.timestamp)
             guard existingChoices.insert(key).inserted else { summary.skipped += 1; continue }
-            context.insert(ChoiceRecord(winnerKey: choice.winnerKey, loserKey: choice.loserKey, timestamp: choice.timestamp))
+            context.insert(ChoiceRecord(
+                winnerKey: choice.winnerKey,
+                loserKey: choice.loserKey,
+                timestamp: choice.timestamp,
+                isVoided: choice.isVoided ?? false
+            ))
             summary.choices += 1
         }
         for verdict in archive.verdicts {

@@ -348,8 +348,14 @@ actor PreferenceRanker {
     /// can also use them for training and the applicable-count check.
     @discardableResult
     private func loadJudgedPairsAndCount() throws -> [ChoiceRecord] {
+        // A voided choice (FR-5.12) is excluded here, not just from training:
+        // it must also drop out of `judgedPairs` so the pair it named becomes
+        // askable again, exactly as if it had never been judged.
         let choices = try modelContext.fetch(
-            FetchDescriptor<ChoiceRecord>(sortBy: [SortDescriptor(\.timestamp)])
+            FetchDescriptor<ChoiceRecord>(
+                predicate: #Predicate { !$0.isVoided },
+                sortBy: [SortDescriptor(\.timestamp)]
+            )
         )
         judgedPairs = Set(choices.map { Self.pairKey($0.winnerKey, $0.loserKey) })
         choiceCount = choices.count
@@ -692,6 +698,39 @@ actor PreferenceRanker {
 
         recomputeScores()
         scheduleCacheFlush()
+    }
+
+    /// FR-5.12: reverses the single most recent `record()` call for exactly
+    /// this pair — the Duel tab's "Undo" button, offered right after a choice
+    /// and nowhere else, since a raw pairwise choice has no persistent visible
+    /// mark anywhere else in the app for a later toggle to correct (unlike
+    /// "Not Wallpaper Material"/"Ignore This Photo", which stay visible in the
+    /// Library tab and are already correctable there per FR-4.6).
+    ///
+    /// Voids the matching `ChoiceRecord` in place (see its doc comment) rather
+    /// than deleting it — an append-only ledger, like every other judgment
+    /// here — then forces the same full-replay rebuild `clearVerdicts` already
+    /// takes: SGD has no inverse, so un-applying the step this choice took is
+    /// only possible by leaving it out of a fresh replay. Finds the most
+    /// recent non-voided match for the pair (rather than requiring the caller
+    /// to carry the exact record around) so `DuelModel` only needs the two
+    /// identifiers it already has.
+    func undoLastChoice(winnerID: String, loserID: String) throws {
+        guard let winnerKey = indexByID[winnerID].map({ entries[$0].key }),
+              let loserKey = indexByID[loserID].map({ entries[$0].key }) else { return }
+
+        let descriptor = FetchDescriptor<ChoiceRecord>(
+            predicate: #Predicate { $0.winnerKey == winnerKey && $0.loserKey == loserKey && !$0.isVoided },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+        )
+        guard let mostRecent = try modelContext.fetch(descriptor).first else { return }
+        mostRecent.isVoided = true
+        try modelContext.save()
+
+        isPrepared = false
+        try prepare()
+
+        Task { @MainActor in RankingClock.shared.bump() }
     }
 
     // MARK: Model

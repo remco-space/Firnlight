@@ -12,6 +12,18 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Added
+
+- The Duel tab now has an "Undo" command, reachable both as an on-screen
+  button (disabled, not hidden, when there is nothing to take back) and as
+  the Mac's Edit-menu ⌘Z: it reverses the single most recent duel choice or
+  "Both Are Great"/"Both Are Bad" verdict, restoring the ranking to what it
+  would have been had that judgment never been given, and re-serves the same
+  pair (FR-5.12). "Not Wallpaper Material" and "Ignore This Photo" already
+  satisfied FR-5.12 a different way — they stay visible as a toggle in the
+  Library tab for as long as they hold, and clicking again there already
+  reverses them (FR-4.6).
+
 ## [0.19.4] - 2026-08-14
 
 ### Added

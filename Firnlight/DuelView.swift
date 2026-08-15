@@ -23,6 +23,33 @@ final class DuelModel {
     private(set) var isRecording = false
     private(set) var lastError: String?
 
+    /// FR-5.12: whatever the user just told the app — a duel choice, "Both
+    /// Are Great", "Both Are Bad" — can be taken back "at latest in the
+    /// moment after giving it". "Not Wallpaper Material" and "Ignore This
+    /// Photo" already satisfy that requirement a different way: they stay
+    /// visible as a toggle in the Library tab for as long as they hold, so
+    /// clearing them there (FR-4.6/4.7/4.8) is the correction path FR-5.12
+    /// asks for. A raw duel choice or a "Both Are Great" verdict has no such
+    /// persistent, visible mark anywhere else in the app, so the floor FR-5.12
+    /// sets — correctable in the moment right after — is answered here
+    /// instead: `canUndo` is true only for the single most recent action, and
+    /// goes false the instant any further action (another choice, a verdict,
+    /// a skip, an ignore) moves past it. Never persisted across launches, for
+    /// the same reason the in-progress pair above is UI-restoration state, not
+    /// durable data — the durable correction path for a *lasting* judgment
+    /// stays FR-4.6's toggle.
+    private(set) var canUndo = false
+    private enum PendingUndo {
+        case choice(winnerID: String, loserID: String)
+        case verdict(ids: [String])
+    }
+    private var pendingUndo: PendingUndo?
+    /// The pair that was on screen when the pending action was taken, so
+    /// undoing puts the user back exactly where they were — judging it again
+    /// is still valid (FR-5.10), and it is the most natural place to land
+    /// after "taking back" a choice about precisely these two photos.
+    private var pendingUndoPair: PreferenceRanker.DuelPair?
+
     private var ranker: PreferenceRanker?
 
     /// Set right before a bump this model itself causes (a verdict), so the
@@ -111,7 +138,7 @@ final class DuelModel {
     }
 
     func choose(winner: Candidate, loser: Candidate) {
-        guard !isRecording, let ranker else { return }
+        guard !isRecording, let ranker, let shownPair = pair else { return }
         isRecording = true
 
         Task {
@@ -124,8 +151,10 @@ final class DuelModel {
                 // grid/export reload here on every single choice (FR-8.2).
                 try await ranker.record(winnerID: winner.localIdentifier, loserID: loser.localIdentifier)
                 choiceCount = await ranker.choiceCount
+                setPendingUndo(.choice(winnerID: winner.localIdentifier, loserID: loser.localIdentifier), shownPair: shownPair)
             } catch {
                 lastError = error.localizedDescription
+                clearPendingUndo()
             }
             setPair(await ranker.nextPair())
             isRecording = false
@@ -134,6 +163,10 @@ final class DuelModel {
 
     func skip() {
         guard !isRecording, let ranker else { return }
+        // Skip records nothing (FR-5.7), but it does move past whatever
+        // preceded it — FR-5.12's window is "the moment after", and this is
+        // the next moment.
+        clearPendingUndo()
         Task { setPair(await ranker.nextPair()) }
     }
 
@@ -142,20 +175,75 @@ final class DuelModel {
     func judgeBoth(isGood: Bool) {
         guard !isRecording, let ranker, let pair else { return }
         isRecording = true
+        let shownPair = pair
         Task {
             do {
                 try await ranker.recordVerdicts(
-                    [pair.first.localIdentifier, pair.second.localIdentifier],
+                    [shownPair.first.localIdentifier, shownPair.second.localIdentifier],
                     isGood: isGood
                 )
                 suppressNextReload = true // verdicts don't change the pool
                 RankingClock.shared.bump() // suggestion recalibrates
+                setPendingUndo(
+                    .verdict(ids: [shownPair.first.localIdentifier, shownPair.second.localIdentifier]),
+                    shownPair: shownPair
+                )
             } catch {
                 lastError = error.localizedDescription
+                clearPendingUndo()
             }
             setPair(await ranker.nextPair())
             isRecording = false
         }
+    }
+
+    /// FR-5.12: undoes exactly the most recent choice or "Both Are
+    /// Great"/"Both Are Bad" verdict, restoring the ranking to what it would
+    /// have been had that judgment never been given, and re-serves the same
+    /// pair the action was taken on. A no-op once nothing is pending —
+    /// `canUndo` already governs whether the command is offered at all
+    /// (FR-8.13: a disabled control, not a missing one, so its existence is
+    /// still discoverable).
+    func undo() {
+        guard !isRecording, let ranker, let pendingUndo, let restorePair = pendingUndoPair else { return }
+        isRecording = true
+        Task {
+            do {
+                switch pendingUndo {
+                case .choice(let winnerID, let loserID):
+                    try await ranker.undoLastChoice(winnerID: winnerID, loserID: loserID)
+                    choiceCount = await ranker.choiceCount
+                case .verdict(let ids):
+                    try await ranker.clearVerdicts(ids)
+                }
+                clearPendingUndo()
+                suppressNextReload = true
+                // Only restore the exact pair if both photos are still live
+                // candidates (e.g. neither was ignored in the meantime);
+                // otherwise fall back to a fresh pair rather than serving a
+                // stale one (same guard `reload()` already applies).
+                if await ranker.contains(restorePair) {
+                    setPair(restorePair)
+                } else {
+                    setPair(await ranker.nextPair())
+                }
+            } catch {
+                lastError = error.localizedDescription
+            }
+            isRecording = false
+        }
+    }
+
+    private func setPendingUndo(_ action: PendingUndo, shownPair: PreferenceRanker.DuelPair) {
+        pendingUndo = action
+        pendingUndoPair = shownPair
+        canUndo = true
+    }
+
+    private func clearPendingUndo() {
+        pendingUndo = nil
+        pendingUndoPair = nil
+        canUndo = false
     }
 
     /// Looks up the persisted pair from last launch, if any, and hands back a
@@ -251,6 +339,12 @@ struct DuelView: View {
             // flush boundaries now, not fired per choice.
             await model.reload(container: modelContext.container)
         }
+        // FR-5.12/FR-8.3: published unconditionally, like every other command
+        // target here, even though only the macOS Edit menu reads it back
+        // (`AppCommands` itself is the thing gated to macOS) — only while
+        // this tab is actually mounted, so a stale model can't let ⌘Z from
+        // another tab silently act on a Duel tab the user isn't looking at.
+        .focusedSceneValue(\.duelUndoTarget, model)
     }
 
     /// FR-5.1: both photos fully visible at once, however small the screen.
@@ -363,6 +457,20 @@ struct DuelView: View {
             .disabled(model.isRecording)
         Button("Skip") { model.skip() }
             .disabled(model.isRecording)
+        // FR-5.12: always present rather than appearing/disappearing with
+        // `canUndo`, the same "always in the layout" idiom the spinner below
+        // uses — an item that popped in and out here would drag the other
+        // three buttons sideways under a pointer about to click one of them
+        // again (FR-8.7). Disabled, not hidden, when nothing is pending: a
+        // greyed command still announces that undoing is something this
+        // screen can do (FR-8.13), where a missing one wouldn't.
+        Button("Undo") { model.undo() }
+            .disabled(model.isRecording || !model.canUndo)
+            .accessibilityHint(
+                model.canUndo
+                    ? "Takes back your most recent choice or verdict."
+                    : "Nothing to take back yet."
+            )
     }
 
     @ViewBuilder

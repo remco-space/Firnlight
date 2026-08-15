@@ -139,6 +139,23 @@ extension FocusedValues {
     }
 }
 
+// MARK: - Duel commands (undo, FR-5.12)
+
+private struct DuelUndoTargetKey: FocusedValueKey {
+    typealias Value = DuelModel
+}
+
+extension FocusedValues {
+    /// Published by `DuelView` while it's the visible tab, so the Edit menu's
+    /// Undo item can reach the same `DuelModel.undo()` the on-screen "Undo"
+    /// button calls — one source of truth, read from two places, the same
+    /// pattern every other command target here follows.
+    var duelUndoTarget: DuelModel? {
+        get { self[DuelUndoTargetKey.self] }
+        set { self[DuelUndoTargetKey.self] = newValue }
+    }
+}
+
 // MARK: - Export commands (album sync)
 
 /// What "Sync Album" needs: the export model to trigger the sync and read
@@ -171,8 +188,22 @@ struct AppCommands: Commands {
     @FocusedValue(\.libraryCommandTarget) private var libraryCommandTarget
     @FocusedValue(\.libraryGridModel) private var gridModel
     @FocusedValue(\.exportCommandTarget) private var exportCommandTarget
+    @FocusedValue(\.duelUndoTarget) private var duelUndoTarget
 
     var body: some Commands {
+        // FR-5.12: replaces the system's own Undo/Redo pair rather than
+        // adding a third — this app has exactly one thing ⌘Z could mean (the
+        // Duel tab's most recent choice or verdict) and no notion of Redo,
+        // so a system Undo item that did nothing everywhere else would be
+        // exactly the unreachable-by-name command FR-8.3 rules out.
+        CommandGroup(replacing: .undoRedo) {
+            Button("Undo") {
+                duelUndoTarget?.undo()
+            }
+            .keyboardShortcut("z", modifiers: [.command])
+            .disabled(duelUndoTarget?.canUndo != true)
+        }
+
         CommandMenu("Photo") {
             Button("Open in Photos") {
                 guard let focusedPhoto else { return }
