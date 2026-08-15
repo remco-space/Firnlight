@@ -258,6 +258,14 @@ The app has three tabs matching the three stages of the journey:
   bounds how fast it can learn, so it looks as deeply as the device allows
   (FR-3.8). *(Why: a curator the user must train for a thousand clicks before it
   is useful is one they abandon at fifty.)*
+- **FR-5.12** No judgment is a one-way door: whatever the user tells the app,
+  they can take back or change — at latest in the moment after giving it, and
+  where the judgment stays visible, for as long as it does — with the outcome
+  as if the corrected judgment had always been the one given (FR-5.2).
+  Correction is always reachable as a named command (FR-8.3, FR-8.4), never
+  only a gesture. *(Why: judging is rapid by design (FR-5.11), and speed
+  guarantees slips; a permanent record (FR-5.3) is only trustworthy if the
+  moment of recording can survive a slipped finger.)*
 
 ## 6. The wallpaper album (Export tab)
 
@@ -458,6 +466,15 @@ The app has three tabs matching the three stages of the journey:
 - **FR-8.12** No failure is silent. The app never claims a success it did not
   achieve, and never shows lost work as an empty state. *(Why: an empty grid
   otherwise means both "nothing yet" and "your work is gone".)*
+- **FR-8.13** The app is learned from itself: what each control will do — and
+  how it differs in consequence from its neighbours (FR-4.7 vs FR-4.8 above
+  all) — is discoverable from the interface before the act, on every platform,
+  in the forms FR-4.13 already governs for icons; and every state the app can
+  be in says on-screen what it means and what the user can do about it. No
+  manual, release note, or prior acquaintance is ever required. *(Why: an app
+  distributed as a download has no salesperson and no training; the screen is
+  the only teacher the user ever meets, and a feature the screen cannot teach
+  may as well not exist.)*
 
 ## 9. Across the user's devices
 
