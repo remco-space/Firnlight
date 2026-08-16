@@ -34,6 +34,18 @@ heading when that version is released (FR-10.3).
   is shown, and starting a drag now abandons a half-typed count rather than
   holding the field at it.
 
+- Undoing a duel choice (FR-5.12) now actually reaches another device through
+  the judgment archive (FR-7.4) — today's only working route for FR-9.1's "a
+  judgment made on one device counts on all of them." A duel choice's undo is
+  recorded by marking the same row voided in place rather than by appending a
+  new one, so an archive exported after an undo carried the same identity
+  (winner, loser, timestamp) as the copy a device may have already imported
+  before the undo — and a plain duplicate check silently dropped the
+  correction instead of applying it. Restoring an archive now updates an
+  already-present choice in place when the incoming copy says voided and the
+  local one doesn't, so a correction that arrives after the judgment it
+  corrects still wins, as FR-5.12 now says explicitly it must.
+
 ## [0.19.4] - 2026-08-14
 
 ### Added

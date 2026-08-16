@@ -33,6 +33,24 @@ import os
 /// row's own values — the same test `JudgmentStore`'s legacy migration uses,
 /// and for the same reason: a replayed duel choice is not a harmless duplicate
 /// but a second SGD step the user never made.
+///
+/// **A correction still updates a row already here.** `VerdictRecord.isCleared`
+/// and `IgnoreRecord.isIgnored` are append-only — a correction is a *new* row
+/// with a later timestamp, so it always has fresh identity and is never
+/// mistaken for a duplicate. `ChoiceRecord.isVoided` (FR-5.12) is the one
+/// exception: undoing a choice marks the *same* row in place rather than
+/// appending one (see `ChoiceRecord`'s doc comment for why), so its identity
+/// — winner, loser, timestamp — never changes. Without special handling, an
+/// archive exported after an undo would look like a plain duplicate of a
+/// choice this device already imported before the undo, and the correction
+/// would silently never arrive: exactly what FR-5.12 forbids now that it says
+/// a correction "travels wherever, and by whatever route, the judgment it
+/// corrects travels (FR-9.1) — and a correction that arrives after the
+/// judgment it corrects still wins." So a matching identity is not simply
+/// skipped: if the incoming row is voided and the local one isn't, the local
+/// row is corrected in place. Voiding a choice has no undo of its own
+/// (`DuelModel` never re-offers Undo for the same action twice), so this is a
+/// safe one-way merge — never the reverse.
 nonisolated enum JudgmentArchive {
     private static let log = Logger(subsystem: "space.remco.Firnlight", category: "JudgmentArchive")
 
@@ -109,12 +127,20 @@ nonisolated enum JudgmentArchive {
         var verdicts = 0
         var ignores = 0
         var skipped = 0
+        /// How many already-present duel choices this restore corrected —
+        /// i.e. the archive said voided (FR-5.12) where this device's copy
+        /// didn't yet. Counted apart from `choices`, which is rows newly
+        /// added: a correction adds no row, it updates one already here. Not
+        /// folded into `skipped` either — a corrected row did change
+        /// something, so reporting it as merely skipped would itself be the
+        /// silent-failure FR-8.12 forbids.
+        var corrections = 0
         /// Whether the archive's album-size standard (FR-6.12) was adopted —
         /// only when this device had never set one of its own; see the merge
         /// rule in `restore`.
         var standardAdopted = false
 
-        var isEmpty: Bool { choices == 0 && verdicts == 0 && ignores == 0 && !standardAdopted }
+        var isEmpty: Bool { choices == 0 && verdicts == 0 && ignores == 0 && corrections == 0 && !standardAdopted }
     }
 
     enum ArchiveError: LocalizedError {
@@ -180,8 +206,13 @@ nonisolated enum JudgmentArchive {
         }
 
         let context = ModelContext(container)
-        var existingChoices = Set(try context.fetch(FetchDescriptor<ChoiceRecord>())
-            .map { identity($0.winnerKey, $0.loserKey, $0.timestamp) })
+        // Keyed by identity, not just collected into a Set: a matching
+        // incoming row may still need to correct this one in place (see the
+        // "A correction still updates a row already here" note above).
+        var existingChoicesByKey: [String: ChoiceRecord] = [:]
+        for record in try context.fetch(FetchDescriptor<ChoiceRecord>()) {
+            existingChoicesByKey[identity(record.winnerKey, record.loserKey, record.timestamp)] = record
+        }
         var existingVerdicts = Set(try context.fetch(FetchDescriptor<VerdictRecord>())
             .map { identity($0.photoKey, "\($0.isGood)|\($0.isCleared)", $0.timestamp) })
         var existingIgnores = Set(try context.fetch(FetchDescriptor<IgnoreRecord>())
@@ -190,13 +221,28 @@ nonisolated enum JudgmentArchive {
         var summary = RestoreSummary()
         for choice in archive.choices {
             let key = identity(choice.winnerKey, choice.loserKey, choice.timestamp)
-            guard existingChoices.insert(key).inserted else { summary.skipped += 1; continue }
-            context.insert(ChoiceRecord(
+            if let existing = existingChoicesByKey[key] {
+                // Same choice already here. FR-5.12/FR-9.1: a correction that
+                // arrives after the judgment it corrects still wins — once
+                // either side has voided it, it stays voided (voiding has no
+                // undo, so this can never overwrite a live row with a stale
+                // one).
+                if (choice.isVoided ?? false) && !existing.isVoided {
+                    existing.isVoided = true
+                    summary.corrections += 1
+                } else {
+                    summary.skipped += 1
+                }
+                continue
+            }
+            let record = ChoiceRecord(
                 winnerKey: choice.winnerKey,
                 loserKey: choice.loserKey,
                 timestamp: choice.timestamp,
                 isVoided: choice.isVoided ?? false
-            ))
+            )
+            context.insert(record)
+            existingChoicesByKey[key] = record
             summary.choices += 1
         }
         for verdict in archive.verdicts {
@@ -239,7 +285,7 @@ nonisolated enum JudgmentArchive {
         }
 
         try context.save()
-        log.info("Restored \(summary.choices) choices, \(summary.verdicts) verdicts, \(summary.ignores) ignores (\(summary.skipped) already here), standard adopted: \(summary.standardAdopted)")
+        log.info("Restored \(summary.choices) choices, \(summary.verdicts) verdicts, \(summary.ignores) ignores, \(summary.corrections) corrections applied (\(summary.skipped) already here), standard adopted: \(summary.standardAdopted)")
         return summary
     }
 

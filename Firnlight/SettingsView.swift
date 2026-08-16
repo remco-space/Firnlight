@@ -204,6 +204,7 @@ struct SettingsView: View {
                 judgmentStatus = summary.isEmpty
                     ? "Nothing new — every judgment in that file was already here."
                     : "Restored \(summary.choices) choices, \(summary.verdicts) verdicts and \(summary.ignores) ignored photos"
+                        + (summary.corrections > 0 ? ", applied \(summary.corrections) correction\(summary.corrections == 1 ? "" : "s") to choices already here" : "")
                         + (summary.standardAdopted ? ", and adopted its album-size standard." : ".")
                 // Restored judgments are judgments: the ranking, the grid, the
                 // duel pool and the album suggestion all rest on them (FR-4.5).
@@ -225,8 +226,11 @@ struct SettingsView: View {
                 // `prepare()` to retrain against — `RankingClock.bump()` below
                 // still fires unconditionally, which is what
                 // `ExportModel.refreshSuggestion` needs to pick the standard
-                // up (see its `reloadStrictnessIfChanged`).
-                if summary.choices + summary.verdicts + summary.ignores > 0 {
+                // up (see its `reloadStrictnessIfChanged`). `summary.corrections`
+                // counts too: a choice voided in place by this restore
+                // (FR-5.12/FR-9.1) changed what the ranker replays exactly as
+                // a newly inserted row would, even though it added none.
+                if summary.choices + summary.verdicts + summary.ignores + summary.corrections > 0 {
                     try await PreferenceRanker(modelContainer: modelContext.container).prepare()
                 }
                 RankingClock.shared.bump()
