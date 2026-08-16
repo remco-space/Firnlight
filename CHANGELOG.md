@@ -113,6 +113,25 @@ heading when that version is released (FR-10.3).
   pair actually appears — an alert over a working Duel tab never again shows
   a problem that's already gone (FR-8.13).
 
+- A quick double-click on that alert's "OK" — ordinary behavior, not an edge
+  case — could still land on the button before the alert had a chance to
+  redraw with a second queued message, discarding it unseen: two clicks
+  registered as two dismissals even though the user only ever saw one alert.
+  A dismissal in flight now absorbs a second one that arrives before it
+  finishes, rather than treating it as a second, distinct alert being
+  dismissed (FR-8.12).
+
+- A choice, verdict, or Undo that failed because its photo had just dropped
+  out of the pool could have that one-off failure filed as the *reason there
+  is currently nothing to compare* — the same event that failed the action
+  could also empty the pool, so asking "is a pair on screen right now" at
+  that instant picked the wrong report. That message stayed pinned as the
+  screen's standing explanation until something unrelated came along to
+  clear it, in place of "Nothing to Compare" once the pool actually settled.
+  A duel-action failure now always reports as what it is — a one-off,
+  dismissible event — never as a persistent explanation for an empty screen
+  (FR-8.12, FR-8.13).
+
 ## [0.19.4] - 2026-08-14
 
 ### Added

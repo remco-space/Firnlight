@@ -38,31 +38,63 @@ final class DuelModel {
     private(set) var stateError: String?
 
     /// FR-8.12: a queue, not a single slot, for a *transient* action
-    /// failure (a choice, verdict, Undo, or a pool refresh, all of which
-    /// only ever run once a pair already exists — see `reportError`). A
+    /// failure (a choice, verdict, Undo, or a ranker hiccup while a pair is
+    /// already showing — see `reportActionFailure`/`reportRankerFailure`). A
     /// single `String?` here used to let a second failure (e.g. `reload()`'s
     /// own error landing while a duel-action failure's alert was still up)
     /// silently overwrite the first — one of the two failures was never
-    /// shown, which is exactly the silence the requirement forbids.
-    /// `reportError` appends; `dismissError()` pops the front, and the
-    /// view's `.alert` re-presents with whatever's next as long as the queue
-    /// isn't empty.
+    /// shown, which is exactly the silence the requirement forbids. Both
+    /// `reportActionFailure` and `reportRankerFailure` append here (never
+    /// `stateError`, which they may choose instead — see each); `dismissError()`
+    /// pops the front, and the view's `.alert` re-presents with whatever's
+    /// next as long as the queue isn't empty.
     private var errors: [String] = []
     /// What the alert shows, read fresh on every SwiftUI evaluation.
     var alertError: String? { errors.first }
+    /// Guards `dismissError()` against being run twice for the same
+    /// on-screen alert — see its doc comment for why a plain "queue isn't
+    /// empty" check isn't enough on its own.
+    private var isDismissingError = false
 
-    /// FR-8.12/FR-8.13: routes a caught error to whichever report actually
-    /// fits the screen at the moment it happened — the persistent state
-    /// description while there's no pair to show anything over, or the
-    /// transient, dismissible queue while there is. The same `pair == nil`
-    /// test the "no pair" branch and the alert's own gate already use, so
-    /// this can never disagree with which one the view is about to show.
-    private func reportError(_ message: String) {
+    /// FR-8.12/FR-8.13: routes a `start()`/`reload()` failure — the
+    /// ranker's own housekeeping, run on a timer/clock bump rather than in
+    /// direct response to a specific pair the user just acted on — to
+    /// whichever report actually fits the screen at the moment it happened:
+    /// the persistent state description while there's no pair to show
+    /// anything over, or the transient, dismissible queue while there is.
+    /// The same `pair == nil` test the "no pair" branch and the alert's own
+    /// gate already use, so this can never disagree with which one the view
+    /// is about to show. Unlike `reportActionFailure` below, `start`/`reload`
+    /// have no pair of their own that failed — "is one currently on screen"
+    /// really is the right question to ask about *them* specifically.
+    private func reportRankerFailure(_ message: String) {
         if pair == nil {
             stateError = message
         } else {
             errors.append(message)
         }
+    }
+
+    /// FR-8.12/FR-8.13: routes a `choose`/`judgeBoth`/`undo` failure to the
+    /// transient alert queue — unconditionally, never to `stateError`, and
+    /// never by asking what `pair` currently is. All three only ever run in
+    /// response to a specific pair that WAS on screen the moment the user
+    /// pressed something (each is gated on `let shownPair = pair` or
+    /// equivalent before its `Task` starts), so by construction their
+    /// failure is always a transient report about a pair just acted on —
+    /// never a statement about why the screen currently has none.
+    ///
+    /// That distinction matters because `pair` can already be nil by the
+    /// time the catch block runs: the very race that fails the action — a
+    /// concurrent pool refresh dropping the photo the choice/verdict/undo
+    /// concerned — can also be the thing that empties the pool, so an
+    /// at-that-instant `pair == nil` test (what `reportRankerFailure` uses)
+    /// would misfile a one-off "that photo is no longer a candidate" message
+    /// as the *persistent* reason there's nothing to compare — shown
+    /// indefinitely in place of the true "Nothing to Compare" empty state,
+    /// until something unrelated happens to clear it.
+    private func reportActionFailure(_ message: String) {
+        errors.append(message)
     }
 
     /// FR-5.12: whatever the user just told the app — a duel choice, "Both
@@ -157,7 +189,7 @@ final class DuelModel {
                 setPair(await ranker.nextPair())
             }
         } catch {
-            reportError(error.localizedDescription)
+            reportRankerFailure(error.localizedDescription)
         }
     }
 
@@ -210,7 +242,7 @@ final class DuelModel {
                 clearPendingUndo()
             }
         } catch {
-            reportError(error.localizedDescription)
+            reportRankerFailure(error.localizedDescription)
         }
     }
 
@@ -230,7 +262,7 @@ final class DuelModel {
                 choiceCount = await ranker.choiceCount
                 setPendingUndo(.choice(receipt), shownPair: shownPair)
             } catch {
-                reportError(error.localizedDescription)
+                reportActionFailure(error.localizedDescription)
                 clearPendingUndo()
             }
             setPair(await ranker.nextPair())
@@ -266,7 +298,7 @@ final class DuelModel {
                     shownPair: shownPair
                 )
             } catch {
-                reportError(error.localizedDescription)
+                reportActionFailure(error.localizedDescription)
                 clearPendingUndo()
             }
             setPair(await ranker.nextPair())
@@ -305,7 +337,7 @@ final class DuelModel {
                     setPair(await ranker.nextPair())
                 }
             } catch {
-                reportError(error.localizedDescription)
+                reportActionFailure(error.localizedDescription)
                 // FR-8.12: a failed undo took nothing back, and the offer it
                 // answered can't be retried — the judgment it named either
                 // never existed (`RankerError.candidateNotLive` at record
@@ -338,17 +370,33 @@ final class DuelModel {
     /// The pop itself is deferred a runloop turn rather than done inline:
     /// mutating `errors` synchronously here, in the very call SwiftUI makes
     /// to tear the alert down, risks handing its presentation state machine
-    /// a false→true flip for `isPresented` within one update — alerts are
-    /// documented by community reports (not verified interactively in this
-    /// environment; see the commit message) to sometimes fail to re-present
-    /// without a genuine dismissed frame in between. Scheduling the pop for
-    /// the next turn lets the dismissal complete first.
+    /// a false→true flip for `isPresented` within one update, which alerts
+    /// are documented by community reports to sometimes fail to re-present
+    /// without a genuine dismissed frame in between. Live-verified against
+    /// a real Photos library: with two failures queued, one OK dismisses the
+    /// first and the second correctly re-presents, then drains.
+    ///
+    /// `isDismissingError` closes a second, faster race the deferral alone
+    /// doesn't: a quick double dismissal (most concretely a double-click on
+    /// "OK", ordinary user behavior, not an edge case) can fire this method
+    /// twice before the first call's deferred `Task` has run — at that
+    /// point `errors` still isn't empty, so an unguarded second call would
+    /// schedule a second pop, and the two together would drain **two**
+    /// messages for what the user only ever saw and dismissed as **one**
+    /// alert (the second alert never had a chance to render before the
+    /// second click landed on the same "OK" button). The guard treats any
+    /// call arriving while a pop is already pending as redundant — the same
+    /// dismissal signal restated, not a second alert genuinely dismissed —
+    /// and simply drops it, so a double-click can only ever pop one message,
+    /// matching the one alert the user actually acted on.
     func dismissError() {
-        guard !errors.isEmpty else { return }
+        guard !errors.isEmpty, !isDismissingError else { return }
+        isDismissingError = true
         Task { @MainActor in
-            if !self.errors.isEmpty {
-                self.errors.removeFirst()
+            if !errors.isEmpty {
+                errors.removeFirst()
             }
+            isDismissingError = false
         }
     }
 
@@ -485,9 +533,12 @@ struct DuelView: View {
         // `ContentUnavailableView`) — both already say their piece without
         // an alert stacked on top, and `model.alertError` is a wholly
         // separate queue from `stateError` besides (see `DuelModel`'s
-        // `reportError`): a startup/reload failure caught while there was no
-        // pair to show anything over is never in this queue to begin with,
-        // so it can never resurface here once a pair finally appears.
+        // `reportRankerFailure`/`reportActionFailure`): a `choose`/
+        // `judgeBoth`/`undo` failure always lands here, regardless of what
+        // `pair` happens to be by the time its catch runs, and a `start`/
+        // `reload` failure caught while there was no pair to show anything
+        // over goes to `stateError` instead — never in this queue to begin
+        // with, so it can never resurface here once a pair finally appears.
         //
         // What the alert appears over differs by which action failed:
         // `choose`/`judgeBoth` always call `setPair(await ranker.nextPair())`
