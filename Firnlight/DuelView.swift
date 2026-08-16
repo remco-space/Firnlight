@@ -21,15 +21,49 @@ final class DuelModel {
     private(set) var choiceCount = 0
     private(set) var isPreparing = false
     private(set) var isRecording = false
-    /// FR-8.12: a queue, not a single slot. A single `String?` here used to
-    /// let a second failure (e.g. `reload()`'s own error landing while a
-    /// duel-action failure's alert was still up) silently overwrite the
-    /// first — one of the two failures was never shown, which is exactly
-    /// the silence the requirement forbids. Every catch block below appends;
-    /// `dismissError()` pops the front, and the view's `.alert` re-presents
-    /// with whatever's next as long as the queue isn't empty.
+    /// FR-8.13: the *state* the "no pair to show" branch describes — why
+    /// `start()`/`reload()` couldn't get the ranker to a servable state. A
+    /// single slot, not a queue, and deliberately not the same storage the
+    /// alert below reads: this is a description of the screen's current
+    /// state ("Ranker Error" `ContentUnavailableView`, shown only while
+    /// `pair == nil`), not a transient event to dismiss. It is replaced by
+    /// whatever the next attempt finds true — cleared on a successful
+    /// `prepare()`/`reload()`, and by `setPair` the moment a pair actually
+    /// shows, since a pair on screen makes any earlier "why there's no pair"
+    /// text stale. Without that clearing, an old, already-resolved startup
+    /// error would keep being true forever, including — before this was
+    /// split from the alert's queue below — replaying itself in the alert
+    /// once a pair finally appeared, one dismissal at a time, over a Duel
+    /// tab that had recovered.
+    private(set) var stateError: String?
+
+    /// FR-8.12: a queue, not a single slot, for a *transient* action
+    /// failure (a choice, verdict, Undo, or a pool refresh, all of which
+    /// only ever run once a pair already exists — see `reportError`). A
+    /// single `String?` here used to let a second failure (e.g. `reload()`'s
+    /// own error landing while a duel-action failure's alert was still up)
+    /// silently overwrite the first — one of the two failures was never
+    /// shown, which is exactly the silence the requirement forbids.
+    /// `reportError` appends; `dismissError()` pops the front, and the
+    /// view's `.alert` re-presents with whatever's next as long as the queue
+    /// isn't empty.
     private var errors: [String] = []
-    var lastError: String? { errors.first }
+    /// What the alert shows, read fresh on every SwiftUI evaluation.
+    var alertError: String? { errors.first }
+
+    /// FR-8.12/FR-8.13: routes a caught error to whichever report actually
+    /// fits the screen at the moment it happened — the persistent state
+    /// description while there's no pair to show anything over, or the
+    /// transient, dismissible queue while there is. The same `pair == nil`
+    /// test the "no pair" branch and the alert's own gate already use, so
+    /// this can never disagree with which one the view is about to show.
+    private func reportError(_ message: String) {
+        if pair == nil {
+            stateError = message
+        } else {
+            errors.append(message)
+        }
+    }
 
     /// FR-5.12: whatever the user just told the app — a duel choice, "Both
     /// Are Great", "Both Are Bad" — can be taken back "at latest in the
@@ -104,6 +138,10 @@ final class DuelModel {
         let ranker = PreferenceRanker(modelContainer: container)
         do {
             try await ranker.prepare()
+            // FR-8.13: a clean prepare retires whatever `stateError` an
+            // earlier attempt left behind — it's no longer true the moment
+            // this succeeds, `pair` being nil below or not.
+            stateError = nil
             // Assign only after a clean prepare, so a thrown error leaves ranker
             // nil and a retry actually re-runs instead of no-opping.
             self.ranker = ranker
@@ -119,7 +157,7 @@ final class DuelModel {
                 setPair(await ranker.nextPair())
             }
         } catch {
-            errors.append(error.localizedDescription)
+            reportError(error.localizedDescription)
         }
     }
 
@@ -137,6 +175,11 @@ final class DuelModel {
         }
         do {
             try await ranker.reload()
+            // FR-8.13: same reasoning as `start()` above — a successful
+            // reload retires any earlier `stateError`, whether or not it
+            // finds a pair to serve (a genuine "Nothing to Compare" is not
+            // an error, and must not keep showing old error text either).
+            stateError = nil
             if let pair, await !ranker.contains(pair) {
                 setPair(await ranker.nextPair())
             }
@@ -167,7 +210,7 @@ final class DuelModel {
                 clearPendingUndo()
             }
         } catch {
-            errors.append(error.localizedDescription)
+            reportError(error.localizedDescription)
         }
     }
 
@@ -187,7 +230,7 @@ final class DuelModel {
                 choiceCount = await ranker.choiceCount
                 setPendingUndo(.choice(receipt), shownPair: shownPair)
             } catch {
-                errors.append(error.localizedDescription)
+                reportError(error.localizedDescription)
                 clearPendingUndo()
             }
             setPair(await ranker.nextPair())
@@ -223,7 +266,7 @@ final class DuelModel {
                     shownPair: shownPair
                 )
             } catch {
-                errors.append(error.localizedDescription)
+                reportError(error.localizedDescription)
                 clearPendingUndo()
             }
             setPair(await ranker.nextPair())
@@ -262,7 +305,7 @@ final class DuelModel {
                     setPair(await ranker.nextPair())
                 }
             } catch {
-                errors.append(error.localizedDescription)
+                reportError(error.localizedDescription)
                 // FR-8.12: a failed undo took nothing back, and the offer it
                 // answered can't be retried — the judgment it named either
                 // never existed (`RankerError.candidateNotLive` at record
@@ -275,16 +318,37 @@ final class DuelModel {
         }
     }
 
-    /// FR-8.12: dismisses the error banner currently shown, revealing the
-    /// next queued one (if any) rather than clearing everything at once — a
+    /// FR-8.12: dismisses the alert currently shown, revealing the next
+    /// queued one (if any) rather than clearing everything at once — a
     /// second failure that arrived while the first was still up must still
     /// get its own turn on screen, never silently discarded by the first
     /// one's dismissal. Nothing else pops `errors` — a later successful
     /// action simply leaves the queue as it was until this is called, which
-    /// is fine, since the view only shows a banner while it's non-empty.
+    /// is fine, since the view only shows the alert while it's non-empty.
+    ///
+    /// Called from exactly one place — the alert's own `isPresented`
+    /// binding, whose setter SwiftUI invokes with `false` on every
+    /// dismissal (including a button tap, which also runs that button's own
+    /// action). The "OK" button below deliberately has an empty action and
+    /// leaves the pop to the binding, not the other way around: this used to
+    /// be called from both, so one tap on "OK" ran it twice — the front
+    /// error that was actually shown, and the next one, silently discarded
+    /// unseen (FR-8.12 again, in miniature, inside its own fix).
+    ///
+    /// The pop itself is deferred a runloop turn rather than done inline:
+    /// mutating `errors` synchronously here, in the very call SwiftUI makes
+    /// to tear the alert down, risks handing its presentation state machine
+    /// a false→true flip for `isPresented` within one update — alerts are
+    /// documented by community reports (not verified interactively in this
+    /// environment; see the commit message) to sometimes fail to re-present
+    /// without a genuine dismissed frame in between. Scheduling the pop for
+    /// the next turn lets the dismissal complete first.
     func dismissError() {
-        if !errors.isEmpty {
-            errors.removeFirst()
+        guard !errors.isEmpty else { return }
+        Task { @MainActor in
+            if !self.errors.isEmpty {
+                self.errors.removeFirst()
+            }
         }
     }
 
@@ -336,6 +400,15 @@ final class DuelModel {
     /// why that matters for FR-8.1's resume correctness.
     private func setPair(_ newPair: PreferenceRanker.DuelPair?) {
         pair = newPair
+        // FR-8.13: a pair actually on screen makes any earlier "why there's
+        // no pair" text stale. `start()`/`reload()` already clear
+        // `stateError` on their own success, but every route that serves a
+        // pair passes through this one method, so clearing it here too —
+        // belt and suspenders — means no future call site can reintroduce
+        // the stale-error replay this was written to close.
+        if newPair != nil {
+            stateError = nil
+        }
         let defaults = UserDefaults.standard
         if let newPair {
             let persisted = PersistedPair(first: newPair.first.localIdentifier, second: newPair.second.localIdentifier)
@@ -376,7 +449,7 @@ struct DuelView: View {
             } else if model.isPreparing {
                 ProgressView("Preparing ranker…")
                     .shownWhileWaiting()
-            } else if let error = model.lastError {
+            } else if let error = model.stateError {
                 ContentUnavailableView("Ranker Error", systemImage: "exclamationmark.triangle", description: Text(error))
             } else {
                 ContentUnavailableView(
@@ -408,9 +481,13 @@ struct DuelView: View {
         // end of `choose`/`judgeBoth`/`undo`, after the failing step), so
         // that branch alone never caught this. An alert reports it instead,
         // gated on `pair != nil` so it never fires during the *other*
-        // branches' own reporting (`isPreparing`'s spinner, `lastError`'s
+        // branches' own reporting (`isPreparing`'s spinner, `stateError`'s
         // `ContentUnavailableView`) — both already say their piece without
-        // an alert stacked on top.
+        // an alert stacked on top, and `model.alertError` is a wholly
+        // separate queue from `stateError` besides (see `DuelModel`'s
+        // `reportError`): a startup/reload failure caught while there was no
+        // pair to show anything over is never in this queue to begin with,
+        // so it can never resurface here once a pair finally appears.
         //
         // What the alert appears over differs by which action failed:
         // `choose`/`judgeBoth` always call `setPair(await ranker.nextPair())`
@@ -425,16 +502,20 @@ struct DuelView: View {
         // calls `setPair` — there is nothing valid left to advance to once
         // the correction itself failed — so its alert genuinely does sit
         // over the same pair that was on screen when Undo was pressed.
+        //
+        // The "OK" button's action is deliberately empty — see
+        // `dismissError()`'s doc comment for why calling it from both here
+        // and the binding's setter double-popped the queue.
         .alert(
             "Something Went Wrong",
             isPresented: Binding(
-                get: { model.pair != nil && model.lastError != nil },
+                get: { model.pair != nil && model.alertError != nil },
                 set: { if !$0 { model.dismissError() } }
             )
         ) {
-            Button("OK") { model.dismissError() }
+            Button("OK") {}
         } message: {
-            Text(model.lastError ?? "")
+            Text(model.alertError ?? "")
         }
     }
 

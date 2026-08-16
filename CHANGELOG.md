@@ -101,6 +101,18 @@ heading when that version is released (FR-10.3).
   silently replace it — one of the two was never shown. Failures now queue
   and are shown one at a time (FR-8.12).
 
+- That queue's own dismissal defeated it: tapping "OK" popped it twice — once
+  from the button and once more from the alert's own teardown — so a queued
+  second failure was silently discarded unseen the moment the first was
+  acknowledged. The button no longer double-dismisses (FR-8.12).
+
+- A duel-action failure's alert could replay an old, already-resolved
+  startup error once a pair appeared, one dismissal at a time, because both
+  kinds of failure shared one queue. The two are tracked separately now, and
+  a startup/reload problem is retired the moment its retry succeeds or a
+  pair actually appears — an alert over a working Duel tab never again shows
+  a problem that's already gone (FR-8.13).
+
 ## [0.19.4] - 2026-08-14
 
 ### Added
