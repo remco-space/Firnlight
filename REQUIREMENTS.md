@@ -263,7 +263,10 @@ The app has three tabs matching the three stages of the journey:
   where the judgment stays visible, for as long as it does — with the outcome
   as if the corrected judgment had always been the one given (FR-5.2).
   Correction is always reachable as a named command (FR-8.3, FR-8.4), never
-  only a gesture. *(Why: judging is rapid by design (FR-5.11), and speed
+  only a gesture. A correction is itself a judgment for FR-9's purposes: it
+  travels wherever, and by whatever route, the judgment it corrects travels
+  (FR-9.1) — and a correction that arrives after the judgment it corrects
+  still wins. *(Why: judging is rapid by design (FR-5.11), and speed
   guarantees slips; a permanent record (FR-5.3) is only trustworthy if the
   moment of recording can survive a slipped finger.)*
 
@@ -466,12 +469,17 @@ The app has three tabs matching the three stages of the journey:
   goes — rather than overlaps. *(Why: two labels printed over each other read
   as neither; a layout is only correct if no reachable state breaks it.)*
 - **FR-8.12** No failure is silent. The app never claims a success it did not
-  achieve, and never shows lost work as an empty state. *(Why: an empty grid
-  otherwise means both "nothing yet" and "your work is gone".)*
+  achieve, and never shows lost work as an empty state. A control that offers
+  itself as available does what it offers; one that cannot act right now shows
+  itself unavailable. *(Why: an empty grid otherwise means both "nothing yet"
+  and "your work is gone", and a button that answers a press with nothing is
+  the same lie in miniature.)*
 - **FR-8.13** The app is learned from itself: what each control will do — and
   how it differs in consequence from its neighbours (FR-4.7 vs FR-4.8 above
   all) — is discoverable from the interface before the act, on every platform,
-  in the forms FR-4.13 already governs for icons; and every state the app can
+  in the forms FR-4.13 governs, for every control alike, named or icon-only —
+  a control's name states its act, never its consequence — and by routes that
+  reach pointer, keyboard and touch alike; and every state the app can
   be in says on-screen what it means and what the user can do about it. No
   manual, release note, or prior acquaintance is ever required. *(Why: an app
   distributed as a download has no salesperson and no training; the screen is
