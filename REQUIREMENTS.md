@@ -279,8 +279,10 @@ The app has three tabs matching the three stages of the journey:
   handful of photos to every candidate the library holds. The scale is
   proportional — a nudge changes the count by a fraction of it, not a fixed
   amount — and carries a few labeled marks at round counts so the unusual
-  scale reads at a glance. The exact count is shown beside the slider, always
-  current until the user edits it, and can be edited directly as a number.
+  scale reads at a glance. The album's size is one number; every part of the
+  interface that shows or sets it shows that number as it stands, unless the
+  user is in the middle of naming a new one. The exact count is shown beside
+  the slider and can be typed directly.
   The thumb moves freely, and equally freely on every platform: the marks
   are a scale to read the track by, never stops the thumb is confined to —
   every count is reachable by dragging, with one deliberate exception: the
