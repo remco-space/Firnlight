@@ -139,6 +139,23 @@ extension FocusedValues {
     }
 }
 
+// MARK: - Duel commands (undo, FR-5.12)
+
+private struct DuelUndoTargetKey: FocusedValueKey {
+    typealias Value = DuelModel
+}
+
+extension FocusedValues {
+    /// Published by `DuelView` while it's the visible tab, so the Edit menu's
+    /// Undo item can reach the same `DuelModel.undo()` the on-screen "Undo"
+    /// button calls — one source of truth, read from two places, the same
+    /// pattern every other command target here follows.
+    var duelUndoTarget: DuelModel? {
+        get { self[DuelUndoTargetKey.self] }
+        set { self[DuelUndoTargetKey.self] = newValue }
+    }
+}
+
 // MARK: - Export commands (album sync)
 
 /// What "Sync Album" needs: the export model to trigger the sync and read
@@ -171,8 +188,41 @@ struct AppCommands: Commands {
     @FocusedValue(\.libraryCommandTarget) private var libraryCommandTarget
     @FocusedValue(\.libraryGridModel) private var gridModel
     @FocusedValue(\.exportCommandTarget) private var exportCommandTarget
+    @FocusedValue(\.duelUndoTarget) private var duelUndoTarget
 
     var body: some Commands {
+        // FR-5.12 vs. FR-8.1: ⌘Z means exactly one thing while the Duel tab
+        // is showing — its most recent choice or verdict — and this app has
+        // no notion of Redo, so replacing the system's Undo/Redo pair with a
+        // single custom Undo is right *there*. But an unconditional
+        // `CommandGroup(replacing: .undoRedo)` replaces it application-wide,
+        // for the life of the window, not just while Duel is the visible
+        // tab — so ⌘Z (and the Edit-menu item it drives) stopped reaching a
+        // text field's own platform undo everywhere else in the app, e.g.
+        // Export's album-size count field. That is exactly what FR-8.1
+        // forbids: the HIG's own guidance is "place undo and redo commands
+        // in the Edit menu and support the standard keyboard shortcuts"
+        // (Human Interface Guidelines › Undo and redo › macOS) — for
+        // whatever is being edited, not for one screen claimed on behalf of
+        // the whole app.
+        //
+        // `duelUndoTarget` is published only while `DuelView` is actually
+        // mounted (`TabView` builds only the selected tab — see
+        // `ContentView`), so gating the replacement on it existing means the
+        // system's own Undo/Redo item — and the platform undo manager behind
+        // ⌘Z — is exactly what's in the Edit menu everywhere else, text
+        // fields included. `CommandsBuilder` supports `if` here the same way
+        // `ViewBuilder` does.
+        if duelUndoTarget != nil {
+            CommandGroup(replacing: .undoRedo) {
+                Button("Undo") {
+                    duelUndoTarget?.undo()
+                }
+                .keyboardShortcut("z", modifiers: [.command])
+                .disabled(duelUndoTarget?.canUndo != true)
+            }
+        }
+
         CommandMenu("Photo") {
             Button("Open in Photos") {
                 guard let focusedPhoto else { return }

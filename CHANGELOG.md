@@ -12,6 +12,18 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Added
+
+- The Duel tab now has an "Undo" command, reachable both as an on-screen
+  button (disabled, not hidden, when there is nothing to take back) and as
+  the Mac's Edit-menu ⌘Z: it reverses the single most recent duel choice or
+  "Both Are Great"/"Both Are Bad" verdict, restoring the ranking to what it
+  would have been had that judgment never been given, and re-serves the same
+  pair (FR-5.12). "Not Wallpaper Material" and "Ignore This Photo" already
+  satisfied FR-5.12 a different way — they stay visible as a toggle in the
+  Library tab for as long as they hold, and clicking again there already
+  reverses them (FR-4.6).
+
 ### Fixed
 
 - Dragging the album-size slider no longer leaves the exact count beside it
@@ -21,6 +33,104 @@ heading when that version is released (FR-10.3).
   many photos the album would hold. The size is one number again, wherever it
   is shown, and starting a drag now abandons a half-typed count rather than
   holding the field at it.
+
+- Undoing a duel choice (FR-5.12) now actually reaches another device through
+  the judgment archive (FR-7.4) — today's only working route for FR-9.1's "a
+  judgment made on one device counts on all of them." A duel choice's undo is
+  recorded by marking the same row voided in place rather than by appending a
+  new one, so an archive exported after an undo carried the same identity
+  (winner, loser, timestamp) as the copy a device may have already imported
+  before the undo — and a plain duplicate check silently dropped the
+  correction instead of applying it. Restoring an archive now updates an
+  already-present choice in place when the incoming copy says voided and the
+  local one doesn't, so a correction that arrives after the judgment it
+  corrects still wins, as FR-5.12 now says explicitly it must.
+
+- A failed duel choice, verdict, or Undo press used to leave the screen
+  looking exactly like a success: the pair stayed on screen, the count didn't
+  move, nothing said anything went wrong. It's now reported in an alert over
+  the pair, on every input route (FR-8.12).
+
+- Undo could be offered right after a choice that was silently never
+  recorded — most often because the photo had just stopped being a candidate
+  (ignored elsewhere while the pair was on screen). Pressing it then either
+  did nothing while still reporting success, or, worse, voided a different,
+  legitimate earlier choice for the same pair, because it hunted only by
+  winner/loser rather than by the exact choice just made. Recording a choice
+  now hands back a receipt naming exactly the row it wrote (or throws,
+  honestly, if it wrote nothing), Undo matches that receipt exactly instead
+  of guessing, and refreshing the duel pool now withdraws a pending Undo
+  whose subject has since stopped being a candidate rather than continuing
+  to offer it (FR-5.12, FR-8.12).
+
+- The Mac's Edit-menu Undo/Redo (⌘Z/⇧⌘Z) stopped doing ordinary text-editing
+  undo anywhere in the app — including the album-size count field on the
+  Export tab — from the moment the Duel tab's own Undo command took over the
+  Edit menu's Undo/Redo group application-wide rather than only while the
+  Duel tab was actually showing. The system's own Undo/Redo, and the
+  standard keyboard shortcuts behind it, are back everywhere except the Duel
+  tab, which is the one place ⌘Z is unambiguous (FR-8.1's HIG "place undo
+  and redo commands in the Edit menu and support the standard keyboard
+  shortcuts" — the Undo and redo guidelines' point being *whatever's being
+  edited*, not one screen claimed for the whole app). This was a regression
+  in the Undo command added above and went undisclosed here at the time.
+
+- On iPhone and iPad, the grid's touch photo-actions menu disabled "Not
+  Wallpaper Material" for an ignored photo with no way for touch to learn
+  why — the reason lived only in a `.help()` tooltip, which only a pointer
+  ever sees. The menu row's own visible label now says why it's unavailable,
+  and carries the same explanation as a VoiceOver hint (FR-8.13).
+
+- Undoing "Both Are Great"/"Both Are Bad" could clear only one photo's
+  verdict while claiming to clear both, when the other photo had stopped
+  being a candidate in the meantime — the same silently-partial write the
+  fix above closed for recording a verdict, still open on the clearing
+  path. Clearing a verdict is now all-or-nothing too, so a failed Undo
+  reports failure honestly rather than half-correcting and calling it done
+  (FR-5.12, FR-8.12).
+
+- A pending Undo offer could be silently withdrawn out from under a duel the
+  user had just judged: if a fresh, valid choice or verdict armed a new Undo
+  while a duel-pool refresh was mid-flight checking an older, stale one, the
+  refresh's cleanup — resuming afterward — cleared whatever was pending *by
+  then*, not the stale offer it had actually checked. The refresh now
+  re-confirms nothing changed underneath before withdrawing anything
+  (FR-5.12).
+
+- A second failure landing while an earlier one's alert was still up used to
+  silently replace it — one of the two was never shown. Failures now queue
+  and are shown one at a time (FR-8.12).
+
+- That queue's own dismissal defeated it: tapping "OK" popped it twice — once
+  from the button and once more from the alert's own teardown — so a queued
+  second failure was silently discarded unseen the moment the first was
+  acknowledged. The button no longer double-dismisses (FR-8.12).
+
+- A duel-action failure's alert could replay an old, already-resolved
+  startup error once a pair appeared, one dismissal at a time, because both
+  kinds of failure shared one queue. The two are tracked separately now, and
+  a startup/reload problem is retired the moment its retry succeeds or a
+  pair actually appears — an alert over a working Duel tab never again shows
+  a problem that's already gone (FR-8.13).
+
+- A quick double-click on that alert's "OK" — ordinary behavior, not an edge
+  case — could still land on the button before the alert had a chance to
+  redraw with a second queued message, discarding it unseen: two clicks
+  registered as two dismissals even though the user only ever saw one alert.
+  A dismissal in flight now absorbs a second one that arrives before it
+  finishes, rather than treating it as a second, distinct alert being
+  dismissed (FR-8.12).
+
+- A choice, verdict, or Undo that failed because its photo had just dropped
+  out of the pool could have that one-off failure filed as the *reason there
+  is currently nothing to compare* — the same event that failed the action
+  could also empty the pool, so asking "is a pair on screen right now" at
+  that instant picked the wrong report. That message stayed pinned as the
+  screen's standing explanation until something unrelated came along to
+  clear it, in place of "Nothing to Compare" once the pool actually settled.
+  A duel-action failure now always reports as what it is — a one-off,
+  dismissible event — never as a persistent explanation for an empty screen
+  (FR-8.12, FR-8.13).
 
 ## [0.19.4] - 2026-08-14
 

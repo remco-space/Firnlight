@@ -24,10 +24,26 @@ final class ChoiceRecord {
     @Attribute(originalName: "winnerID") var winnerKey: String = ""
     @Attribute(originalName: "loserID") var loserKey: String = ""
     var timestamp: Date = Date.distantPast
+    /// FR-5.12: the correction path for a duel choice. A choice has no
+    /// separate "cleared" record shape the way `VerdictRecord` does — nothing
+    /// else in the app displays "you chose X over Y" for a later toggle to
+    /// act on, so there is nothing to append a clearing row against. Instead
+    /// the row that would be un-said is marked in place, the same append-only
+    /// philosophy applied to the one row it actually concerns: every reader
+    /// that walks `ChoiceRecord` for training or for the judged-pairs set
+    /// excludes a voided row, so a voided choice behaves as if it had never
+    /// been made (FR-5.2's "outcome as if the corrected judgment had always
+    /// been the one given"). Only ever set moments after the choice, by
+    /// `PreferenceRanker.undoLastChoice` — see its doc comment for why voiding
+    /// forces the same full-replay rebuild `clearVerdicts` already takes.
+    /// Defaulted, like every other attribute here, so the shape stays
+    /// CloudKit-mirrorable.
+    var isVoided: Bool = false
 
-    init(winnerKey: String, loserKey: String, timestamp: Date) {
+    init(winnerKey: String, loserKey: String, timestamp: Date, isVoided: Bool = false) {
         self.winnerKey = winnerKey
         self.loserKey = loserKey
         self.timestamp = timestamp
+        self.isVoided = isVoided
     }
 }
