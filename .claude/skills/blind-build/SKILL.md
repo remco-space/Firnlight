@@ -36,6 +36,10 @@ Before anything else, read the FRs the report touches and decide:
 When in doubt, it's a requirements change. The bug path is the exception and
 must be provable by pointing at the FR the current behavior violates.
 
+**This same test runs again in Phase 4**, on each defect validation finds. A
+finding is not automatically a wording gap; some are ordinary bugs against
+wording that was already right.
+
 ## Roles and models
 
 | Role | Model | Why this model |
@@ -85,11 +89,27 @@ exactly three things:
    `blind-build`), report validation results and any proposed FR amendments
    back to the main session, and never edit code itself.
 
+Give the orchestrator a `name`, so this session can reach it by `SendMessage`
+to start the next round rather than spawning a replacement. Every round it
+survives is a round its implementer survives with it (see Phase 3's mechanics);
+a loop that has to re-spawn both agents each time keeps paying to rediscover
+what the last round already knew.
+
 ## Phase 3 — Blind dispatch to the implementer
 
 The orchestrator dispatches an implementer (Agent tool, `model: sonnet`,
 `isolation: worktree` — one git actor per worktree). The dispatch contains the
 FR reference and the standing ground rules, and **nothing else**.
+
+Mechanics that decide whether Phase 4 can iterate at all: the team roster is
+flat, so an orchestrator that was itself given a `name` cannot name its
+implementer — omit `name` and spawn it as a plain subagent. An anonymous
+subagent is still continuable by ID through `SendMessage`, with its context
+intact, **but only by the agent that spawned it**. So the implementer lives
+exactly as long as its orchestrator does: the orchestrator must stay alive
+across rounds — holding the implementer's ID — or the context is gone and the
+branch is all that survives, and "continue the same implementer" degrades to a
+fresh agent inheriting a worktree.
 
 Discipline: draft the dispatch, then delete every sentence that is not (a) the
 FR reference/commit or (b) a standing ground rule. Cautionary example: an
@@ -126,26 +146,57 @@ fixed and content-free about intent, which is why it is not a hint):
 The orchestrator audits the build against the brief's text alone (fan-out
 allowed; have a separate adversarial subagent vet each round's diff). Then:
 
-- **Defects are never fixed in code and never fed back as hints.** For each
-  defect, draft the FR amendment whose wording would have forced the right
-  outcome, and report it to the main session. The user approves or edits every
-  amendment before it lands.
-- After the amendment lands, **continue the same implementer** against the
-  amended brief by default — same agent, worktree, and branch. An amended
-  brief is not a hint; it is the artifact under test, and a maintainer
-  revisiting old code under new wording is exactly the real-world case. The
-  re-dispatch carries what a first dispatch would and nothing more: the FR
-  pointers, the new commit, the standing ground rules. Never the validation
-  findings, the defect, or why the wording moved — if the new words cannot
-  redirect the implementer on their own, the amendment is not done, and that
-  failure is itself the next finding.
+**The orchestrator never edits code itself** — that rule is absolute, and it is
+the one the rest of this phase is built on. But route each defect before
+deciding what to do with it, exactly as the Route check does:
+
+- **Wording gap** — the brief permits the wrong outcome, or the orchestrator
+  cannot quote a clause the code already violates. Draft the FR amendment whose
+  wording would have forced the right outcome and report it to the main
+  session; the user approves or edits every amendment before it lands. **Never
+  feed such a defect back as a hint**: the wording is what is under test, and a
+  hint destroys the measurement for good.
+- **Implementation defect** — the orchestrator can quote, verbatim, the clause
+  the code already violates. Then blindness has already done its work on that
+  clause: the wording won and only the code lost, and there is nothing to
+  amend. Send it straight back to the same implementer, naming the defect and
+  quoting the clause it breaks. Withholding it measures nothing — it spends a
+  round hoping. *(This is where the FR-5.12 undo race stalled: no amendment was
+  possible and the loop had no other move.)*
+
+Discipline on the nudge, so it stays a bug report and not a design brief: name
+the defect and the clause, never a solution, API, or mechanism — otherwise the
+implementer builds the orchestrator's design instead of the brief's. If you
+cannot quote the violated clause, it is a wording gap; when in doubt, amend.
+Say in the report which findings took which path: amendments are the wording
+under test, nudges are the agent under test, and a user who cannot tell them
+apart cannot tell whether the brief is improving.
+
+One round routinely produces both kinds, and both continue the **same**
+implementer, worktree, and branch. **Iteration is the default; a restart is
+the exception** — the branch keeps its history and the agent keeps its context,
+and nothing is rebuilt that was already right.
+
+- After an amendment lands, continue that implementer against the amended
+  brief. An amended brief is not a hint; it is the artifact under test, and a
+  maintainer revisiting old code under new wording is exactly the real-world
+  case. That part of the re-dispatch carries what a first dispatch would and
+  nothing more: the FR pointers, the new commit, the standing ground rules.
+  Never the validation findings behind the amendment, or why the wording
+  moved — if the new words cannot redirect the implementer on their own, the
+  amendment is not done, and that failure is itself the next finding.
+- A routed implementation defect travels in the same message as a plain bug
+  report, and does not taint it. Quoting a clause that already passed cannot
+  bias a measurement of that clause; there is none left to make.
 - Dispatch a **fresh** implementer (Phase 3 from scratch) only when the
-  previous one is actually contaminated — a hint or defect detail reached it —
-  or its worktree/branch state is unsound, or the user asks for a clean
-  measurement of the new wording against an unprejudiced reader.
-- If the implementer misses a known case, the wording — not the agent — needs
-  another turn. If the same build fails on capability across rounds with sound
-  wording, surface the Opus escape hatch to the user.
+  previous one is actually contaminated — intent, rationale, or a wording-gap
+  defect reached it — or its worktree/branch state is unsound, or the user asks
+  for a clean measurement of the new wording against an unprejudiced reader.
+- If the implementer misses a case the brief does not pin down, the wording —
+  not the agent — needs another turn. If it misses one the brief does pin down,
+  the agent does, and the nudge is how it gets it. If the same build fails on
+  capability across rounds with sound wording, surface the Opus escape hatch to
+  the user.
 
 ## Phase 5 — Landing
 
