@@ -40,7 +40,7 @@ final class DuelModel {
     /// stays FR-4.6's toggle.
     private(set) var canUndo = false
     private enum PendingUndo {
-        case choice(winnerID: String, loserID: String)
+        case choice(PreferenceRanker.ChoiceReceipt)
         case verdict(ids: [String])
     }
     private var pendingUndo: PendingUndo?
@@ -132,6 +132,18 @@ final class DuelModel {
             if let pair, await !ranker.contains(pair) {
                 setPair(await ranker.nextPair())
             }
+            // FR-5.12/FR-8.12: a pending Undo's subject can stop being a live
+            // candidate while it sits on screen — ignored elsewhere, say —
+            // in the gap between the choice/verdict that offered Undo and
+            // this reload noticing. Leaving `canUndo` true would keep
+            // offering a control that can no longer honor what it offers
+            // (the ranker would just throw on the attempt); withdraw the
+            // offer here instead of waiting for a doomed press to surface
+            // the failure. `pendingUndoPair` names exactly the two photos
+            // either a pending choice or a pending verdict concerns.
+            if let pendingUndoPair, await !ranker.contains(pendingUndoPair) {
+                clearPendingUndo()
+            }
         } catch {
             lastError = error.localizedDescription
         }
@@ -149,9 +161,9 @@ final class DuelModel {
                 // a debounce inside the ranker, which bumps RankingClock once it
                 // persists — so we neither write the whole library nor fan out a
                 // grid/export reload here on every single choice (FR-8.2).
-                try await ranker.record(winnerID: winner.localIdentifier, loserID: loser.localIdentifier)
+                let receipt = try await ranker.record(winnerID: winner.localIdentifier, loserID: loser.localIdentifier)
                 choiceCount = await ranker.choiceCount
-                setPendingUndo(.choice(winnerID: winner.localIdentifier, loserID: loser.localIdentifier), shownPair: shownPair)
+                setPendingUndo(.choice(receipt), shownPair: shownPair)
             } catch {
                 lastError = error.localizedDescription
                 clearPendingUndo()
@@ -210,8 +222,8 @@ final class DuelModel {
         Task {
             do {
                 switch pendingUndo {
-                case .choice(let winnerID, let loserID):
-                    try await ranker.undoLastChoice(winnerID: winnerID, loserID: loserID)
+                case .choice(let receipt):
+                    try await ranker.undoLastChoice(receipt)
                     choiceCount = await ranker.choiceCount
                 case .verdict(let ids):
                     try await ranker.clearVerdicts(ids)
@@ -229,9 +241,24 @@ final class DuelModel {
                 }
             } catch {
                 lastError = error.localizedDescription
+                // FR-8.12: a failed undo took nothing back, and the offer it
+                // answered can't be retried — the judgment it named either
+                // never existed (`RankerError.candidateNotLive` at record
+                // time slipped past an earlier check) or is already gone
+                // (`RankerError.nothingToUndo`). Leaving `canUndo` true would
+                // just offer the same doomed retry again.
+                clearPendingUndo()
             }
             isRecording = false
         }
+    }
+
+    /// FR-8.12: dismisses a failed press's error banner. Nothing else clears
+    /// `lastError` — a later successful action simply leaves it stale and
+    /// unread until this is called, which is fine, since the view only shows
+    /// it while it's non-nil and dismissing is exactly what stops that.
+    func dismissError() {
+        lastError = nil
     }
 
     private func setPendingUndo(_ action: PendingUndo, shownPair: PreferenceRanker.DuelPair) {
@@ -345,6 +372,26 @@ struct DuelView: View {
         // this tab is actually mounted, so a stale model can't let ⌘Z from
         // another tab silently act on a Duel tab the user isn't looking at.
         .focusedSceneValue(\.duelUndoTarget, model)
+        // FR-8.12: a failed choice, verdict or Undo used to leave the screen
+        // exactly as it looked before the press — the pair still on screen,
+        // no changed count, no spinner left running — on every input route,
+        // indistinguishable from success. The `else if let error` branch
+        // above only ever runs once `model.pair` is nil, which it never is
+        // while a mid-duel action fails (the pair only changes at the very
+        // end of `choose`/`judgeBoth`/`undo`, after the failing step), so
+        // that branch alone never caught this. An alert reports it without
+        // discarding the pair still on screen underneath.
+        .alert(
+            "Something Went Wrong",
+            isPresented: Binding(
+                get: { model.pair != nil && model.lastError != nil },
+                set: { if !$0 { model.dismissError() } }
+            )
+        ) {
+            Button("OK") { model.dismissError() }
+        } message: {
+            Text(model.lastError ?? "")
+        }
     }
 
     /// FR-5.1: both photos fully visible at once, however small the screen.

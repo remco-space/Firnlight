@@ -446,9 +446,11 @@ struct ThumbnailCell: View {
     /// FR-4.8 takes an ignored photo out of the ranking entirely, and the
     /// ranker only loads entries for `isNature && !isExcluded` records — so a
     /// verdict written against one has nothing to train and nothing to
-    /// calibrate, and `PreferenceRanker.recordVerdicts` would silently drop
-    /// it for want of an entry. A disabled control that explains itself is
-    /// the honest reading of that: the photo is out, un-ignore it first.
+    /// calibrate, and `PreferenceRanker.recordVerdicts` would throw rather
+    /// than write it (FR-8.12: it used to drop such an identifier silently
+    /// via `compactMap` — see its doc comment). A disabled control that
+    /// explains itself is the honest reading of that: the photo is out,
+    /// un-ignore it first.
     private var verdictToggles: some View {
         HStack(spacing: 6) {
             Button {
@@ -562,6 +564,22 @@ struct ThumbnailCell: View {
             .help("Predicted wallpaper appeal, 0–1 — higher scores rank earlier. Learned from your duel choices.")
     }
 
+    /// FR-8.13: same reasoning as `verdictToggleLabel` above, for the
+    /// touch/context-menu row rather than the overlay icon — the visible
+    /// title itself has to carry "unavailable while ignored" because a menu
+    /// popover has no nearby surface for separate explanatory text, and this
+    /// row's `.disabled` state would otherwise reach only pointer users (via
+    /// `.help()`'s hover tooltip, macOS-only).
+    private var notWallpaperMaterialMenuTitle: String {
+        if candidate.isIgnored {
+            "Not Wallpaper Material (Unavailable While Ignored)"
+        } else if candidate.isNotWallpaperMaterial {
+            "Clear Verdict"
+        } else {
+            "Not Wallpaper Material"
+        }
+    }
+
     /// FR-4.6's three actions, plus FR-4.6's toggle wording: the two verdict
     /// entries read as their reverse once the photo already carries that
     /// verdict ("Not Wallpaper Material" ↔ "Clear Verdict", "Ignore This
@@ -574,11 +592,23 @@ struct ThumbnailCell: View {
             CandidateActions.openInPhotos(candidate.localIdentifier, using: openURL)
         }
         Divider()
-        Button(candidate.isNotWallpaperMaterial ? "Clear Verdict" : "Not Wallpaper Material") {
+        Button(notWallpaperMaterialMenuTitle) {
             CandidateActions.setNotWallpaperMaterial(candidate.localIdentifier, !candidate.isNotWallpaperMaterial, in: modelContext)
         }
         // Same reason the overlay toggle disables here — see `verdictToggles`.
         .disabled(candidate.isIgnored)
+        // FR-8.13: a disabled row in a menu has no route to touch other than
+        // itself — macOS gets `.help()`'s hover tooltip on this same item,
+        // but iPhone and iPad never show it, so touch is left with a greyed
+        // row and no way to learn why. `notWallpaperMaterialMenuTitle` says
+        // it in the row's own visible words, which is also the route
+        // VoiceOver reads by default; this hint adds the "what you can do
+        // about it" half FR-8.13 also asks every state to answer.
+        .accessibilityHint(
+            candidate.isIgnored
+                ? "Ignored photos are out of the ranking entirely — un-ignore this photo to judge it."
+                : ""
+        )
         if candidate.isIgnored {
             Button("Un-ignore") {
                 CandidateActions.setIgnored(candidate.localIdentifier, false, in: modelContext)

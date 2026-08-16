@@ -62,6 +62,37 @@ actor PreferenceRanker {
         let second: Candidate
     }
 
+    /// A durable receipt for exactly the `ChoiceRecord` `record(winnerID:loserID:)`
+    /// just wrote — the device-independent keys and the exact timestamp, not
+    /// the local identifiers the pair was shown under. `undoLastChoice`
+    /// matches on this triple rather than "the most recent choice for this
+    /// pair" (see its doc comment for why that distinction matters, FR-5.12).
+    struct ChoiceReceipt: Sendable, Equatable {
+        let winnerKey: String
+        let loserKey: String
+        let timestamp: Date
+    }
+
+    /// FR-8.12: a control that offers Undo has to be honoring a judgment that
+    /// was actually recorded. `record`/`recordVerdicts`/`undoLastChoice` throw
+    /// these rather than silently doing nothing when a photo the caller named
+    /// is no longer a live candidate (e.g. ignored elsewhere while the pair
+    /// was on screen) or when the specific judgment being undone can't be
+    /// found — the two ways a "no-op that reports success" used to happen.
+    enum RankerError: LocalizedError {
+        case candidateNotLive
+        case nothingToUndo
+
+        var errorDescription: String? {
+            switch self {
+            case .candidateNotLive:
+                "That photo is no longer a candidate — it may have been ignored or marked elsewhere. Nothing was recorded."
+            case .nothingToUndo:
+                "There's nothing to undo — that judgment either wasn't recorded or has already been taken back."
+            }
+        }
+    }
+
     /// Deterministic RNG (SplitMix64) so seeding a fresh weights file from the
     /// same favorites + choice history rebuilds the exact same ranking — the
     /// choices must be sufficient to reproduce it (FR-7.1).
@@ -593,8 +624,18 @@ actor PreferenceRanker {
         let now = Date()
         // Callers hand over local identifiers (that is what the UI and
         // PhotoKit deal in); the verdict is filed under the device-independent
-        // key so it counts on every device (FR-9.1).
-        let keys = localIdentifiers.compactMap { indexByID[$0].map { entries[$0].key } }
+        // key so it counts on every device (FR-9.1). All-or-nothing: a
+        // `compactMap` here used to drop whichever identifiers no longer
+        // resolved and silently record a verdict for only the rest — the
+        // "Both Are Great"/"Both Are Bad" buttons say they judge the whole
+        // pair, so a caller (`DuelModel.judgeBoth`) that treats a
+        // non-throwing return as "the pair was judged" and offers Undo on
+        // that basis needs the guarantee to actually be all or nothing
+        // (FR-8.12).
+        let keys = try localIdentifiers.map { id -> String in
+            guard let index = indexByID[id] else { throw RankerError.candidateNotLive }
+            return entries[index].key
+        }
         for key in keys {
             modelContext.insert(VerdictRecord(photoKey: key, isGood: isGood, timestamp: now))
         }
@@ -679,13 +720,27 @@ actor PreferenceRanker {
     /// write is what beachballed the UI (FR-8.2). Instead the new scores live in
     /// `entries` immediately and the store cache is flushed on a debounce (see
     /// `scheduleCacheFlush`). Weights are a small file write, kept synchronous.
-    func record(winnerID: String, loserID: String) throws {
+    ///
+    /// Throws `RankerError.candidateNotLive` — never silently records nothing
+    /// — if either photo has stopped being a live candidate since the pair
+    /// was drawn (e.g. ignored elsewhere while it sat on screen): a caller
+    /// that can't tell a real write from a no-op would otherwise go on to
+    /// offer Undo for a choice that was never taken (FR-8.12). Returns a
+    /// `ChoiceReceipt` naming exactly the row just written, which
+    /// `undoLastChoice` needs to undo this exact choice rather than guessing
+    /// which of possibly several past choices for the same pair is meant
+    /// (FR-5.12).
+    @discardableResult
+    func record(winnerID: String, loserID: String) throws -> ChoiceReceipt {
         // Local identifiers in (from the duel cards), device-independent keys
         // stored (FR-9.1). A photo with no entry can't have been dueled.
         guard let winnerKey = indexByID[winnerID].map({ entries[$0].key }),
-              let loserKey = indexByID[loserID].map({ entries[$0].key }) else { return }
+              let loserKey = indexByID[loserID].map({ entries[$0].key }) else {
+            throw RankerError.candidateNotLive
+        }
 
-        modelContext.insert(ChoiceRecord(winnerKey: winnerKey, loserKey: loserKey, timestamp: Date()))
+        let timestamp = Date()
+        modelContext.insert(ChoiceRecord(winnerKey: winnerKey, loserKey: loserKey, timestamp: timestamp))
         try modelContext.save()
         judgedPairs.insert(Self.pairKey(winnerKey, loserKey))
 
@@ -698,33 +753,47 @@ actor PreferenceRanker {
 
         recomputeScores()
         scheduleCacheFlush()
+        return ChoiceReceipt(winnerKey: winnerKey, loserKey: loserKey, timestamp: timestamp)
     }
 
-    /// FR-5.12: reverses the single most recent `record()` call for exactly
-    /// this pair — the Duel tab's "Undo" button, offered right after a choice
-    /// and nowhere else, since a raw pairwise choice has no persistent visible
+    /// FR-5.12: reverses exactly the `record()` call that produced `receipt`
+    /// — the Duel tab's "Undo" button, offered right after a choice and
+    /// nowhere else, since a raw pairwise choice has no persistent visible
     /// mark anywhere else in the app for a later toggle to correct (unlike
     /// "Not Wallpaper Material"/"Ignore This Photo", which stay visible in the
     /// Library tab and are already correctable there per FR-4.6).
+    ///
+    /// Matches the `ChoiceRecord` by `receipt`'s winner key, loser key AND
+    /// timestamp — not by "the most recent non-voided choice for this pair",
+    /// which this used to do. That was wrong whenever the choice `record()`
+    /// just returned to the caller didn't actually exist: if the photo had
+    /// meanwhile stopped being a live candidate, `record()` threw and wrote
+    /// nothing, but a caller that didn't check would still offer Undo — and
+    /// pressing it, hunting only by pair, would happily void an earlier,
+    /// wholly unrelated legitimate choice for the same two photos, or find
+    /// none and silently do nothing while reporting success either way. Now
+    /// undoing something that was never recorded throws
+    /// `RankerError.nothingToUndo` instead of guessing (FR-8.12).
     ///
     /// Voids the matching `ChoiceRecord` in place (see its doc comment) rather
     /// than deleting it — an append-only ledger, like every other judgment
     /// here — then forces the same full-replay rebuild `clearVerdicts` already
     /// takes: SGD has no inverse, so un-applying the step this choice took is
-    /// only possible by leaving it out of a fresh replay. Finds the most
-    /// recent non-voided match for the pair (rather than requiring the caller
-    /// to carry the exact record around) so `DuelModel` only needs the two
-    /// identifiers it already has.
-    func undoLastChoice(winnerID: String, loserID: String) throws {
-        guard let winnerKey = indexByID[winnerID].map({ entries[$0].key }),
-              let loserKey = indexByID[loserID].map({ entries[$0].key }) else { return }
-
+    /// only possible by leaving it out of a fresh replay.
+    func undoLastChoice(_ receipt: ChoiceReceipt) throws {
+        let winnerKey = receipt.winnerKey
+        let loserKey = receipt.loserKey
+        let timestamp = receipt.timestamp
         let descriptor = FetchDescriptor<ChoiceRecord>(
-            predicate: #Predicate { $0.winnerKey == winnerKey && $0.loserKey == loserKey && !$0.isVoided },
-            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+            predicate: #Predicate {
+                $0.winnerKey == winnerKey && $0.loserKey == loserKey
+                    && $0.timestamp == timestamp && !$0.isVoided
+            }
         )
-        guard let mostRecent = try modelContext.fetch(descriptor).first else { return }
-        mostRecent.isVoided = true
+        guard let match = try modelContext.fetch(descriptor).first else {
+            throw RankerError.nothingToUndo
+        }
+        match.isVoided = true
         try modelContext.save()
 
         isPrepared = false

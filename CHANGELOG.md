@@ -46,6 +46,41 @@ heading when that version is released (FR-10.3).
   local one doesn't, so a correction that arrives after the judgment it
   corrects still wins, as FR-5.12 now says explicitly it must.
 
+- A failed duel choice, verdict, or Undo press used to leave the screen
+  looking exactly like a success: the pair stayed on screen, the count didn't
+  move, nothing said anything went wrong. It's now reported in an alert over
+  the pair, on every input route (FR-8.12).
+
+- Undo could be offered right after a choice that was silently never
+  recorded — most often because the photo had just stopped being a candidate
+  (ignored elsewhere while the pair was on screen). Pressing it then either
+  did nothing while still reporting success, or, worse, voided a different,
+  legitimate earlier choice for the same pair, because it hunted only by
+  winner/loser rather than by the exact choice just made. Recording a choice
+  now hands back a receipt naming exactly the row it wrote (or throws,
+  honestly, if it wrote nothing), Undo matches that receipt exactly instead
+  of guessing, and refreshing the duel pool now withdraws a pending Undo
+  whose subject has since stopped being a candidate rather than continuing
+  to offer it (FR-5.12, FR-8.12).
+
+- The Mac's Edit-menu Undo/Redo (⌘Z/⇧⌘Z) stopped doing ordinary text-editing
+  undo anywhere in the app — including the album-size count field on the
+  Export tab — from the moment the Duel tab's own Undo command took over the
+  Edit menu's Undo/Redo group application-wide rather than only while the
+  Duel tab was actually showing. The system's own Undo/Redo, and the
+  standard keyboard shortcuts behind it, are back everywhere except the Duel
+  tab, which is the one place ⌘Z is unambiguous (FR-8.1's HIG "place undo
+  and redo commands in the Edit menu and support the standard keyboard
+  shortcuts" — the Undo and redo guidelines' point being *whatever's being
+  edited*, not one screen claimed for the whole app). This was a regression
+  in the Undo command added above and went undisclosed here at the time.
+
+- On iPhone and iPad, the grid's touch photo-actions menu disabled "Not
+  Wallpaper Material" for an ignored photo with no way for touch to learn
+  why — the reason lived only in a `.help()` tooltip, which only a pointer
+  ever sees. The menu row's own visible label now says why it's unavailable,
+  and carries the same explanation as a VoiceOver hint (FR-8.13).
+
 ## [0.19.4] - 2026-08-14
 
 ### Added
