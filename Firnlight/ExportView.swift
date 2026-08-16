@@ -868,16 +868,26 @@ struct ExportView: View {
         .task(id: RankingClock.shared.version) {
             await model.refreshSuggestion(container: modelContext.container)
         }
-        // The count moves without the user touching it — a fresh suggestion
-        // carries it (FR-6.12), and learning the pool's real size narrows it —
-        // so the number field follows it. Never while there's an unsaved edit
-        // in progress: that half-typed number outranks ours. Gating on focus
-        // alone was wrong — the field can hold focus (tabbed or clicked into,
-        // or via dragging the slider without ever touching the field) with
-        // nothing typed, which isn't an edit and shouldn't freeze the field
-        // out of every update, including the slider's own.
+        // FR-6.3: the size is one number, and the field is one of the places
+        // showing it, so it follows the count wherever the count goes — the
+        // thumb, a fresh suggestion carrying it (FR-6.12), the pool's real
+        // size narrowing it. The one thing that outranks the count is a number
+        // the user is still in the middle of naming; `draftIsEdited` is that
+        // and nothing else. See the field's own `onChange` for why deciding
+        // that on focus, or on any write to the draft, does not work.
         .onChange(of: model.count, initial: true) { _, newCount in
             if !draftIsEdited { draftCount = newCount }
+        }
+        // Starting a drag ends any half-typed number: the thumb is the newer
+        // act, and FR-6.3 leaves only one number for both to be showing. Doing
+        // this on the drag rather than on every count change is what keeps
+        // typing possible at all — the count moves on its own often enough
+        // that a rule keyed to it would eat the digits as they were typed.
+        .onChange(of: model.isAdjustingSize) { _, adjusting in
+            if adjusting {
+                draftIsEdited = false
+                draftCount = model.count
+            }
         }
         .task(id: "\(model.count)|\(model.isAdjustingSize)|\(RankingClock.shared.version)") {
             await model.refreshPreview(container: modelContext.container)
@@ -1034,8 +1044,21 @@ struct ExportView: View {
                     // Control's "tap Album size" ambiguous and the rotor
                     // listing two identical entries (FR-8.1).
                     .accessibilityLabel("Exact album size")
-                    .onChange(of: draftCount) { _, _ in
-                        if countFieldFocused { draftIsEdited = true }
+                    // What marks the draft as the user's own, and the seam two
+                    // earlier tries fell through. Focus alone was wrong: the
+                    // field can hold focus with nothing typed — dragging the
+                    // slider on the Mac leaves it focused — which is no edit.
+                    // Adding "and the draft changed" was wrong the same way,
+                    // because the update above *is* a change to the draft: the
+                    // first slider move echoed into the field, the echo read
+                    // as typing, and the field froze out of every later move
+                    // while the thumb went on without it (FR-6.3). Only a
+                    // draft that has come to differ from the count is a number
+                    // the user is naming; the echo, being the count, never is.
+                    .onChange(of: draftCount) { _, newDraft in
+                        if countFieldFocused && newDraft != model.count {
+                            draftIsEdited = true
+                        }
                     }
                     .onSubmit { commitCount() }
                     .onChange(of: countFieldFocused) { _, focused in
@@ -1142,6 +1165,9 @@ struct ExportView: View {
                     ? Thresholds.albumSizeAssistiveStep
                     : 1 / Thresholds.albumSizeAssistiveStep
                 model.count = Int((Double(model.count) * step).rounded())
+                // The same act the thumb performs, so it ends a half-typed
+                // number the same way a drag does (FR-6.3).
+                draftIsEdited = false
                 draftCount = model.count
             }
             .accessibilityHint("Adjusts in proportion. Type an exact count in the field above.")

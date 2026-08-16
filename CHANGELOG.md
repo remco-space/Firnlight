@@ -24,6 +24,16 @@ heading when that version is released (FR-10.3).
   Library tab for as long as they hold, and clicking again there already
   reverses them (FR-4.6).
 
+### Fixed
+
+- Dragging the album-size slider no longer leaves the exact count beside it
+  showing a stale number. Once the number field had keyboard focus — which
+  dragging the slider on the Mac is enough to give it — the field stopped
+  following the thumb, so the two halves of one setting disagreed about how
+  many photos the album would hold. The size is one number again, wherever it
+  is shown, and starting a drag now abandons a half-typed count rather than
+  holding the field at it.
+
 ## [0.19.4] - 2026-08-14
 
 ### Added
