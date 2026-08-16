@@ -164,6 +164,16 @@ deciding what to do with it, exactly as the Route check does:
   round hoping. *(This is where the FR-5.12 undo race stalled: no amendment was
   possible and the loop had no other move.)*
 
+A clause can be quotable **by reference**: FR-8.1 points at Apple's HIG rather
+than restating it, so any behaviour the HIG governs is already forbidden, and
+the finding is an implementation defect however specific it looks. Never draft
+an amendment that restates a rule Apple publishes and maintains — that defeats
+the one FR whose job is to keep the brief out of the native-feel checklist
+business. Cite FR-8.1, and let the implementer find and follow the guidance it
+points at. (CLAUDE.md's rule that native-feel defects ratchet section 8 is for
+the class of defect the HIG does *not* cover; a rule already published upstream
+is not a missing rule.)
+
 Discipline on the nudge, so it stays a bug report and not a design brief: name
 the defect and the clause, never a solution, API, or mechanism — otherwise the
 implementer builds the orchestrator's design instead of the brief's. If you
