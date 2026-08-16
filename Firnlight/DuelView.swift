@@ -21,7 +21,15 @@ final class DuelModel {
     private(set) var choiceCount = 0
     private(set) var isPreparing = false
     private(set) var isRecording = false
-    private(set) var lastError: String?
+    /// FR-8.12: a queue, not a single slot. A single `String?` here used to
+    /// let a second failure (e.g. `reload()`'s own error landing while a
+    /// duel-action failure's alert was still up) silently overwrite the
+    /// first — one of the two failures was never shown, which is exactly
+    /// the silence the requirement forbids. Every catch block below appends;
+    /// `dismissError()` pops the front, and the view's `.alert` re-presents
+    /// with whatever's next as long as the queue isn't empty.
+    private var errors: [String] = []
+    var lastError: String? { errors.first }
 
     /// FR-5.12: whatever the user just told the app — a duel choice, "Both
     /// Are Great", "Both Are Bad" — can be taken back "at latest in the
@@ -111,7 +119,7 @@ final class DuelModel {
                 setPair(await ranker.nextPair())
             }
         } catch {
-            lastError = error.localizedDescription
+            errors.append(error.localizedDescription)
         }
     }
 
@@ -141,11 +149,25 @@ final class DuelModel {
             // offer here instead of waiting for a doomed press to surface
             // the failure. `pendingUndoPair` names exactly the two photos
             // either a pending choice or a pending verdict concerns.
-            if let pendingUndoPair, await !ranker.contains(pendingUndoPair) {
+            //
+            // `checkedPair` is captured before the `await` below, and the
+            // live property is re-read (not just re-derived) afterward
+            // rather than clearing unconditionally: `choose`/`judgeBoth` run
+            // as their own concurrent `Task`s and can arm a brand-new,
+            // perfectly valid pending Undo — for the same pair or a
+            // different one — while this `contains` call is in flight. A
+            // bare `clearPendingUndo()` after that await would blow away
+            // whichever offer happens to be pending *now*, not the stale one
+            // this check actually reasoned about — silently withdrawing a
+            // fresh, legitimate Undo the user has every right to expect is
+            // still there "at latest in the moment after giving it"
+            // (FR-5.12). Only withdraw if nothing changed underneath.
+            if let checkedPair = pendingUndoPair, await !ranker.contains(checkedPair),
+               pendingUndoPair == checkedPair {
                 clearPendingUndo()
             }
         } catch {
-            lastError = error.localizedDescription
+            errors.append(error.localizedDescription)
         }
     }
 
@@ -165,7 +187,7 @@ final class DuelModel {
                 choiceCount = await ranker.choiceCount
                 setPendingUndo(.choice(receipt), shownPair: shownPair)
             } catch {
-                lastError = error.localizedDescription
+                errors.append(error.localizedDescription)
                 clearPendingUndo()
             }
             setPair(await ranker.nextPair())
@@ -201,7 +223,7 @@ final class DuelModel {
                     shownPair: shownPair
                 )
             } catch {
-                lastError = error.localizedDescription
+                errors.append(error.localizedDescription)
                 clearPendingUndo()
             }
             setPair(await ranker.nextPair())
@@ -240,7 +262,7 @@ final class DuelModel {
                     setPair(await ranker.nextPair())
                 }
             } catch {
-                lastError = error.localizedDescription
+                errors.append(error.localizedDescription)
                 // FR-8.12: a failed undo took nothing back, and the offer it
                 // answered can't be retried — the judgment it named either
                 // never existed (`RankerError.candidateNotLive` at record
@@ -253,12 +275,17 @@ final class DuelModel {
         }
     }
 
-    /// FR-8.12: dismisses a failed press's error banner. Nothing else clears
-    /// `lastError` — a later successful action simply leaves it stale and
-    /// unread until this is called, which is fine, since the view only shows
-    /// it while it's non-nil and dismissing is exactly what stops that.
+    /// FR-8.12: dismisses the error banner currently shown, revealing the
+    /// next queued one (if any) rather than clearing everything at once — a
+    /// second failure that arrived while the first was still up must still
+    /// get its own turn on screen, never silently discarded by the first
+    /// one's dismissal. Nothing else pops `errors` — a later successful
+    /// action simply leaves the queue as it was until this is called, which
+    /// is fine, since the view only shows a banner while it's non-empty.
     func dismissError() {
-        lastError = nil
+        if !errors.isEmpty {
+            errors.removeFirst()
+        }
     }
 
     private func setPendingUndo(_ action: PendingUndo, shownPair: PreferenceRanker.DuelPair) {
@@ -373,14 +400,31 @@ struct DuelView: View {
         // another tab silently act on a Duel tab the user isn't looking at.
         .focusedSceneValue(\.duelUndoTarget, model)
         // FR-8.12: a failed choice, verdict or Undo used to leave the screen
-        // exactly as it looked before the press — the pair still on screen,
-        // no changed count, no spinner left running — on every input route,
-        // indistinguishable from success. The `else if let error` branch
+        // exactly as it looked before the press — no changed count, no
+        // spinner left running, nothing said — indistinguishable from
+        // success on every input route. The `else if let error` branch
         // above only ever runs once `model.pair` is nil, which it never is
         // while a mid-duel action fails (the pair only changes at the very
         // end of `choose`/`judgeBoth`/`undo`, after the failing step), so
-        // that branch alone never caught this. An alert reports it without
-        // discarding the pair still on screen underneath.
+        // that branch alone never caught this. An alert reports it instead,
+        // gated on `pair != nil` so it never fires during the *other*
+        // branches' own reporting (`isPreparing`'s spinner, `lastError`'s
+        // `ContentUnavailableView`) — both already say their piece without
+        // an alert stacked on top.
+        //
+        // What the alert appears over differs by which action failed:
+        // `choose`/`judgeBoth` always call `setPair(await ranker.nextPair())`
+        // after their catch block, success or failure alike — same as a
+        // skip — so by the time the alert shows, the screen has already
+        // moved on to a fresh pair; the failed pair is gone, and the alert
+        // reports what happened to it a moment ago rather than sitting over
+        // it. That's deliberate, not a gap: the failure means *that* pair
+        // couldn't be judged as shown (typically because a photo in it
+        // stopped being a candidate), so leaving it on screen would only
+        // invite the same failure again. `undo`'s catch, by contrast, never
+        // calls `setPair` — there is nothing valid left to advance to once
+        // the correction itself failed — so its alert genuinely does sit
+        // over the same pair that was on screen when Undo was pressed.
         .alert(
             "Something Went Wrong",
             isPresented: Binding(

@@ -696,9 +696,23 @@ actor PreferenceRanker {
     /// rebuild having happened. So the bump is unconditional here, the same
     /// rebuild-then-bump pairing `AnalysisView`'s one-off `prepare()` call
     /// already uses.
+    ///
+    /// All-or-nothing, like `recordVerdicts`: a `compactMap` here used to
+    /// silently drop whichever identifier no longer resolved (e.g. ignored
+    /// elsewhere since the verdict was given) and clear only the rest,
+    /// reporting full success either way. For the Duel tab's Undo of a
+    /// "Both Are Great"/"Both Are Bad" verdict that's a correction left half
+    /// done while claiming to be whole — the opposite of FR-5.12's "outcome
+    /// as if the corrected judgment had always been the one given" — so this
+    /// now throws `RankerError.candidateNotLive` and clears nothing rather
+    /// than clearing one photo's verdict and silently leaving the other's in
+    /// force (FR-8.12).
     func clearVerdicts(_ localIdentifiers: [String]) throws {
         let now = Date()
-        let keys = localIdentifiers.compactMap { indexByID[$0].map { entries[$0].key } }
+        let keys = try localIdentifiers.map { id -> String in
+            guard let index = indexByID[id] else { throw RankerError.candidateNotLive }
+            return entries[index].key
+        }
         for key in keys {
             modelContext.insert(VerdictRecord(photoKey: key, isGood: false, isCleared: true, timestamp: now))
         }

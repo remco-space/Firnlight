@@ -81,6 +81,26 @@ heading when that version is released (FR-10.3).
   ever sees. The menu row's own visible label now says why it's unavailable,
   and carries the same explanation as a VoiceOver hint (FR-8.13).
 
+- Undoing "Both Are Great"/"Both Are Bad" could clear only one photo's
+  verdict while claiming to clear both, when the other photo had stopped
+  being a candidate in the meantime — the same silently-partial write the
+  fix above closed for recording a verdict, still open on the clearing
+  path. Clearing a verdict is now all-or-nothing too, so a failed Undo
+  reports failure honestly rather than half-correcting and calling it done
+  (FR-5.12, FR-8.12).
+
+- A pending Undo offer could be silently withdrawn out from under a duel the
+  user had just judged: if a fresh, valid choice or verdict armed a new Undo
+  while a duel-pool refresh was mid-flight checking an older, stale one, the
+  refresh's cleanup — resuming afterward — cleared whatever was pending *by
+  then*, not the stale offer it had actually checked. The refresh now
+  re-confirms nothing changed underneath before withdrawing anything
+  (FR-5.12).
+
+- A second failure landing while an earlier one's alert was still up used to
+  silently replace it — one of the two was never shown. Failures now queue
+  and are shown one at a time (FR-8.12).
+
 ## [0.19.4] - 2026-08-14
 
 ### Added
