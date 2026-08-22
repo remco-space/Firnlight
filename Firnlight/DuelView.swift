@@ -471,8 +471,14 @@ final class DuelModel {
 
 /// Pairwise A/B picker: click the photo that makes the better wallpaper.
 struct DuelView: View {
+    /// FR-5.12: owned by `ContentView`, not here — see its doc comment on
+    /// `duelModel`. Receiving it as a plain `let` (not `@State`) is what
+    /// keeps this view a pure, stateless expression of the model each time
+    /// `TabView` remounts it; the model itself, and the correction offer it
+    /// carries, outlives every such remount.
+    let model: DuelModel
+
     @Environment(\.modelContext) private var modelContext
-    @State private var model = DuelModel()
 
     /// The gap between the two duel cards. A named constant rather than a
     /// literal — and deliberately not in `Thresholds`, which holds tuned
@@ -527,32 +533,46 @@ struct DuelView: View {
         // above only ever runs once `model.pair` is nil, which it never is
         // while a mid-duel action fails (the pair only changes at the very
         // end of `choose`/`judgeBoth`/`undo`, after the failing step), so
-        // that branch alone never caught this. An alert reports it instead,
-        // gated on `pair != nil` so it never fires during the *other*
-        // branches' own reporting (`isPreparing`'s spinner, `stateError`'s
-        // `ContentUnavailableView`) — both already say their piece without
-        // an alert stacked on top, and `model.alertError` is a wholly
-        // separate queue from `stateError` besides (see `DuelModel`'s
-        // `reportRankerFailure`/`reportActionFailure`): a `choose`/
-        // `judgeBoth`/`undo` failure always lands here, regardless of what
-        // `pair` happens to be by the time its catch runs, and a `start`/
-        // `reload` failure caught while there was no pair to show anything
-        // over goes to `stateError` instead — never in this queue to begin
-        // with, so it can never resurface here once a pair finally appears.
+        // that branch alone never caught this. An alert reports it instead.
+        // `model.alertError` is a wholly separate queue from `stateError`
+        // (see `DuelModel`'s `reportRankerFailure`/`reportActionFailure`): a
+        // `choose`/`judgeBoth`/`undo` failure always lands here, regardless
+        // of what `pair` happens to be by the time its catch runs, and a
+        // `start`/`reload` failure caught while there was no pair to show
+        // anything over goes to `stateError` instead — never in this queue
+        // to begin with, so it can never resurface here once a pair finally
+        // appears.
         //
-        // What the alert appears over differs by which action failed:
-        // `choose`/`judgeBoth` always call `setPair(await ranker.nextPair())`
-        // after their catch block, success or failure alike — same as a
-        // skip — so by the time the alert shows, the screen has already
-        // moved on to a fresh pair; the failed pair is gone, and the alert
-        // reports what happened to it a moment ago rather than sitting over
-        // it. That's deliberate, not a gap: the failure means *that* pair
-        // couldn't be judged as shown (typically because a photo in it
-        // stopped being a candidate), so leaving it on screen would only
-        // invite the same failure again. `undo`'s catch, by contrast, never
-        // calls `setPair` — there is nothing valid left to advance to once
-        // the correction itself failed — so its alert genuinely does sit
-        // over the same pair that was on screen when Undo was pressed.
+        // Gated on `model.alertError != nil` alone now — NOT also on
+        // `model.pair != nil`, which this used to require. That gate was
+        // reasoned (wrongly) on an assumption that by the time the alert
+        // shows, `choose`/`judgeBoth` have always already called
+        // `setPair(await ranker.nextPair())` and landed on a fresh pair —
+        // true only while the pool still has one to give. When the same
+        // failure that emptied the pair (a photo the failing pair depended
+        // on stopped being a candidate) also exhausts it, `nextPair()`
+        // legitimately returns nil: the queued failure and a nil `pair` can
+        // coexist, and reporting either the `stateError` panel or "Nothing
+        // to Compare" instead of the alert would silently drop the
+        // just-recorded failure — exactly the silence FR-8.12 forbids, and
+        // exactly the gap validation found: an error could sit queued
+        // forever behind a `pair == nil` screen that never mentions it
+        // (reload() can also null a displayed `pair` out from under a
+        // pending alert on its own bump-driven `Task`, same effect). An
+        // alert stacking momentarily over `isPreparing`'s spinner or
+        // `stateError`'s `ContentUnavailableView` is a strictly better
+        // outcome than the message never appearing — SwiftUI's `.alert` is
+        // a modal presentation, not a layout element, so there is nothing
+        // for it to visually collide with underneath (FR-8.11 doesn't
+        // apply to a sheet floating above the whole screen).
+        //
+        // What the alert appears over now genuinely varies, and that's
+        // fine: often a fresh pair (the common case above), sometimes the
+        // `stateError`/"Nothing to Compare" screen if the pool ran out in
+        // the same stroke, and for `undo`'s catch — which never calls
+        // `setPair`, since there is nothing valid to advance to once the
+        // correction itself failed — always the same pair that was on
+        // screen when Undo was pressed.
         //
         // The "OK" button's action is deliberately empty — see
         // `dismissError()`'s doc comment for why calling it from both here
@@ -560,7 +580,7 @@ struct DuelView: View {
         .alert(
             "Something Went Wrong",
             isPresented: Binding(
-                get: { model.pair != nil && model.alertError != nil },
+                get: { model.alertError != nil },
                 set: { if !$0 { model.dismissError() } }
             )
         ) {
@@ -797,10 +817,26 @@ private struct DuelCard: View {
                             .glassEffect(in: .circle)
                             .padding(6)
                             .help("You marked this photo as a favorite in Photos, which boosts its ranking.")
+                            // FR-8.13/FR-4.13: the heart's meaning ("marked a
+                            // favorite in Photos, boosts its ranking") used to
+                            // live only in `.help()`, a route touch and
+                            // VoiceOver users never reach. The hint carries
+                            // the same words through the route that does
+                            // reach them, alongside `.help()` for pointer
+                            // users — see `ignoreButton` below for the same
+                            // pairing on a pressable control.
+                            .accessibilityHint("Marked as a favorite in Photos, which boosts its ranking.")
                     }
                 }
             }
             .buttonStyle(.plain)
+            // FR-8.12: a press mid-recording would silently no-op against
+            // `DuelModel.choose`'s own `!isRecording` guard — the control
+            // would still look pickable while doing nothing, exactly what
+            // "a control that offers itself as available does what it
+            // offers" forbids. Same reasoning covers `ignoreButton` and the
+            // duel-state entries in `photoActions` below.
+            .disabled(duelModel.isRecording)
             .accessibilityLabel(candidate.isFavorite ? "\(positionLabel), favorite" : positionLabel)
             // Ignore lives in its own button overlaid on (in front of) the
             // pick button, so its taps aren't swallowed as a duel choice.
@@ -846,8 +882,20 @@ private struct DuelCard: View {
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .circle)
         .padding(6)
+        // FR-8.12: see the pick button's own `.disabled` comment above — a
+        // press mid-recording would silently no-op against `DuelModel.skip`'s
+        // own `!isRecording` guard.
+        .disabled(duelModel.isRecording)
         .accessibilityLabel("Ignore \(positionLabel)")
         .help("Ignores this photo — it leaves the grid, duels, and the wallpaper album without teaching the app anything (reversible from the Library tab's Ignored view).")
+        // FR-8.13/FR-4.13: how this differs in consequence from "Both Are
+        // Bad" (FR-5.9) — removal versus a quality judgment the ranking
+        // learns from — used to be explained only in the `.help()` tooltip
+        // above, a route pointer users get and touch/VoiceOver users never
+        // do. The hint restates the same distinction through the route that
+        // reaches them, so the difference is discoverable before the act on
+        // every platform, not just under a mouse.
+        .accessibilityHint("Removes this photo from the grid, duels, and the wallpaper album without teaching the app anything — unlike Both Are Bad, which keeps it and marks it as a quality judgment.")
     }
 
     /// FR-4.6's three actions, shared by the right-click menu and — on iPhone
@@ -858,10 +906,17 @@ private struct DuelCard: View {
     /// mid-duel doesn't remove the photo from the pool.
     @ViewBuilder
     private var photoActions: some View {
+        // Never disabled: opening the photo in Photos doesn't touch
+        // `duelModel` at all, so it stays available through a duel action
+        // in flight (FR-8.12 only requires disabling what would actually
+        // no-op).
         Button("Open in Photos") {
             CandidateActions.openInPhotos(candidate.localIdentifier, using: openURL)
         }
         Divider()
+        // FR-8.12: both entries below end in `duelModel.skip()`, which
+        // no-ops under its own `!isRecording` guard — same reasoning as the
+        // pick button and `ignoreButton` above.
         Button(candidate.isNotWallpaperMaterial ? "Clear Verdict" : "Not Wallpaper Material") {
             let wasMarked = candidate.isNotWallpaperMaterial
             CandidateActions.setNotWallpaperMaterial(candidate.localIdentifier, !wasMarked, in: modelContext)
@@ -870,9 +925,11 @@ private struct DuelCard: View {
                 duelModel.skip()
             }
         }
+        .disabled(duelModel.isRecording)
         Button("Ignore This Photo", role: .destructive) {
             ignore()
         }
+        .disabled(duelModel.isRecording)
     }
 
     /// FR-8.4 *(iPhone and iPad)*: the three actions need a home that isn't a

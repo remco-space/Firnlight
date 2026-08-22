@@ -145,6 +145,44 @@ heading when that version is released (FR-10.3).
   isolation — Apple's own guidance treats that as correctness where glass
   elements sit close together, not just as a performance nicety.
 
+- The Duel tab's `DuelModel` — the ranker session, the pending pair, and the
+  Undo offer — is now owned by `ContentView`, not by `DuelView` itself. The
+  "Tab" value-based `TabView` genuinely unmounts and remounts a non-selected
+  tab's content, not just lazily builds it once; a `DuelModel` scoped to
+  `DuelView`'s own `@State` was torn down on every switch away and rebuilt
+  from scratch on return, silently discarding whatever Undo offer FR-5.12
+  had standing at the time. Lifting ownership to the tab-switching level
+  (the same fix already applied to the library catch-up pipeline) ties its
+  lifetime to the window instead, so switching tabs and back finds the
+  offer exactly where it was left — spent only by the next judgment, as
+  FR-5.12 requires, never by the user's gaze.
+
+- Duel-tab controls that record a judgment — both pick buttons, the ignore
+  control, and the touch/right-click "Not Wallpaper Material"/"Ignore This
+  Photo" entries — now disable themselves while a prior choice, verdict, or
+  Undo is still being recorded, instead of staying fully clickable and
+  silently swallowing the press against `DuelModel`'s own `!isRecording`
+  guard. A control offering itself as available now always does what it
+  offers (FR-8.12).
+
+- The Duel tab's failure alert used to require a pair still be on screen
+  before it could present (`model.pair != nil && model.alertError != nil`).
+  A failure that arrived in the same stroke that emptied the candidate pool
+  — plausibly the same condition that caused the failure — left `pair` nil
+  and the alert gated shut, so the message sat queued behind the "Nothing to
+  Compare" or ranker-error screen forever, with nothing on screen ever
+  mentioning it. The alert now presents on `model.alertError != nil` alone,
+  so a recorded failure always reaches the user regardless of what the rest
+  of the screen is showing underneath (FR-8.12).
+
+- The favorite badge, the Duel tab's ignore control, and the Library grid's
+  two verdict toggles explained their consequence — and how each differs
+  from its neighbor (FR-4.7 vs FR-4.8, "Both Are Bad" vs Ignore) — only in a
+  `.help()` tooltip, a route pointer users get and touch/VoiceOver users
+  never do. Each now also carries an accessibility hint with the same
+  words, so the distinction is discoverable before the act on every
+  platform (FR-8.13, FR-4.13), not only under a mouse.
+
 ## [0.19.4] - 2026-08-14
 
 ### Added

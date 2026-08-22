@@ -486,6 +486,11 @@ struct ThumbnailCell: View {
             .disabled(candidate.isIgnored)
             .accessibilityLabel(verdictToggleLabel)
             .help(verdictToggleHelp)
+            // FR-8.13/FR-4.13: `verdictToggleHelp` explains this control's
+            // consequence — and how it differs from Ignore — but `.help()`
+            // alone only reaches a pointer. The hint restates the same text
+            // through the route touch and VoiceOver users get instead.
+            .accessibilityHint(verdictToggleHelp)
 
             Button {
                 CandidateActions.setIgnored(candidate.localIdentifier, !candidate.isIgnored, in: modelContext)
@@ -499,6 +504,11 @@ struct ThumbnailCell: View {
             .glassEffect(.regular.interactive(), in: .circle)
             .accessibilityLabel(candidate.isIgnored ? "Un-ignore this photo" : "Ignore this photo")
             .help(candidate.isIgnored ? "Returns this photo to the grid, duels, and the wallpaper album." : "Ignores this photo — it leaves the grid, duels, and the wallpaper album without teaching the app anything. Right for a good shot you'd rather not see every day.")
+            // FR-8.13/FR-4.13: same pairing as the toggle above — the
+            // consequence (and, unignored, how it differs from a "Not
+            // Wallpaper Material" verdict) reaches touch and VoiceOver
+            // through the hint, not just a pointer through `.help()`.
+            .accessibilityHint(candidate.isIgnored ? "Returns this photo to the grid, duels, and the wallpaper album." : "Removes this photo from the grid, duels, and the wallpaper album without teaching the app anything — unlike a quality verdict, which keeps it in the ranking.")
         }
         .padding(5)
     }
