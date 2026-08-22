@@ -741,57 +741,72 @@ private struct DuelCard: View {
     @State private var image: CGImage?
     @State private var isHovering = false
 
+    /// FR-8.1: Apple's own Liquid Glass guidance treats sharing a
+    /// `GlassEffectContainer` across nearby glass surfaces as correctness,
+    /// not polish — glass cannot sample other glass, so elements close
+    /// enough to interfere need one shared container to render and blend
+    /// correctly. This card carries three independent glass surfaces (the
+    /// favorite badge, the ignore control, the actions menu), so all three
+    /// share one container rather than each calling `.glassEffect()` in
+    /// isolation.
+    private static let glassContainerSpacing: CGFloat = 16
+
     var body: some View {
-        Button(action: action) {
-            Rectangle()
-                .fill(.quaternary)
-                .aspectRatio(Thresholds.desktopAspectRatio, contentMode: .fit)
+        GlassEffectContainer(spacing: Self.glassContainerSpacing) {
+            Button(action: action) {
+                Rectangle()
+                    .fill(.quaternary)
+                    .aspectRatio(Thresholds.desktopAspectRatio, contentMode: .fit)
+                    .overlay {
+                        if let image {
+                            Image(decorative: image, scale: 1)
+                                .resizable()
+                                .scaledToFill()
+                        } else {
+                            // Only for a card genuinely held up (an original
+                            // still coming down from iCloud). A cached image
+                            // arrives faster than the delay, and a spinner
+                            // blinking on every advance through the pair
+                            // queue is exactly the wait FR-8.7 says not to
+                            // report.
+                            ProgressView()
+                                .shownWhileWaiting()
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                // Bound clicking/right-clicking to the visible card; a
+                // panorama's scaledToFill overflow is clipped visually but
+                // not for hit-testing.
+                .contentShape(RoundedRectangle(cornerRadius: 10))
                 .overlay {
-                    if let image {
-                        Image(decorative: image, scale: 1)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        // Only for a card genuinely held up (an original still
-                        // coming down from iCloud). A cached image arrives
-                        // faster than the delay, and a spinner blinking on
-                        // every advance through the pair queue is exactly the
-                        // wait FR-8.7 says not to report.
-                        ProgressView()
-                            .shownWhileWaiting()
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(isHovering ? Color.accentColor : .clear, lineWidth: 3)
+                }
+                .overlay(alignment: .topLeading) {
+                    if candidate.isFavorite {
+                        // FR-8.5: floating over the photo doesn't make this
+                        // the photo's own plain surface — it's the app's own
+                        // status badge, so it wears the platform's real
+                        // glass rather than a hand-built material imitation
+                        // of it, exactly like the ignore control and actions
+                        // menu below.
+                        Image(systemName: "heart.fill")
+                            .font(.caption)
+                            .foregroundStyle(.pink)
+                            .padding(4)
+                            .glassEffect(in: .circle)
+                            .padding(6)
+                            .help("You marked this photo as a favorite in Photos, which boosts its ranking.")
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-            // Bound clicking/right-clicking to the visible card; a panorama's
-            // scaledToFill overflow is clipped visually but not for hit-testing.
-            .contentShape(RoundedRectangle(cornerRadius: 10))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(isHovering ? Color.accentColor : .clear, lineWidth: 3)
             }
-            .overlay(alignment: .topLeading) {
-                if candidate.isFavorite {
-                    // FR-8.5: floating over the photo doesn't make this the
-                    // photo's own plain surface — it's the app's own status
-                    // badge, so it wears the platform's real glass rather
-                    // than a hand-built material imitation of it, exactly
-                    // like the ignore control and actions menu below.
-                    Image(systemName: "heart.fill")
-                        .font(.caption)
-                        .foregroundStyle(.pink)
-                        .padding(4)
-                        .glassEffect(in: .circle)
-                        .padding(6)
-                        .help("You marked this photo as a favorite in Photos, which boosts its ranking.")
-                }
-            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(candidate.isFavorite ? "\(positionLabel), favorite" : positionLabel)
+            // Ignore lives in its own button overlaid on (in front of) the
+            // pick button, so its taps aren't swallowed as a duel choice.
+            .overlay(alignment: .topTrailing) { ignoreButton }
+            .overlay(alignment: .bottomTrailing) { actionsMenu }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(candidate.isFavorite ? "\(positionLabel), favorite" : positionLabel)
-        // Ignore lives in its own button overlaid on (in front of) the pick
-        // button, so its taps aren't swallowed as a duel choice.
-        .overlay(alignment: .topTrailing) { ignoreButton }
-        .overlay(alignment: .bottomTrailing) { actionsMenu }
         .contextMenu { photoActions }
         .onHover { isHovering = $0 }
         // Duel cards are already focusable (they're Buttons); publish the
@@ -818,7 +833,9 @@ private struct DuelCard: View {
     /// `.background(.regularMaterial)` imitation of it — only the
     /// photograph itself stays plain. `.interactive()` because this is a
     /// pressable control, not a static badge (contrast the favorite heart
-    /// above).
+    /// above). Shares `body`'s `GlassEffectContainer` with the favorite
+    /// badge and the actions menu (FR-8.1) rather than rendering in
+    /// isolation.
     private var ignoreButton: some View {
         Button(action: ignore) {
             Image(systemName: "eye.slash")

@@ -344,14 +344,29 @@ struct ThumbnailCell: View {
     @Environment(\.openURL) private var openURL
     @State private var thumbnail: CGImage?
 
+    /// FR-8.5/FR-8.1: every over-photo control on this cell wears real glass
+    /// (`.glassEffect()`), and all of them share one `GlassEffectContainer`
+    /// rather than each carrying the modifier in isolation. Apple's own
+    /// guidance for the material is explicit that this is correctness, not
+    /// polish: glass cannot sample other glass, so nearby glass surfaces need
+    /// one shared container to blend correctly — and `verdictToggles`' own
+    /// two buttons sit only 6pt apart, well inside "nearby". One container
+    /// per cell, spaced tightly, merges only genuinely adjacent glass (the
+    /// verdict pair) and leaves the far corners — the favorite badge, the
+    /// score, the actions menu — rendering independently.
+    private static let glassContainerSpacing: CGFloat = 8
+
     var body: some View {
-        tile
-            // The verdict toggles and the actions menu sit *outside* `tile`,
-            // and so outside its `.accessibilityElement(children: .ignore)`,
-            // which would otherwise swallow the only touch path to the photo
-            // actions (FR-8.4) and leave VoiceOver unable to reach them.
-            .overlay(alignment: .bottomLeading) { verdictToggles }
-            .overlay(alignment: .topTrailing) { actionsMenu }
+        GlassEffectContainer(spacing: Self.glassContainerSpacing) {
+            tile
+                // The verdict toggles and the actions menu sit *outside*
+                // `tile`, and so outside its
+                // `.accessibilityElement(children: .ignore)`, which would
+                // otherwise swallow the only touch path to the photo actions
+                // (FR-8.4) and leave VoiceOver unable to reach them.
+                .overlay(alignment: .bottomLeading) { verdictToggles }
+                .overlay(alignment: .topTrailing) { actionsMenu }
+        }
             .contextMenu { menu }
             .task {
                 if thumbnail == nil {
@@ -409,11 +424,16 @@ struct ThumbnailCell: View {
             .contentShape(RoundedRectangle(cornerRadius: 8))
         .overlay(alignment: .topLeading) {
             if candidate.isFavorite {
+                // FR-8.5: floating over the photo doesn't make this the
+                // photo's own plain surface — it's the app's own status
+                // badge, so it wears the platform's real glass (see `badge`'s
+                // doc comment below for the full FR-8.5 reasoning, shared
+                // verbatim by every over-photo control on this cell).
                 Image(systemName: "heart.fill")
                     .font(.caption)
                     .foregroundStyle(.pink)
                     .padding(4)
-                    .background(.regularMaterial, in: Circle())
+                    .glassEffect(in: .circle)
                     .padding(5)
                     .help("You marked this photo as a favorite in Photos, which boosts its ranking.")
             }
@@ -427,15 +447,15 @@ struct ThumbnailCell: View {
 
     /// FR-4.14: the two verdict toggles (FR-4.6), as translucent overlay
     /// buttons in the same visual family as the favorite heart at
-    /// `.topLeading` — `.regularMaterial` circle backing, `.caption` glyph,
-    /// `.plain` button style, the same padding rhythm. One tap or click marks
-    /// or unmarks a photo, no context menu or long-press needed, and this
-    /// works identically wherever `ThumbnailCell` appears (the Library grid
-    /// and the Export preview) because both toggles read `candidate`'s own
-    /// flags rather than a mode passed in by the caller. `.regularMaterial`,
-    /// not `.glassEffect()` — see `badge`'s doc comment for why (FR-8.5):
-    /// the same reasoning applies verbatim to every over-photo control, this
-    /// pair included.
+    /// `.topLeading` — real glass backing (see `badge`'s doc comment for
+    /// FR-8.5's reasoning), `.caption` glyph, `.plain` button style, the same
+    /// padding rhythm. One tap or click marks or unmarks a photo, no context
+    /// menu or long-press needed, and this works identically wherever
+    /// `ThumbnailCell` appears (the Library grid and the Export preview)
+    /// because both toggles read `candidate`'s own flags rather than a mode
+    /// passed in by the caller. The two buttons sit only 6pt apart — the
+    /// nearby-glass case `body`'s `GlassEffectContainer` doc comment calls
+    /// out by name.
     ///
     /// Each button's glyph changes shape (outline → filled) as well as
     /// prominence (`.secondary` → `.primary`), not just colour — required so
@@ -460,9 +480,9 @@ struct ThumbnailCell: View {
                     .font(.caption)
                     .foregroundStyle(candidate.isNotWallpaperMaterial ? .primary : .secondary)
                     .padding(4)
-                    .background(.regularMaterial, in: Circle())
             }
             .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .circle)
             .disabled(candidate.isIgnored)
             .accessibilityLabel(verdictToggleLabel)
             .help(verdictToggleHelp)
@@ -474,9 +494,9 @@ struct ThumbnailCell: View {
                     .font(.caption)
                     .foregroundStyle(candidate.isIgnored ? .primary : .secondary)
                     .padding(4)
-                    .background(.regularMaterial, in: Circle())
             }
             .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .circle)
             .accessibilityLabel(candidate.isIgnored ? "Un-ignore this photo" : "Ignore this photo")
             .help(candidate.isIgnored ? "Returns this photo to the grid, duels, and the wallpaper album." : "Ignores this photo — it leaves the grid, duels, and the wallpaper album without teaching the app anything. Right for a good shot you'd rather not see every day.")
         }
@@ -512,6 +532,9 @@ struct ThumbnailCell: View {
     /// adding a third redundant affordance to every thumbnail. On touch the
     /// context menu opens only on a long press — a gesture FR-4.6 forbids as
     /// the sole path — so this visible control is that path.
+    /// FR-8.5: same reasoning as `verdictToggles` above — the app's own
+    /// control floating over the photo, so it wears real glass rather than
+    /// a `.background(.regularMaterial)` stand-in.
     @ViewBuilder
     private var actionsMenu: some View {
         #if !os(macOS)
@@ -522,26 +545,47 @@ struct ThumbnailCell: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(6)
-                .background(.regularMaterial, in: Circle())
         }
+        .glassEffect(.regular.interactive(), in: .circle)
         .padding(5)
         .accessibilityLabel("Photo actions")
         #endif
     }
 
-    /// FR-8.5: badges and controls that sit *on* a photo are backed by
-    /// `.regularMaterial`, never `.glassEffect()`. Two rules meet here. Glass
-    /// belongs to the app's own bars and controls and never to the photos, so
-    /// the thumbnail stays plain — the material is the content-layer backing
-    /// the platform provides for exactly this, not a glass surface. And the
-    /// backing has to stay legible over the user's brightest *and* darkest
-    /// photos in both appearances: materials take their label colour from the
-    /// appearance rather than from the photo behind them, so the thinner
-    /// `.ultraThinMaterial` this used to be left dark text over a dark
-    /// mountain and light text over a bright sky. `.regularMaterial` is the
-    /// thinnest one that stays readable over any photo, and it is used for
-    /// every over-photo badge in the app — here and on the duel cards — so
-    /// they all look the same.
+    /// FR-8.5: every badge and control that sits *on* a photo is one of the
+    /// app's own controls, floating over the photo rather than belonging to
+    /// it — the FR is explicit that this holds "wherever it stands", so it
+    /// wears what the platform gives controls layered over content
+    /// (`.glassEffect()`), never a hand-built `.background(.material)`
+    /// imitation of it. Only the photograph itself — the thumbnail's pixels
+    /// — stays plain. This used to read the other way (`.regularMaterial`,
+    /// reasoned as belonging to the "photos stay plain" half of the old FR
+    /// text), which is what the *photo* being plain actually forbade glass
+    /// on; the amendment draws the line at the photo's own pixels, not at
+    /// anything drawn over them. Regular glass, not Clear: the design
+    /// system's own rule is one variant per interface, and Regular is what
+    /// "stays legible over the user's brightest and darkest photos" (FR-8.5)
+    /// actually requires — Regular carries adaptive legibility built in;
+    /// Clear has none and needs a dimming layer this app never has. Every
+    /// cell's badges and controls share one `GlassEffectContainer` (see
+    /// `body`) rather than each carrying `.glassEffect()` in isolation —
+    /// nearby glass cannot correctly sample other glass, and this cell packs
+    /// four glass surfaces into a small tile.
+    ///
+    /// Flagged, not silently resolved: FR-4.14 still reads "[the verdict
+    /// toggles], like the heart badge, ... are tile markings, not the
+    /// bar-style glass FR-8.5 reserves for the app's own chrome" — a
+    /// description of FR-8.5's *old* scope that this amendment (see FR-8.5's
+    /// current text) has overtaken; FR-8.5 now reserves glass for a control
+    /// "wherever it stands," floating over a photo included, with no
+    /// carve-out for tile markings. Read as a citation of FR-8.5's scope
+    /// rather than an independent rule — the brief style elsewhere is FRs
+    /// referencing, never restating, each other — this cell now follows
+    /// FR-8.5's current text. But that is a judgment call, not something
+    /// this comment can settle on its own: FR-4.14's own prose still asserts
+    /// the old scope in so many words, so the brief carries a real internal
+    /// contradiction on this point until FR-4.14's cross-reference is
+    /// updated to match.
     ///
     /// Used to show an `eye.slash.fill` marker in place of the score for a
     /// cell in the old "Show Ignored" filter. That branch is gone now that
@@ -559,7 +603,7 @@ struct ThumbnailCell: View {
             .font(.caption2.monospacedDigit())
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
-            .background(.regularMaterial, in: Capsule())
+            .glassEffect(in: .capsule)
             .padding(5)
             .help("Predicted wallpaper appeal, 0–1 — higher scores rank earlier. Learned from your duel choices.")
     }
