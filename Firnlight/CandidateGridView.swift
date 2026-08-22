@@ -572,20 +572,12 @@ struct ThumbnailCell: View {
     /// nearby glass cannot correctly sample other glass, and this cell packs
     /// four glass surfaces into a small tile.
     ///
-    /// Flagged, not silently resolved: FR-4.14 still reads "[the verdict
-    /// toggles], like the heart badge, ... are tile markings, not the
-    /// bar-style glass FR-8.5 reserves for the app's own chrome" — a
-    /// description of FR-8.5's *old* scope that this amendment (see FR-8.5's
-    /// current text) has overtaken; FR-8.5 now reserves glass for a control
-    /// "wherever it stands," floating over a photo included, with no
-    /// carve-out for tile markings. Read as a citation of FR-8.5's scope
-    /// rather than an independent rule — the brief style elsewhere is FRs
-    /// referencing, never restating, each other — this cell now follows
-    /// FR-8.5's current text. But that is a judgment call, not something
-    /// this comment can settle on its own: FR-4.14's own prose still asserts
-    /// the old scope in so many words, so the brief carries a real internal
-    /// contradiction on this point until FR-4.14's cross-reference is
-    /// updated to match.
+    /// FR-4.14's own text now agrees: it was amended (main, after this
+    /// cell's fix landed) to read "they are the app's own controls floating
+    /// over a photo, dressed as FR-8.5 requires there" — replacing its
+    /// stale "tile markings, not the bar-style glass" restatement of
+    /// FR-8.5's pre-amendment scope. No remaining contradiction: both FRs
+    /// now agree that a control floating over a photo wears real glass.
     ///
     /// Used to show an `eye.slash.fill` marker in place of the score for a
     /// cell in the old "Show Ignored" filter. That branch is gone now that
