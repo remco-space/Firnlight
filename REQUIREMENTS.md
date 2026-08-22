@@ -190,8 +190,8 @@ The app has three tabs matching the three stages of the journey:
   translucent overlay buttons in the same visual family as the favorite heart
   (FR-4.4), so one tap or click marks or unmarks a photo — no context menu or
   long-press needed. The verdict toggle is unavailable while the photo is
-  ignored (FR-4.8). Like the heart badge, they are tile markings, not the
-  bar-style glass FR-8.5 reserves for the app's own chrome.
+  ignored (FR-4.8). Like the heart badge, they are the app's own controls
+  floating over a photo, dressed as FR-8.5 requires there.
 
 ## 5. Learning taste (Duel tab)
 
