@@ -65,7 +65,7 @@ struct ContentView: View {
                 LibraryTab(authorization: authorization, catchUp: catchUp, updates: updates)
             }
             Tab("Duel", systemImage: "rectangle.split.2x1", value: AppTab.duel) {
-                DuelView(model: duelModel)
+                DuelView(model: duelModel, authorization: authorization)
             }
             Tab("Export", systemImage: "square.and.arrow.up", value: AppTab.export) {
                 ExportView()

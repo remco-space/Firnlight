@@ -632,14 +632,48 @@ struct ThumbnailCell: View {
     /// Photo" ↔ "Un-ignore"), driven by `candidate`'s own flags. `role:
     /// .destructive` marks only the marking direction — un-ignoring undoes a
     /// decision, which isn't itself destructive.
+    ///
+    /// FR-8.13/FR-4.13: the verdict/ignore entries below, and the favorite
+    /// row when present, carry a second `Text` in the `Button`'s `label` —
+    /// SwiftUI renders that as a visible subtitle line under the row's
+    /// title, not a tooltip, giving a sighted user with neither a pointer
+    /// nor VoiceOver an on-screen route to how each control differs in
+    /// consequence from its neighbour (FR-4.7 vs FR-4.8 above all),
+    /// reachable as this row's own named command on every platform — this
+    /// same `menu` backs both the Mac's right-click menu and touch's
+    /// `actionsMenu` below. The title (first line) still only ever states
+    /// the act, never the consequence, per FR-8.13; the subtitle carries
+    /// the consequence.
     @ViewBuilder
     private var menu: some View {
         Button("Open in Photos") {
             CandidateActions.openInPhotos(candidate.localIdentifier, using: openURL)
         }
+        if candidate.isFavorite {
+            Divider()
+            // A disabled, action-less row: purely informational, same
+            // reasoning as `DuelCard.photoActions`' favorite row — the
+            // heart badge is a status indicator, not a control, so there's
+            // no act to name, only the consequence FR-4.13 needs off
+            // `.help()` alone.
+            Button {} label: {
+                Text("Favorite in Photos")
+                Text("Boosts this photo's ranking.")
+            }
+            .disabled(true)
+        }
         Divider()
-        Button(notWallpaperMaterialMenuTitle) {
+        Button {
             CandidateActions.setNotWallpaperMaterial(candidate.localIdentifier, !candidate.isNotWallpaperMaterial, in: modelContext)
+        } label: {
+            Text(notWallpaperMaterialMenuTitle)
+            Text(
+                candidate.isIgnored
+                    ? "Ignored photos are out of the ranking entirely — un-ignore this photo to judge it."
+                    : candidate.isNotWallpaperMaterial
+                        ? "Returns this photo to normal standing."
+                        : "A quality judgment the app learns from — it stays in the ranking but sinks over time."
+            )
         }
         // Same reason the overlay toggle disables here — see `verdictToggles`.
         .disabled(candidate.isIgnored)
@@ -656,12 +690,18 @@ struct ThumbnailCell: View {
                 : ""
         )
         if candidate.isIgnored {
-            Button("Un-ignore") {
+            Button {
                 CandidateActions.setIgnored(candidate.localIdentifier, false, in: modelContext)
+            } label: {
+                Text("Un-ignore")
+                Text("Returns this photo to the grid, duels, and the wallpaper album.")
             }
         } else {
-            Button("Ignore This Photo", role: .destructive) {
+            Button(role: .destructive) {
                 CandidateActions.setIgnored(candidate.localIdentifier, true, in: modelContext)
+            } label: {
+                Text("Ignore This Photo")
+                Text("Removes it from the grid, duels, and the wallpaper album without teaching the app anything — unlike a quality verdict, which keeps it in the ranking.")
             }
         }
     }

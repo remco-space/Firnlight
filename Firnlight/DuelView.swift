@@ -478,6 +478,20 @@ struct DuelView: View {
     /// carries, outlives every such remount.
     let model: DuelModel
 
+    /// FR-6.11's pattern applied to this tab: a precondition the tab cannot
+    /// act without is stated as a standing fact before any attempt, not
+    /// discovered from a failed press. `DuelModel` has no notion of Photos
+    /// authorization at all — it only ever sees the candidates already in
+    /// SwiftData — so without this, an ungranted (or since-revoked) library
+    /// reads as an ordinary empty pool: "Nothing to Compare... still working
+    /// through your library", a claim that's false when nothing is or ever
+    /// will be working (FR-8.13: "every state the app can be in says
+    /// on-screen what it means and what the user can do about it").
+    /// Granting itself stays the Library tab's job alone (FR-1.2) — this
+    /// only names the precondition and points there, rather than growing a
+    /// second grant control that would duplicate it (FR-8.10).
+    let authorization: PhotoLibraryAuthorization
+
     @Environment(\.modelContext) private var modelContext
 
     /// The gap between the two duel cards. A named constant rather than a
@@ -490,7 +504,13 @@ struct DuelView: View {
 
     var body: some View {
         Group {
-            if let pair = model.pair {
+            if !authorization.isAuthorized {
+                ContentUnavailableView(
+                    "Photos Access Needed",
+                    systemImage: "lock.rectangle",
+                    description: Text("Firnlight needs access to your whole Photos library before it can compare photos. Grant access from the Library tab.")
+                )
+            } else if let pair = model.pair {
                 VStack(spacing: 16) {
                     Text("Which makes the better wallpaper?")
                         .font(.title3.bold())
@@ -514,6 +534,15 @@ struct DuelView: View {
             }
         }
         .task(id: RankingClock.shared.version) {
+            // FR-6.11's pattern again: no attempt at all while the
+            // precondition doesn't hold, not just a different message over
+            // a no-op one. `authorization.isAuthorized` flipping is exactly
+            // what re-runs `RankingClock`-independent work here too, since
+            // `ContentView`'s own `.task(id: authorization.isAuthorized)`
+            // kicks the library pipeline the moment access is granted,
+            // which eventually bumps `RankingClock` once candidates exist —
+            // this task doesn't need its own separate trigger.
+            guard authorization.isAuthorized else { return }
             // Prepares on first appearance; on later bumps (a scan/exclusion, or
             // the ranker's own debounced cache flush landing) reloads the
             // candidate snapshot so new/excluded photos show up. Coalesced to
@@ -690,30 +719,48 @@ struct DuelView: View {
         HStack(spacing: 8) { choiceProgress }
     }
 
+    /// FR-8.1 (HIG: "using the platform's own controls" — give a button
+    /// chrome matching its importance, and make interactivity visually
+    /// apparent): left unstyled, `Button`'s `.automatic` style resolves
+    /// per-platform to two different things for the exact same row. On
+    /// macOS it's the standard bordered push button — fine, and every
+    /// other screen's persistent action already looks like this. On
+    /// iPhone/iPad `.automatic` in this plain context resolves to
+    /// tint-only text with no border or background: nothing here marks
+    /// four persistent, always-visible commands as tappable buttons rather
+    /// than static labels. `.bordered` fixes iOS/iPadOS without changing
+    /// macOS's existing look (macOS's own `.automatic` push-button chrome
+    /// and `.bordered` render the same there), and none of the four is
+    /// `.borderedProminent` — the two duel cards above are already this
+    /// screen's one prominent action (FR-8.5's cap), and this row is
+    /// deliberately secondary to them.
     @ViewBuilder
     private var verdictButtons: some View {
-        // No winner for the pairwise ranker, but an absolute verdict that
-        // calibrates the album-size suggestion.
-        Button("Both Are Great") { model.judgeBoth(isGood: true) }
-            .disabled(model.isRecording)
-        Button("Both Are Bad") { model.judgeBoth(isGood: false) }
-            .disabled(model.isRecording)
-        Button("Skip") { model.skip() }
-            .disabled(model.isRecording)
-        // FR-5.12: always present rather than appearing/disappearing with
-        // `canUndo`, the same "always in the layout" idiom the spinner below
-        // uses — an item that popped in and out here would drag the other
-        // three buttons sideways under a pointer about to click one of them
-        // again (FR-8.7). Disabled, not hidden, when nothing is pending: a
-        // greyed command still announces that undoing is something this
-        // screen can do (FR-8.13), where a missing one wouldn't.
-        Button("Undo") { model.undo() }
-            .disabled(model.isRecording || !model.canUndo)
-            .accessibilityHint(
-                model.canUndo
-                    ? "Takes back your most recent choice or verdict."
-                    : "Nothing to take back yet."
-            )
+        Group {
+            // No winner for the pairwise ranker, but an absolute verdict that
+            // calibrates the album-size suggestion.
+            Button("Both Are Great") { model.judgeBoth(isGood: true) }
+                .disabled(model.isRecording)
+            Button("Both Are Bad") { model.judgeBoth(isGood: false) }
+                .disabled(model.isRecording)
+            Button("Skip") { model.skip() }
+                .disabled(model.isRecording)
+            // FR-5.12: always present rather than appearing/disappearing with
+            // `canUndo`, the same "always in the layout" idiom the spinner below
+            // uses — an item that popped in and out here would drag the other
+            // three buttons sideways under a pointer about to click one of them
+            // again (FR-8.7). Disabled, not hidden, when nothing is pending: a
+            // greyed command still announces that undoing is something this
+            // screen can do (FR-8.13), where a missing one wouldn't.
+            Button("Undo") { model.undo() }
+                .disabled(model.isRecording || !model.canUndo)
+                .accessibilityHint(
+                    model.canUndo
+                        ? "Takes back your most recent choice or verdict."
+                        : "Nothing to take back yet."
+                )
+        }
+        .buttonStyle(.bordered)
     }
 
     @ViewBuilder
@@ -904,6 +951,20 @@ private struct DuelCard: View {
     /// as its reverse once the photo already carries it (FR-4.6); only the
     /// marking direction spends the pair (FR-4.7) — clearing a verdict
     /// mid-duel doesn't remove the photo from the pool.
+    ///
+    /// FR-8.13/FR-4.13: the two verdict entries below, and the favorite row
+    /// when present, put a second `Text` in the `Button`'s own `label` —
+    /// SwiftUI renders that as a visible subtitle line under the row's
+    /// title in a `Menu`/context menu, not a tooltip. That gives a sighted
+    /// user with neither a pointer (no `.help()`) nor VoiceOver (no
+    /// accessibility hint) an on-screen route to "how it differs in
+    /// consequence from its neighbours" (FR-4.7 vs FR-4.8 above all) —
+    /// reachable as this row's own named command (FR-4.13), on every
+    /// platform, since this same `photoActions` backs both the Mac's
+    /// right-click menu and touch's `actionsMenu` below. The title
+    /// (`Text`'s first line) still only ever states the act — never the
+    /// consequence, per FR-8.13 — the subtitle carries the consequence
+    /// instead.
     @ViewBuilder
     private var photoActions: some View {
         // Never disabled: opening the photo in Photos doesn't touch
@@ -913,21 +974,45 @@ private struct DuelCard: View {
         Button("Open in Photos") {
             CandidateActions.openInPhotos(candidate.localIdentifier, using: openURL)
         }
+        if candidate.isFavorite {
+            Divider()
+            // A disabled, action-less row: purely informational, the same
+            // route as the two verdict rows below but with nothing to do —
+            // the favorite heart badge is a status indicator, not a
+            // control, so there's no act to name here, only the
+            // consequence FR-4.13 requires be discoverable somewhere other
+            // than `.help()`.
+            Button {} label: {
+                Text("Favorite in Photos")
+                Text("Boosts this photo's ranking.")
+            }
+            .disabled(true)
+        }
         Divider()
         // FR-8.12: both entries below end in `duelModel.skip()`, which
         // no-ops under its own `!isRecording` guard — same reasoning as the
         // pick button and `ignoreButton` above.
-        Button(candidate.isNotWallpaperMaterial ? "Clear Verdict" : "Not Wallpaper Material") {
+        Button {
             let wasMarked = candidate.isNotWallpaperMaterial
             CandidateActions.setNotWallpaperMaterial(candidate.localIdentifier, !wasMarked, in: modelContext)
             if !wasMarked {
                 // This pair is spent — advance (FR-4.7).
                 duelModel.skip()
             }
+        } label: {
+            Text(candidate.isNotWallpaperMaterial ? "Clear Verdict" : "Not Wallpaper Material")
+            Text(
+                candidate.isNotWallpaperMaterial
+                    ? "Returns this photo to normal standing."
+                    : "A quality judgment the app learns from — it stays in the ranking but sinks over time."
+            )
         }
         .disabled(duelModel.isRecording)
-        Button("Ignore This Photo", role: .destructive) {
+        Button(role: .destructive) {
             ignore()
+        } label: {
+            Text("Ignore This Photo")
+            Text("Removes it from the grid, duels, and the album without teaching the app anything — unlike Both Are Bad, which keeps it as a quality judgment.")
         }
         .disabled(duelModel.isRecording)
     }
