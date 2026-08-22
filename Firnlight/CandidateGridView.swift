@@ -721,7 +721,10 @@ struct ThumbnailCell: View {
 /// Context-menu actions shared by every image shown in the app.
 @MainActor
 enum CandidateActions {
-    private static let log = Logger(subsystem: "space.remco.Firnlight", category: "CandidateActions")
+    // nonisolated: Logger is Sendable and thread-safe, and openInPhotos's
+    // @Sendable completions (see its doc comment) log from LaunchServices'
+    // own queue — a main-actor-isolated static would trip isolation there.
+    private nonisolated static let log = Logger(subsystem: "space.remco.Firnlight", category: "CandidateActions")
 
     /// FR-4.6's "Open in Photos". Best-effort deep link; the scheme is
     /// undocumented but widely used.
@@ -771,11 +774,16 @@ enum CandidateActions {
                 return
             }
             guard let app = URL(string: "photos-redirect://") else { return }
-            openURL(app) { @Sendable openedApp in
-                if openedApp {
-                    log.notice("No handler for photos://asset — opened the Photos app instead")
-                } else {
-                    log.error("Nothing on this device would open Photos")
+            // Back onto the main actor for the second attempt:
+            // `OpenURLAction.callAsFunction` is main-actor-isolated, and this
+            // completion arrives on LaunchServices' queue (see above).
+            Task { @MainActor in
+                openURL(app) { @Sendable openedApp in
+                    if openedApp {
+                        log.notice("No handler for photos://asset — opened the Photos app instead")
+                    } else {
+                        log.error("Nothing on this device would open Photos")
+                    }
                 }
             }
         }
@@ -819,7 +827,7 @@ enum CandidateActions {
                 try await ranker.prepare()
                 try await ranker.recordVerdicts([localIdentifier], isGood: false, flushSynchronously: true)
             } catch {
-                log.error("Failed to record bad verdict for \(localIdentifier, privacy: .public): \(error)")
+                log.error("Failed to record bad verdict for \(localIdentifier, privacy: .private): \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -839,7 +847,7 @@ enum CandidateActions {
                 try await ranker.prepare()
                 try await ranker.clearVerdicts([localIdentifier])
             } catch {
-                log.error("Failed to clear bad verdict for \(localIdentifier, privacy: .public): \(error)")
+                log.error("Failed to clear bad verdict for \(localIdentifier, privacy: .private): \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -890,7 +898,7 @@ enum CandidateActions {
             record.isExcluded = ignored
             try modelContext.save()
         } catch {
-            log.error("Failed to \(ignored ? "ignore" : "un-ignore") \(localIdentifier, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            log.error("Failed to \(ignored ? "ignore" : "un-ignore") \(localIdentifier, privacy: .private): \(error.localizedDescription, privacy: .public)")
         }
         RankingClock.shared.bump() // grid + export preview + suggestion reload
     }

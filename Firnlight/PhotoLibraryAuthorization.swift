@@ -23,13 +23,26 @@ final class PhotoLibraryAuthorization {
 
     init() {
         status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        log.info("Initial authorization status: \(String(describing: self.status), privacy: .public)")
+        log.info("Initial authorization status: \(Self.describe(self.status), privacy: .public)")
     }
 
     /// Prompts the user for access and updates ``status`` with the result.
     func request() async {
         status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-        log.info("Authorization request result: \(String(describing: self.status), privacy: .public)")
+        log.info("Authorization request result: \(Self.describe(self.status), privacy: .public)")
+    }
+
+    // PHAuthorizationStatus is an imported ObjC enum with no
+    // CustomStringConvertible; String(describing:) yields "rawValue: 3".
+    private static func describe(_ status: PHAuthorizationStatus) -> String {
+        switch status {
+        case .notDetermined: "notDetermined"
+        case .restricted: "restricted"
+        case .denied: "denied"
+        case .authorized: "authorized"
+        case .limited: "limited"
+        @unknown default: "unknown(\(status.rawValue))"
+        }
     }
 
     /// Re-reads the current status — call when the app becomes active so a
@@ -49,7 +62,7 @@ final class PhotoLibraryAuthorization {
         let previous = status
         status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if status != previous {
-            log.info("Authorization changed: \(String(describing: previous), privacy: .public) → \(String(describing: self.status), privacy: .public)")
+            log.info("Authorization changed: \(Self.describe(previous), privacy: .public) → \(Self.describe(self.status), privacy: .public)")
         }
     }
 

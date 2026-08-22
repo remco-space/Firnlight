@@ -125,8 +125,12 @@ final class AnalysisModel {
             /// but a run holding deferred iCloud work never ends (FR-3.4), so
             /// without this the photos it just accepted would sit unscored at
             /// the bottom of the grid for as long as one photo stayed stuck in
-            /// iCloud. Seeded `true` so the first pass through the wait
-            /// rescores whatever the local work found.
+            /// iCloud. Seeded below from whether unscored accepted records
+            /// actually exist (an earlier session ended before its rescore),
+            /// so the no-op runs that library churn triggers — scan finds
+            /// nothing, run analyzes nothing — end without paying the
+            /// whole-table rescore each time (FR-8.2). Defaults `true` on a
+            /// failed read: a wasted rescore beats a stale grid.
             var analyzedSinceRescore = true
             #if os(iOS)
             // Set once the run has told the system it no longer needs to be
@@ -135,6 +139,7 @@ final class AnalysisModel {
             #endif
             do {
                 await queue.beginSession()
+                analyzedSinceRescore = (try? await queue.hasUnscoredAccepted()) ?? true
                 while !Task.isCancelled {
                     // FR-3.6: hold off between batches while the device is
                     // warm or saving power. Batches are already the save
@@ -263,8 +268,14 @@ final class AnalysisModel {
             // Newly accepted photos carry no cached preference score and would
             // otherwise sit unranked at the bottom of the grid until the Duel
             // tab runs; rescore now so ranking is current, then tell views.
-            try? await PreferenceRanker(modelContainer: container).prepare()
-            RankingClock.shared.bump()
+            // Only when this run actually analyzed something (or inherited
+            // unscored records — see the flag's seeding): an unconditional
+            // rescore here made every library-churn no-op run repeat the
+            // whole-table pass and re-key every view keyed on the clock.
+            if analyzedSinceRescore {
+                try? await PreferenceRanker(modelContainer: container).prepare()
+                RankingClock.shared.bump()
+            }
         }
         runTask = task
         return task

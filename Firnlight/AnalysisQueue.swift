@@ -178,10 +178,15 @@ nonisolated struct AnalysisStatistics: Sendable, Equatable {
 /// truly runs off the main thread — see FeatureStore's doc comment for the
 /// `DefaultSerialModelExecutor` caller-thread pitfall this avoids (FR-8.2).
 actor AnalysisQueue {
-    private let modelContext: ModelContext
+    private let modelContainer: ModelContainer
+    // Lazy so the context is created by the actor's own executor on first
+    // isolated access — an actor's init is nonisolated and runs on the
+    // caller's (main) thread, and a ModelContext binds to the queue that
+    // creates it. See FeatureStore's doc comment.
+    private lazy var modelContext = ModelContext(modelContainer)
 
     init(modelContainer: ModelContainer) {
-        self.modelContext = ModelContext(modelContainer)
+        self.modelContainer = modelContainer
     }
 
     private static let log = Logger(subsystem: "space.remco.Firnlight", category: "AnalysisQueue")
@@ -203,6 +208,24 @@ actor AnalysisQueue {
     /// Starts a fresh run session, making deferred records eligible for retry again.
     func beginSession() {
         attemptedNetworkRetries.removeAll()
+    }
+
+    /// Whether any accepted, servable record still lacks a cached preference
+    /// score — the one condition under which a run that analyzed nothing still
+    /// owes the ranking a refresh (an earlier session's run analyzed photos
+    /// and ended before its rescore). Lets the run loop skip the whole-table
+    /// rescore on the no-op runs that library churn triggers, instead of
+    /// paying it unconditionally (FR-8.2).
+    func hasUnscoredAccepted() throws -> Bool {
+        let version = AnalysisGeneration.servingVersion(in: modelContext)
+        var descriptor = FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate {
+                $0.isNature && !$0.isExcluded && $0.analysisVersion == version
+                    && $0.preferenceScore == nil
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetchCount(descriptor) > 0
     }
 
     /// Analyzes the next batch and saves. Returns the number of records
@@ -354,7 +377,7 @@ actor AnalysisQueue {
             // fails with "Failed to create espresso context" — which the app
             // used to present as ten photos waiting on iCloud, on a device with
             // no iCloud account at all.
-            log.error("Vision analysis failed for \(identifier, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            log.error("Vision analysis failed for \(identifier, privacy: .private): \(error.localizedDescription, privacy: .public)")
             return .failed(identifier)
         }
     }
