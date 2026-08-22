@@ -12,6 +12,25 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Fixed
+
+- The database contexts the ranking pipeline's background workers use are now
+  created by the worker that uses them, not on the main thread that happened
+  to construct the worker — ending the repeated "Unbinding from the main
+  queue" recovery path the system log showed on every launch, and removing a
+  latent threading hazard in how photo records were read and written.
+- A library change that turns out to change nothing — the common case, six
+  times in one logged session — no longer pays a full re-scoring of every
+  ranked photo and a refresh of every view watching the ranking.
+- Photo identifiers are no longer written to the system log in the clear when
+  an action on a photo fails; they are redacted like the rest of the log's
+  dynamic values. Authorization changes now log as readable states rather
+  than raw numbers.
+- Opening a photo in Photos from the grid no longer risks a crash when the
+  first, per-photo route fails and the fallback fires from the system's own
+  callback queue (the last main-actor isolation warnings in the build, now
+  zero).
+
 ### Added
 
 - The Duel tab now has an "Undo" command, reachable both as an on-screen

@@ -61,15 +61,21 @@ extension Data {
 /// `suggestedAlbumSize()`'s O(n²) dedupe walk sampled ON the main thread
 /// despite living in a "background" model actor. A plain actor's default
 /// executor lives on the cooperative pool, so cross-actor calls genuinely
-/// hop off main. The context is created in the init and only ever touched
-/// from actor-isolated methods, preserving SwiftData's serialized-access
-/// requirement. `PreferenceRanker` and `AnalysisQueue` follow the same
-/// pattern for the same reason.
+/// hop off main. The context is created lazily on first actor-isolated
+/// access — never in the init, which is nonisolated and so runs on the
+/// caller's (main) thread: a `ModelContext` binds to the queue that creates
+/// it, and a main-created context used from the pool draws Core Data's
+/// "Unbinding from the main queue" recovery path on every use. Created
+/// lazily by the actor's own executor and only ever touched from
+/// actor-isolated methods, it is both correctly bound and serialized.
+/// `PreferenceRanker` and `AnalysisQueue` follow the same pattern for the
+/// same reasons.
 actor FeatureStore {
-    private let modelContext: ModelContext
+    private let modelContainer: ModelContainer
+    private lazy var modelContext = ModelContext(modelContainer)
 
     init(modelContainer: ModelContainer) {
-        self.modelContext = ModelContext(modelContainer)
+        self.modelContainer = modelContainer
     }
 
     struct RankedResult: Sendable, Equatable {
