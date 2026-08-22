@@ -14,6 +14,9 @@ heading when that version is released (FR-10.3).
 
 ### Fixed
 
+- The Export tab now says a device can't yet see the "Firnlight" album as a
+  standing fact the moment the tab appears, instead of only after a failed
+  Sync press (FR-6.11).
 - The database contexts the ranking pipeline's background workers use are now
   created by the worker that uses them, not on the main thread that happened
   to construct the worker — ending the repeated "Unbinding from the main

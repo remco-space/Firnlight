@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Photos
 #if os(macOS)
 import AppKit
 #else
@@ -68,6 +69,29 @@ final class ExportModel {
 
     func refreshAccess() {
         hasInterruptedSync = WallpaperAlbumSync.hasInterruptedSync
+    }
+
+    /// FR-6.11: "the tab states it as a standing fact, before any attempt" —
+    /// checks whether the album is visible on this device *before* a sync is
+    /// ever pressed, so `albumMissing` (and the notice it drives) is on
+    /// screen the moment the tab appears rather than only discoverable from a
+    /// failed Sync press. `sync()`'s own catch of `.albumNotVisible` still
+    /// exists alongside this — a device could lose sight of the album between
+    /// this check and a later Sync — but it is no longer the *first* place the
+    /// user learns of it.
+    ///
+    /// Guarded to whole-library authorization: without it PhotoKit's album
+    /// fetch returns nothing regardless of whether the album truly exists
+    /// elsewhere, which would otherwise print a false "waiting for the album"
+    /// notice before the user has even granted access (FR-1.8 already covers
+    /// that state, in the Library tab). And skipped while a sync, a restore,
+    /// or an unanswered consent question already owns this state, so a
+    /// background poll can't clobber what one of those is in the middle of
+    /// setting for itself.
+    func refreshAlbumVisibility() {
+        guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else { return }
+        guard !isSyncing, !isRestoring, pendingChange == nil else { return }
+        albumMissing = !WallpaperAlbumSync.isAlbumVisible
     }
 
     /// FR-1.9's ask, in the form the write path calls it: hand over the change
@@ -861,9 +885,15 @@ struct ExportView: View {
         // app was in the background, on the tab that acts on it. `.task` covers
         // the tab appearing; `.onChange` covers returning to a tab already on
         // screen, which is exactly the Settings round-trip.
-        .task { model.refreshAccess() }
+        .task {
+            model.refreshAccess()
+            model.refreshAlbumVisibility()
+        }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active { model.refreshAccess() }
+            if newPhase == .active {
+                model.refreshAccess()
+                model.refreshAlbumVisibility()
+            }
         }
         .task(id: RankingClock.shared.version) {
             await model.refreshSuggestion(container: modelContext.container)
