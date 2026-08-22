@@ -262,6 +262,8 @@ The app has three tabs matching the three stages of the journey:
   they can take back or change — at latest in the moment after giving it, and
   where the judgment stays visible, for as long as it does — with the outcome
   as if the corrected judgment had always been the one given (FR-5.2).
+  That moment is spent only by the next judgment, never by the user's gaze:
+  looking elsewhere in the app and back finds the offer still standing.
   Correction is always reachable as a named command (FR-8.3, FR-8.4), never
   only a gesture. A correction is itself a judgment for FR-9's purposes: it
   travels wherever, and by whatever route, the judgment it corrects travels
@@ -302,7 +304,9 @@ The app has three tabs matching the three stages of the journey:
   decide, the doubtful stretch stays out of the suggestion. The estimate is
   reported as it comes out, however small — even zero: no floor, rounding
   step, or presentation nicety readmits photos the judgments or the ranking's
-  shape keep out, or hides a judgment's effect on the count. An estimate
+  shape keep out, or hides a judgment's effect on the count — and the
+  estimate is drawn from everything it speaks for: no working shortcut
+  quietly narrows the pool it considers. An estimate
   below the album's working minimum (FR-6.3) is still reported truthfully,
   but the album itself never shrinks below that minimum; the slider's mark
   then sits at the minimum and is labeled as the minimum, not as the
@@ -317,7 +321,10 @@ The app has three tabs matching the three stages of the journey:
   not as a count — as the same fraction of it, so a choice of half the
   suggested size stays half when the suggestion moves: when the suggestion
   shifts with new analysis and judgments, the set count shifts with it,
-  preserving the user's strictness. A pool
+  preserving the user's strictness. When the suggestion sits below the
+  album's working minimum (FR-6.4), the fraction is measured against that
+  minimum — the smallest count the album actually takes — so the remembered
+  standard never leans on a count the album cannot reach. A pool
   momentarily too small to honour that standard limits only what is shown,
   never what is remembered. The standard is the user's, not the device's: it
   counts on every device, like any other judgment (section 9). The album
@@ -343,7 +350,9 @@ The app has three tabs matching the three stages of the journey:
   user's devices share one album, and unattended changes would let them undo
   each other's.)*
 - **FR-6.11** A device that cannot yet see the Firnlight album says so and
-  waits.
+  waits: the tab states it as a standing fact, before any attempt, and
+  whatever cannot act for that reason shows it (FR-8.12) — the user never
+  learns it first from a failed press.
 
 ## 7. Durability
 
@@ -404,7 +413,10 @@ The app has three tabs matching the three stages of the journey:
 - **FR-8.4** *(iPhone and iPad)* Every command is reachable by touch, and
   nothing lives only behind a gesture the user has to guess.
 - **FR-8.5** Glass belongs to the app's own bars and controls, never to the
-  photos: thumbnails, duel cards and previews stay plain, and glass looks the
+  photos: the photographs themselves — thumbnails, duel cards and previews —
+  stay plain. A control is the app's own wherever it stands, floating over a
+  photo included: there it wears what the platform gives controls layered
+  over content, never a hand-built imitation of it, and glass looks the
   same everywhere it appears. Text on glass stays legible over the user's
   brightest and darkest photos, in light and dark. Nothing the user needs to see
   is half-hidden under a bar, and at most one action per screen is highlighted
@@ -440,7 +452,9 @@ The app has three tabs matching the three stages of the journey:
   same facts somewhere the user would naturally find them. The icon shown is
   the icon: the same rendering the system presents for the app everywhere
   else — Dock, Home Screen, app switcher — never a second, subtly different
-  version of it. Nothing there is
+  version of it; where a platform gives the app no way to present that exact
+  rendering, the facts stand without an icon rather than beside an
+  imitation. Nothing there is
   a template leftover or a placeholder. *(Why: About is where a user checks
   what they are running before reporting a problem or updating; an empty box
   or a stock "1.0" says nobody finished the app.)*
