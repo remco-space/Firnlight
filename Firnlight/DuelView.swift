@@ -771,11 +771,16 @@ private struct DuelCard: View {
             }
             .overlay(alignment: .topLeading) {
                 if candidate.isFavorite {
+                    // FR-8.5: floating over the photo doesn't make this the
+                    // photo's own plain surface — it's the app's own status
+                    // badge, so it wears the platform's real glass rather
+                    // than a hand-built material imitation of it, exactly
+                    // like the ignore control and actions menu below.
                     Image(systemName: "heart.fill")
                         .font(.caption)
                         .foregroundStyle(.pink)
                         .padding(4)
-                        .background(.regularMaterial, in: Circle())
+                        .glassEffect(in: .circle)
                         .padding(6)
                         .help("You marked this photo as a favorite in Photos, which boosts its ranking.")
                 }
@@ -807,15 +812,22 @@ private struct DuelCard: View {
     }
 
     /// FR-5.9's visible ignore control, distinct from "Both Are Bad".
+    /// FR-8.5: this is one of the app's own controls, floating over the
+    /// photo rather than belonging to it, so it wears the platform's real
+    /// glass (`.glassEffect(.regular.interactive())`), never a hand-built
+    /// `.background(.regularMaterial)` imitation of it — only the
+    /// photograph itself stays plain. `.interactive()` because this is a
+    /// pressable control, not a static badge (contrast the favorite heart
+    /// above).
     private var ignoreButton: some View {
         Button(action: ignore) {
             Image(systemName: "eye.slash")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(6)
-                .background(.regularMaterial, in: Circle())
         }
         .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .circle)
         .padding(6)
         .accessibilityLabel("Ignore \(positionLabel)")
         .help("Ignores this photo — it leaves the grid, duels, and the wallpaper album without teaching the app anything (reversible from the Library tab's Ignored view).")
@@ -860,6 +872,9 @@ private struct DuelCard: View {
     /// favorite heart (FR-4.4), the ignore control (FR-5.9), and the pick
     /// target itself. Overlaid on the pick button, like `ignoreButton`, so
     /// opening the menu isn't also recorded as a duel choice.
+    /// FR-8.5: same reasoning as `ignoreButton` above — the app's own
+    /// control floating over the photo, so it wears real glass rather than
+    /// a `.background(.regularMaterial)` stand-in.
     @ViewBuilder
     private var actionsMenu: some View {
         #if !os(macOS)
@@ -870,8 +885,8 @@ private struct DuelCard: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(6)
-                .background(.regularMaterial, in: Circle())
         }
+        .glassEffect(.regular.interactive(), in: .circle)
         .padding(6)
         .accessibilityLabel("Actions for \(positionLabel)")
         #endif

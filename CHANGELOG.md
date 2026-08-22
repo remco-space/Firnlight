@@ -132,6 +132,14 @@ heading when that version is released (FR-10.3).
   dismissible event — never as a persistent explanation for an empty screen
   (FR-8.12, FR-8.13).
 
+- The favorite badge, ignore control, and (on iPhone and iPad) the actions
+  menu floating over each duel card were backed by a hand-built
+  `.background(.regularMaterial)` circle — a stand-in for glass, not glass
+  itself. FR-8.5 now says explicitly that a control floating over a photo is
+  still one of the app's own controls, not part of the photo, so it wears
+  the platform's real glass; these three now use `.glassEffect()`, matching
+  every other bar-style control in the app.
+
 ## [0.19.4] - 2026-08-14
 
 ### Added
