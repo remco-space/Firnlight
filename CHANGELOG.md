@@ -132,6 +132,68 @@ heading when that version is released (FR-10.3).
   dismissible event — never as a persistent explanation for an empty screen
   (FR-8.12, FR-8.13).
 
+- Floating badges and controls over a photo — the favorite heart, the score,
+  the verdict toggles, the actions menu, and the Duel tab's ignore control —
+  were backed by a hand-built `.background(.regularMaterial)` circle or
+  capsule, a stand-in for glass, not glass itself; FR-4.14's own text still
+  described the pre-amendment reading of FR-8.5 that excused it. FR-8.5 was
+  amended to say explicitly that a control floating over a photo is still
+  one of the app's own controls, not part of the photo, and wears the
+  platform's real glass wherever it stands; every one of them now uses
+  `.glassEffect()`, in both the grid (Library and Export previews share
+  `ThumbnailCell`) and the Duel tab, sharing one `GlassEffectContainer` per
+  cell/card rather than rendering in isolation — Apple's own guidance treats
+  a shared container as correctness where glass surfaces sit close together,
+  not just a performance nicety — and FR-4.14 was corrected to match.
+
+  Chasing that fix down surfaced four further defects in the same tab, fixed
+  alongside it: the Duel-tab pick buttons, ignore control, and
+  touch/right-click "Not Wallpaper Material"/"Ignore This Photo" entries
+  stayed clickable while a prior choice, verdict, or Undo was still being
+  recorded, silently swallowing the press against `DuelModel`'s own
+  `!isRecording` guard — they now disable themselves, like the verdict
+  buttons already did (FR-8.12). The failure alert required a pair still be
+  on screen before it could present, so a failure that emptied the
+  candidate pool in the same stroke that caused it left the message queued
+  forever behind "Nothing to Compare" with nothing on screen ever mentioning
+  it — it now presents whenever a failure is queued, regardless of what else
+  the screen is showing (FR-8.12). The favorite badge, the ignore control,
+  and the Library grid's two verdict toggles explained their consequence —
+  and how each differs from its neighbor (FR-4.7 vs FR-4.8, "Both Are Bad"
+  vs Ignore) — only in a `.help()` tooltip, a route touch and VoiceOver
+  users never reach; each now also carries a matching accessibility hint
+  (FR-8.13, FR-4.13). And `DuelModel` — the ranker session, the pending
+  pair, and the Undo offer — was owned by `DuelView`'s own `@State`, which
+  the "Tab" value-based `TabView` genuinely tears down and rebuilds on
+  every switch away from the tab (not just a lazy first build), silently
+  discarding a standing Undo offer; it's now owned by `ContentView` instead
+  — the same fix already applied to the library catch-up pipeline — so the
+  offer survives every tab switch, spent only by the next judgment as
+  FR-5.12 requires, never by the user's gaze.
+
+  Three more turned up chasing that consequence-explaining fix further: the
+  accessibility hint above still left a sighted user without VoiceOver —
+  touch or pointer alike — with no on-screen route to the same distinction,
+  since `.help()` only reaches a mouse and a control's own name may only
+  state its act, never its consequence (FR-8.13). The favorite badge, the
+  Duel tab's ignore control, and the Library grid's two verdict toggles now
+  also carry that explanation as a visible subtitle line on their matching
+  entry in the touch/right-click menu — reachable as that entry's own named
+  command, on every platform (FR-8.13, FR-4.13). Separately, the Duel tab's
+  "Nothing to Compare" empty state showed even with Photos access never
+  granted — a claim that "Firnlight is still working through your library"
+  when nothing was or ever would be, since `DuelModel` never consulted
+  authorization at all; it now states that precondition as a standing fact
+  before attempting anything, pointing to the Library tab where granting
+  actually lives (FR-8.13, FR-6.11's pattern, FR-8.10). And the verdict
+  row's four buttons ("Both Are Great"/"Both Are Bad"/"Skip"/Undo) carried no
+  explicit button style, which resolved to the standard bordered push button
+  on the Mac but to bare tinted text with no border on iPhone/iPad — nothing
+  marked them as tappable on the screen's persistent, always-visible action
+  row. They're `.bordered` now on every platform (matching macOS's existing
+  look exactly), with none `.borderedProminent` — the two duel cards above
+  stay this screen's one prominent action (FR-8.1, FR-8.5).
+
 ## [0.19.4] - 2026-08-14
 
 ### Added

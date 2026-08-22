@@ -24,6 +24,21 @@ struct ContentView: View {
     /// so a launch catch-up and a change-driven one are visibly the same run.
     @State private var catchUp = LibraryCatchUp()
 
+    /// FR-5.12: owned here, not by `DuelView`, for exactly the reason
+    /// `catchUp` above is — `TabView` only builds the *selected* tab, and on
+    /// this "Tab" value-based API that's not just a lazy first build but a
+    /// genuine unmount/remount on every switch away and back (see
+    /// `AppCommands.duelUndoTarget`'s doc comment, which relies on that
+    /// unmount to know when `DuelView` isn't visible). A `DuelModel` owned
+    /// by `DuelView` itself as its own `@State` would be torn down and
+    /// recreated on every such switch, silently discarding `canUndo` /
+    /// `pendingUndo` — exactly the correction offer FR-5.12 requires survive
+    /// "looking elsewhere in the app and back". Owning it at the `TabView`'s
+    /// level instead ties its lifetime to the window (FR-1.7), same as
+    /// `catchUp`, so the offer survives every tab switch and is cleared only
+    /// by what FR-5.12 itself names: the next judgment, or a relaunch.
+    @State private var duelModel = DuelModel()
+
     /// FR-10.8. Shared with the settings switch that turns it on and off — see
     /// `UpdateCheck.shared`.
     private let updates = UpdateCheck.shared
@@ -50,7 +65,7 @@ struct ContentView: View {
                 LibraryTab(authorization: authorization, catchUp: catchUp, updates: updates)
             }
             Tab("Duel", systemImage: "rectangle.split.2x1", value: AppTab.duel) {
-                DuelView()
+                DuelView(model: duelModel, authorization: authorization)
             }
             Tab("Export", systemImage: "square.and.arrow.up", value: AppTab.export) {
                 ExportView()

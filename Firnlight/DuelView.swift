@@ -471,8 +471,28 @@ final class DuelModel {
 
 /// Pairwise A/B picker: click the photo that makes the better wallpaper.
 struct DuelView: View {
+    /// FR-5.12: owned by `ContentView`, not here — see its doc comment on
+    /// `duelModel`. Receiving it as a plain `let` (not `@State`) is what
+    /// keeps this view a pure, stateless expression of the model each time
+    /// `TabView` remounts it; the model itself, and the correction offer it
+    /// carries, outlives every such remount.
+    let model: DuelModel
+
+    /// FR-6.11's pattern applied to this tab: a precondition the tab cannot
+    /// act without is stated as a standing fact before any attempt, not
+    /// discovered from a failed press. `DuelModel` has no notion of Photos
+    /// authorization at all — it only ever sees the candidates already in
+    /// SwiftData — so without this, an ungranted (or since-revoked) library
+    /// reads as an ordinary empty pool: "Nothing to Compare... still working
+    /// through your library", a claim that's false when nothing is or ever
+    /// will be working (FR-8.13: "every state the app can be in says
+    /// on-screen what it means and what the user can do about it").
+    /// Granting itself stays the Library tab's job alone (FR-1.2) — this
+    /// only names the precondition and points there, rather than growing a
+    /// second grant control that would duplicate it (FR-8.10).
+    let authorization: PhotoLibraryAuthorization
+
     @Environment(\.modelContext) private var modelContext
-    @State private var model = DuelModel()
 
     /// The gap between the two duel cards. A named constant rather than a
     /// literal — and deliberately not in `Thresholds`, which holds tuned
@@ -484,7 +504,13 @@ struct DuelView: View {
 
     var body: some View {
         Group {
-            if let pair = model.pair {
+            if !authorization.isAuthorized {
+                ContentUnavailableView(
+                    "Photos Access Needed",
+                    systemImage: "lock.rectangle",
+                    description: Text("Firnlight needs access to your whole Photos library before it can compare photos. Grant access from the Library tab.")
+                )
+            } else if let pair = model.pair {
                 VStack(spacing: 16) {
                     Text("Which makes the better wallpaper?")
                         .font(.title3.bold())
@@ -508,6 +534,15 @@ struct DuelView: View {
             }
         }
         .task(id: RankingClock.shared.version) {
+            // FR-6.11's pattern again: no attempt at all while the
+            // precondition doesn't hold, not just a different message over
+            // a no-op one. `authorization.isAuthorized` flipping is exactly
+            // what re-runs `RankingClock`-independent work here too, since
+            // `ContentView`'s own `.task(id: authorization.isAuthorized)`
+            // kicks the library pipeline the moment access is granted,
+            // which eventually bumps `RankingClock` once candidates exist —
+            // this task doesn't need its own separate trigger.
+            guard authorization.isAuthorized else { return }
             // Prepares on first appearance; on later bumps (a scan/exclusion, or
             // the ranker's own debounced cache flush landing) reloads the
             // candidate snapshot so new/excluded photos show up. Coalesced to
@@ -527,32 +562,46 @@ struct DuelView: View {
         // above only ever runs once `model.pair` is nil, which it never is
         // while a mid-duel action fails (the pair only changes at the very
         // end of `choose`/`judgeBoth`/`undo`, after the failing step), so
-        // that branch alone never caught this. An alert reports it instead,
-        // gated on `pair != nil` so it never fires during the *other*
-        // branches' own reporting (`isPreparing`'s spinner, `stateError`'s
-        // `ContentUnavailableView`) — both already say their piece without
-        // an alert stacked on top, and `model.alertError` is a wholly
-        // separate queue from `stateError` besides (see `DuelModel`'s
-        // `reportRankerFailure`/`reportActionFailure`): a `choose`/
-        // `judgeBoth`/`undo` failure always lands here, regardless of what
-        // `pair` happens to be by the time its catch runs, and a `start`/
-        // `reload` failure caught while there was no pair to show anything
-        // over goes to `stateError` instead — never in this queue to begin
-        // with, so it can never resurface here once a pair finally appears.
+        // that branch alone never caught this. An alert reports it instead.
+        // `model.alertError` is a wholly separate queue from `stateError`
+        // (see `DuelModel`'s `reportRankerFailure`/`reportActionFailure`): a
+        // `choose`/`judgeBoth`/`undo` failure always lands here, regardless
+        // of what `pair` happens to be by the time its catch runs, and a
+        // `start`/`reload` failure caught while there was no pair to show
+        // anything over goes to `stateError` instead — never in this queue
+        // to begin with, so it can never resurface here once a pair finally
+        // appears.
         //
-        // What the alert appears over differs by which action failed:
-        // `choose`/`judgeBoth` always call `setPair(await ranker.nextPair())`
-        // after their catch block, success or failure alike — same as a
-        // skip — so by the time the alert shows, the screen has already
-        // moved on to a fresh pair; the failed pair is gone, and the alert
-        // reports what happened to it a moment ago rather than sitting over
-        // it. That's deliberate, not a gap: the failure means *that* pair
-        // couldn't be judged as shown (typically because a photo in it
-        // stopped being a candidate), so leaving it on screen would only
-        // invite the same failure again. `undo`'s catch, by contrast, never
-        // calls `setPair` — there is nothing valid left to advance to once
-        // the correction itself failed — so its alert genuinely does sit
-        // over the same pair that was on screen when Undo was pressed.
+        // Gated on `model.alertError != nil` alone now — NOT also on
+        // `model.pair != nil`, which this used to require. That gate was
+        // reasoned (wrongly) on an assumption that by the time the alert
+        // shows, `choose`/`judgeBoth` have always already called
+        // `setPair(await ranker.nextPair())` and landed on a fresh pair —
+        // true only while the pool still has one to give. When the same
+        // failure that emptied the pair (a photo the failing pair depended
+        // on stopped being a candidate) also exhausts it, `nextPair()`
+        // legitimately returns nil: the queued failure and a nil `pair` can
+        // coexist, and reporting either the `stateError` panel or "Nothing
+        // to Compare" instead of the alert would silently drop the
+        // just-recorded failure — exactly the silence FR-8.12 forbids, and
+        // exactly the gap validation found: an error could sit queued
+        // forever behind a `pair == nil` screen that never mentions it
+        // (reload() can also null a displayed `pair` out from under a
+        // pending alert on its own bump-driven `Task`, same effect). An
+        // alert stacking momentarily over `isPreparing`'s spinner or
+        // `stateError`'s `ContentUnavailableView` is a strictly better
+        // outcome than the message never appearing — SwiftUI's `.alert` is
+        // a modal presentation, not a layout element, so there is nothing
+        // for it to visually collide with underneath (FR-8.11 doesn't
+        // apply to a sheet floating above the whole screen).
+        //
+        // What the alert appears over now genuinely varies, and that's
+        // fine: often a fresh pair (the common case above), sometimes the
+        // `stateError`/"Nothing to Compare" screen if the pool ran out in
+        // the same stroke, and for `undo`'s catch — which never calls
+        // `setPair`, since there is nothing valid to advance to once the
+        // correction itself failed — always the same pair that was on
+        // screen when Undo was pressed.
         //
         // The "OK" button's action is deliberately empty — see
         // `dismissError()`'s doc comment for why calling it from both here
@@ -560,7 +609,7 @@ struct DuelView: View {
         .alert(
             "Something Went Wrong",
             isPresented: Binding(
-                get: { model.pair != nil && model.alertError != nil },
+                get: { model.alertError != nil },
                 set: { if !$0 { model.dismissError() } }
             )
         ) {
@@ -670,30 +719,48 @@ struct DuelView: View {
         HStack(spacing: 8) { choiceProgress }
     }
 
+    /// FR-8.1 (HIG: "using the platform's own controls" — give a button
+    /// chrome matching its importance, and make interactivity visually
+    /// apparent): left unstyled, `Button`'s `.automatic` style resolves
+    /// per-platform to two different things for the exact same row. On
+    /// macOS it's the standard bordered push button — fine, and every
+    /// other screen's persistent action already looks like this. On
+    /// iPhone/iPad `.automatic` in this plain context resolves to
+    /// tint-only text with no border or background: nothing here marks
+    /// four persistent, always-visible commands as tappable buttons rather
+    /// than static labels. `.bordered` fixes iOS/iPadOS without changing
+    /// macOS's existing look (macOS's own `.automatic` push-button chrome
+    /// and `.bordered` render the same there), and none of the four is
+    /// `.borderedProminent` — the two duel cards above are already this
+    /// screen's one prominent action (FR-8.5's cap), and this row is
+    /// deliberately secondary to them.
     @ViewBuilder
     private var verdictButtons: some View {
-        // No winner for the pairwise ranker, but an absolute verdict that
-        // calibrates the album-size suggestion.
-        Button("Both Are Great") { model.judgeBoth(isGood: true) }
-            .disabled(model.isRecording)
-        Button("Both Are Bad") { model.judgeBoth(isGood: false) }
-            .disabled(model.isRecording)
-        Button("Skip") { model.skip() }
-            .disabled(model.isRecording)
-        // FR-5.12: always present rather than appearing/disappearing with
-        // `canUndo`, the same "always in the layout" idiom the spinner below
-        // uses — an item that popped in and out here would drag the other
-        // three buttons sideways under a pointer about to click one of them
-        // again (FR-8.7). Disabled, not hidden, when nothing is pending: a
-        // greyed command still announces that undoing is something this
-        // screen can do (FR-8.13), where a missing one wouldn't.
-        Button("Undo") { model.undo() }
-            .disabled(model.isRecording || !model.canUndo)
-            .accessibilityHint(
-                model.canUndo
-                    ? "Takes back your most recent choice or verdict."
-                    : "Nothing to take back yet."
-            )
+        Group {
+            // No winner for the pairwise ranker, but an absolute verdict that
+            // calibrates the album-size suggestion.
+            Button("Both Are Great") { model.judgeBoth(isGood: true) }
+                .disabled(model.isRecording)
+            Button("Both Are Bad") { model.judgeBoth(isGood: false) }
+                .disabled(model.isRecording)
+            Button("Skip") { model.skip() }
+                .disabled(model.isRecording)
+            // FR-5.12: always present rather than appearing/disappearing with
+            // `canUndo`, the same "always in the layout" idiom the spinner below
+            // uses — an item that popped in and out here would drag the other
+            // three buttons sideways under a pointer about to click one of them
+            // again (FR-8.7). Disabled, not hidden, when nothing is pending: a
+            // greyed command still announces that undoing is something this
+            // screen can do (FR-8.13), where a missing one wouldn't.
+            Button("Undo") { model.undo() }
+                .disabled(model.isRecording || !model.canUndo)
+                .accessibilityHint(
+                    model.canUndo
+                        ? "Takes back your most recent choice or verdict."
+                        : "Nothing to take back yet."
+                )
+        }
+        .buttonStyle(.bordered)
     }
 
     @ViewBuilder
@@ -741,52 +808,88 @@ private struct DuelCard: View {
     @State private var image: CGImage?
     @State private var isHovering = false
 
+    /// FR-8.1: Apple's own Liquid Glass guidance treats sharing a
+    /// `GlassEffectContainer` across nearby glass surfaces as correctness,
+    /// not polish — glass cannot sample other glass, so elements close
+    /// enough to interfere need one shared container to render and blend
+    /// correctly. This card carries three independent glass surfaces (the
+    /// favorite badge, the ignore control, the actions menu), so all three
+    /// share one container rather than each calling `.glassEffect()` in
+    /// isolation.
+    private static let glassContainerSpacing: CGFloat = 16
+
     var body: some View {
-        Button(action: action) {
-            Rectangle()
-                .fill(.quaternary)
-                .aspectRatio(Thresholds.desktopAspectRatio, contentMode: .fit)
+        GlassEffectContainer(spacing: Self.glassContainerSpacing) {
+            Button(action: action) {
+                Rectangle()
+                    .fill(.quaternary)
+                    .aspectRatio(Thresholds.desktopAspectRatio, contentMode: .fit)
+                    .overlay {
+                        if let image {
+                            Image(decorative: image, scale: 1)
+                                .resizable()
+                                .scaledToFill()
+                        } else {
+                            // Only for a card genuinely held up (an original
+                            // still coming down from iCloud). A cached image
+                            // arrives faster than the delay, and a spinner
+                            // blinking on every advance through the pair
+                            // queue is exactly the wait FR-8.7 says not to
+                            // report.
+                            ProgressView()
+                                .shownWhileWaiting()
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                // Bound clicking/right-clicking to the visible card; a
+                // panorama's scaledToFill overflow is clipped visually but
+                // not for hit-testing.
+                .contentShape(RoundedRectangle(cornerRadius: 10))
                 .overlay {
-                    if let image {
-                        Image(decorative: image, scale: 1)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        // Only for a card genuinely held up (an original still
-                        // coming down from iCloud). A cached image arrives
-                        // faster than the delay, and a spinner blinking on
-                        // every advance through the pair queue is exactly the
-                        // wait FR-8.7 says not to report.
-                        ProgressView()
-                            .shownWhileWaiting()
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(isHovering ? Color.accentColor : .clear, lineWidth: 3)
+                }
+                .overlay(alignment: .topLeading) {
+                    if candidate.isFavorite {
+                        // FR-8.5: floating over the photo doesn't make this
+                        // the photo's own plain surface — it's the app's own
+                        // status badge, so it wears the platform's real
+                        // glass rather than a hand-built material imitation
+                        // of it, exactly like the ignore control and actions
+                        // menu below.
+                        Image(systemName: "heart.fill")
+                            .font(.caption)
+                            .foregroundStyle(.pink)
+                            .padding(4)
+                            .glassEffect(in: .circle)
+                            .padding(6)
+                            .help("You marked this photo as a favorite in Photos, which boosts its ranking.")
+                            // FR-8.13/FR-4.13: the heart's meaning ("marked a
+                            // favorite in Photos, boosts its ranking") used to
+                            // live only in `.help()`, a route touch and
+                            // VoiceOver users never reach. The hint carries
+                            // the same words through the route that does
+                            // reach them, alongside `.help()` for pointer
+                            // users — see `ignoreButton` below for the same
+                            // pairing on a pressable control.
+                            .accessibilityHint("Marked as a favorite in Photos, which boosts its ranking.")
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-            // Bound clicking/right-clicking to the visible card; a panorama's
-            // scaledToFill overflow is clipped visually but not for hit-testing.
-            .contentShape(RoundedRectangle(cornerRadius: 10))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(isHovering ? Color.accentColor : .clear, lineWidth: 3)
             }
-            .overlay(alignment: .topLeading) {
-                if candidate.isFavorite {
-                    Image(systemName: "heart.fill")
-                        .font(.caption)
-                        .foregroundStyle(.pink)
-                        .padding(4)
-                        .background(.regularMaterial, in: Circle())
-                        .padding(6)
-                        .help("You marked this photo as a favorite in Photos, which boosts its ranking.")
-                }
-            }
+            .buttonStyle(.plain)
+            // FR-8.12: a press mid-recording would silently no-op against
+            // `DuelModel.choose`'s own `!isRecording` guard — the control
+            // would still look pickable while doing nothing, exactly what
+            // "a control that offers itself as available does what it
+            // offers" forbids. Same reasoning covers `ignoreButton` and the
+            // duel-state entries in `photoActions` below.
+            .disabled(duelModel.isRecording)
+            .accessibilityLabel(candidate.isFavorite ? "\(positionLabel), favorite" : positionLabel)
+            // Ignore lives in its own button overlaid on (in front of) the
+            // pick button, so its taps aren't swallowed as a duel choice.
+            .overlay(alignment: .topTrailing) { ignoreButton }
+            .overlay(alignment: .bottomTrailing) { actionsMenu }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(candidate.isFavorite ? "\(positionLabel), favorite" : positionLabel)
-        // Ignore lives in its own button overlaid on (in front of) the pick
-        // button, so its taps aren't swallowed as a duel choice.
-        .overlay(alignment: .topTrailing) { ignoreButton }
-        .overlay(alignment: .bottomTrailing) { actionsMenu }
         .contextMenu { photoActions }
         .onHover { isHovering = $0 }
         // Duel cards are already focusable (they're Buttons); publish the
@@ -807,18 +910,39 @@ private struct DuelCard: View {
     }
 
     /// FR-5.9's visible ignore control, distinct from "Both Are Bad".
+    /// FR-8.5: this is one of the app's own controls, floating over the
+    /// photo rather than belonging to it, so it wears the platform's real
+    /// glass (`.glassEffect(.regular.interactive())`), never a hand-built
+    /// `.background(.regularMaterial)` imitation of it — only the
+    /// photograph itself stays plain. `.interactive()` because this is a
+    /// pressable control, not a static badge (contrast the favorite heart
+    /// above). Shares `body`'s `GlassEffectContainer` with the favorite
+    /// badge and the actions menu (FR-8.1) rather than rendering in
+    /// isolation.
     private var ignoreButton: some View {
         Button(action: ignore) {
             Image(systemName: "eye.slash")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(6)
-                .background(.regularMaterial, in: Circle())
         }
         .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .circle)
         .padding(6)
+        // FR-8.12: see the pick button's own `.disabled` comment above — a
+        // press mid-recording would silently no-op against `DuelModel.skip`'s
+        // own `!isRecording` guard.
+        .disabled(duelModel.isRecording)
         .accessibilityLabel("Ignore \(positionLabel)")
         .help("Ignores this photo — it leaves the grid, duels, and the wallpaper album without teaching the app anything (reversible from the Library tab's Ignored view).")
+        // FR-8.13/FR-4.13: how this differs in consequence from "Both Are
+        // Bad" (FR-5.9) — removal versus a quality judgment the ranking
+        // learns from — used to be explained only in the `.help()` tooltip
+        // above, a route pointer users get and touch/VoiceOver users never
+        // do. The hint restates the same distinction through the route that
+        // reaches them, so the difference is discoverable before the act on
+        // every platform, not just under a mouse.
+        .accessibilityHint("Removes this photo from the grid, duels, and the wallpaper album without teaching the app anything — unlike Both Are Bad, which keeps it and marks it as a quality judgment.")
     }
 
     /// FR-4.6's three actions, shared by the right-click menu and — on iPhone
@@ -827,23 +951,70 @@ private struct DuelCard: View {
     /// as its reverse once the photo already carries it (FR-4.6); only the
     /// marking direction spends the pair (FR-4.7) — clearing a verdict
     /// mid-duel doesn't remove the photo from the pool.
+    ///
+    /// FR-8.13/FR-4.13: the two verdict entries below, and the favorite row
+    /// when present, put a second `Text` in the `Button`'s own `label` —
+    /// SwiftUI renders that as a visible subtitle line under the row's
+    /// title in a `Menu`/context menu, not a tooltip. That gives a sighted
+    /// user with neither a pointer (no `.help()`) nor VoiceOver (no
+    /// accessibility hint) an on-screen route to "how it differs in
+    /// consequence from its neighbours" (FR-4.7 vs FR-4.8 above all) —
+    /// reachable as this row's own named command (FR-4.13), on every
+    /// platform, since this same `photoActions` backs both the Mac's
+    /// right-click menu and touch's `actionsMenu` below. The title
+    /// (`Text`'s first line) still only ever states the act — never the
+    /// consequence, per FR-8.13 — the subtitle carries the consequence
+    /// instead.
     @ViewBuilder
     private var photoActions: some View {
+        // Never disabled: opening the photo in Photos doesn't touch
+        // `duelModel` at all, so it stays available through a duel action
+        // in flight (FR-8.12 only requires disabling what would actually
+        // no-op).
         Button("Open in Photos") {
             CandidateActions.openInPhotos(candidate.localIdentifier, using: openURL)
         }
+        if candidate.isFavorite {
+            Divider()
+            // A disabled, action-less row: purely informational, the same
+            // route as the two verdict rows below but with nothing to do —
+            // the favorite heart badge is a status indicator, not a
+            // control, so there's no act to name here, only the
+            // consequence FR-4.13 requires be discoverable somewhere other
+            // than `.help()`.
+            Button {} label: {
+                Text("Favorite in Photos")
+                Text("Boosts this photo's ranking.")
+            }
+            .disabled(true)
+        }
         Divider()
-        Button(candidate.isNotWallpaperMaterial ? "Clear Verdict" : "Not Wallpaper Material") {
+        // FR-8.12: both entries below end in `duelModel.skip()`, which
+        // no-ops under its own `!isRecording` guard — same reasoning as the
+        // pick button and `ignoreButton` above.
+        Button {
             let wasMarked = candidate.isNotWallpaperMaterial
             CandidateActions.setNotWallpaperMaterial(candidate.localIdentifier, !wasMarked, in: modelContext)
             if !wasMarked {
                 // This pair is spent — advance (FR-4.7).
                 duelModel.skip()
             }
+        } label: {
+            Text(candidate.isNotWallpaperMaterial ? "Clear Verdict" : "Not Wallpaper Material")
+            Text(
+                candidate.isNotWallpaperMaterial
+                    ? "Returns this photo to normal standing."
+                    : "A quality judgment the app learns from — it stays in the ranking but sinks over time."
+            )
         }
-        Button("Ignore This Photo", role: .destructive) {
+        .disabled(duelModel.isRecording)
+        Button(role: .destructive) {
             ignore()
+        } label: {
+            Text("Ignore This Photo")
+            Text("Removes it from the grid, duels, and the album without teaching the app anything — unlike Both Are Bad, which keeps it as a quality judgment.")
         }
+        .disabled(duelModel.isRecording)
     }
 
     /// FR-8.4 *(iPhone and iPad)*: the three actions need a home that isn't a
@@ -860,6 +1031,9 @@ private struct DuelCard: View {
     /// favorite heart (FR-4.4), the ignore control (FR-5.9), and the pick
     /// target itself. Overlaid on the pick button, like `ignoreButton`, so
     /// opening the menu isn't also recorded as a duel choice.
+    /// FR-8.5: same reasoning as `ignoreButton` above — the app's own
+    /// control floating over the photo, so it wears real glass rather than
+    /// a `.background(.regularMaterial)` stand-in.
     @ViewBuilder
     private var actionsMenu: some View {
         #if !os(macOS)
@@ -870,8 +1044,8 @@ private struct DuelCard: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(6)
-                .background(.regularMaterial, in: Circle())
         }
+        .glassEffect(.regular.interactive(), in: .circle)
         .padding(6)
         .accessibilityLabel("Actions for \(positionLabel)")
         #endif
