@@ -454,9 +454,26 @@ private struct LibraryStatusView: View {
     private func outcomeContent(_ outcome: LibraryScanner.Outcome) -> some View {
         switch outcome {
         case .finished(let candidates, let examined, let newlyAdded, let editedQueued, let removed):
-            Label("\(candidates) wallpaper candidates", systemImage: "photo.stack")
+            // FR-4.13: this count and the Analysis card's "Wallpaper
+            // candidates" stat below it are two different numbers over the
+            // same word — this one is everything that merely qualifies by
+            // size and shape, Vision hasn't looked yet; that one is what
+            // survived Vision's checks and can actually compete for the
+            // album. They used to share the same visible phrase
+            // ("N wallpaper candidates" over "Wallpaper candidates N"),
+            // distinguished only by a `.help()` tooltip — invisible to
+            // keyboard, VoiceOver, and touch, so those users saw two
+            // contradicting-looking numbers with no explanation at all
+            // (observed live: "3 wallpaper candidates" over "Wallpaper
+            // candidates 0"). "Possible" plus the sentence below now carries
+            // that distinction in words everyone can read.
+            Label("\(candidates) possible candidates found", systemImage: "photo.stack")
                 .font(.callout.weight(.semibold))
-                .help("Photos whose size and shape qualify them for the wallpaper pipeline; Vision analysis filters them further.")
+                .help("Photos whose size and shape qualify them for the wallpaper pipeline; Vision analysis below filters them further.")
+            Text("Vision analysis narrows this to the wallpaper candidates shown below.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Text(scanSummary(examined: examined, newlyAdded: newlyAdded, editedQueued: editedQueued, removed: removed))
                 .font(.callout)
                 .foregroundStyle(.secondary)

@@ -104,7 +104,14 @@ final class AnalysisModel {
         // The shared owner, not a fresh one per run: see ContinuedAnalysisTask.
         let continued = ContinuedAnalysisTask.shared
         stoppedInBackground = false
-        Task { await continued.begin(onCancel: { [weak self] in self?.stopFromBackground() }) }
+        // `[weak self]` repeated on the outer `Task` too, matching the
+        // compiler's own fix-it: with only the inner closure marked weak,
+        // Swift 6.2 flags the mismatch against this scope's own implicit
+        // strong capture — nothing in the outer closure's body reads `self`,
+        // but the capture-list mismatch is what it warns about, not an
+        // actual retain. No behavior changes: the outer `Task` never touches
+        // `self` either way.
+        Task { [weak self] in await continued.begin(onCancel: { [weak self] in self?.stopFromBackground() }) }
         #endif
 
         let task = Task {

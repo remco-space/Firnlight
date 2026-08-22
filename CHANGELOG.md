@@ -16,7 +16,16 @@ heading when that version is released (FR-10.3).
 
 - The Export tab now says a device can't yet see the "Firnlight" album as a
   standing fact the moment the tab appears, instead of only after a failed
-  Sync press (FR-6.11).
+  Sync press (FR-6.11), and clears a stale sync success tally (or error)
+  rather than leaving it standing beside that notice if the album later
+  drops out of sight (FR-8.12).
+- The Export tab now says plainly when it can't show a size control or a
+  suggestion because Photos access hasn't been granted yet, instead of
+  showing "Suggested: 0" with no explanation (FR-8.13).
+- The Library tab's pre-analysis candidate count no longer reads as
+  contradicting the Analysis card's own "Wallpaper candidates" count below
+  it — the two numbers measure different things, and that difference is
+  now said in visible words rather than only a hover tooltip (FR-4.13).
 - The database contexts the ranking pipeline's background workers use are now
   created by the worker that uses them, not on the main thread that happened
   to construct the worker — ending the repeated "Unbinding from the main

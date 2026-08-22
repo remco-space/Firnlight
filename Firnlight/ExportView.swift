@@ -38,6 +38,16 @@ final class ExportModel {
     /// another one (FR-6.10). See `WallpaperAlbumSync.restoreInterruptedSync`.
     private(set) var hasInterruptedSync = false
     private(set) var isRestoring = false
+    /// FR-8.13: whether this device has whole-library Photos access (FR-1.8).
+    /// Without it `LibraryCatchUp` never scans, so the candidate pool stays
+    /// permanently empty — `totalAccepted` reads a true 0 that otherwise
+    /// looks identical to "ready, but genuinely nothing qualifies yet". Read
+    /// directly via PhotoKit rather than the Library tab's own
+    /// `PhotoLibraryAuthorization` object: `TabView` mounts only the
+    /// selected tab, so `ExportView` has no live reference to it, and a
+    /// second observable object threaded in for one status read would be
+    /// more machinery than the check itself.
+    private(set) var isAuthorized = false
     /// One reused model actor (and its ModelContext) for both reload tasks.
     /// Spinning up a fresh FeatureStore per keystroke/re-rank churned contexts
     /// against the store; `.task(id:)` already cancels a superseded run, so a
@@ -68,6 +78,7 @@ final class ExportModel {
     private var isAsking = false
 
     func refreshAccess() {
+        isAuthorized = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
         hasInterruptedSync = WallpaperAlbumSync.hasInterruptedSync
     }
 
@@ -91,7 +102,24 @@ final class ExportModel {
     func refreshAlbumVisibility() {
         guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else { return }
         guard !isSyncing, !isRestoring, pendingChange == nil else { return }
-        albumMissing = !WallpaperAlbumSync.isAlbumVisible
+        let visible = WallpaperAlbumSync.isAlbumVisible
+        albumMissing = !visible
+        if !visible {
+            // FR-8.12/FR-8.13: mirrors `sync()`'s own `.albumNotVisible`
+            // catch below. Without this, a device that could see the album a
+            // moment ago (the last sync's success tally is still standing)
+            // and then loses sight of it — deleted or renamed while the app
+            // was backgrounded — would show that stale "Album has N photos"
+            // success label at the same time as the fresh "waiting for the
+            // album" notice this sets: a claimed success next to a state
+            // that says the app cannot currently confirm it, which is
+            // exactly the contradiction FR-8.12 forbids and FR-8.13 asks
+            // every on-screen state to avoid. A stale error is cleared for
+            // the same reason — it no longer describes what is standing in
+            // its place.
+            outcome = nil
+            errorMessage = nil
+        }
     }
 
     /// FR-1.9's ask, in the form the write path calls it: hand over the change
@@ -955,9 +983,55 @@ struct ExportView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                sizeControls
+                // FR-8.13: without whole-library access `LibraryCatchUp`
+                // never scans, so `totalAccepted` reads a true 0 forever —
+                // indistinguishable, to the controls below, from "ready, and
+                // genuinely nothing qualifies". Left alone, this state showed
+                // the full size slider reading "Suggested: 0" with nothing on
+                // screen saying why, or what to do about it. Stated here
+                // instead, in place of controls that have nothing honest to
+                // offer without a real pool behind them.
+                if !model.isAuthorized {
+                    noAccessNotice
+                } else {
+                    authorizedControls
+                }
+            }
+            .padding(8)
+        }
+    }
 
-                HStack(spacing: 12) {
+    /// FR-1.8/FR-8.13: this device hasn't granted the whole-library access
+    /// the album needs. Named after the one thing the user can do about it
+    /// rather than left to the slider's own disabled state to explain, and
+    /// pointed at the Library tab's own grant prompt (FR-1.2) rather than
+    /// repeating a second one here (FR-8.10).
+    private var noAccessNotice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(
+                "Firnlight needs access to your whole Photos library before it can build an album.",
+                systemImage: "lock.rectangle"
+            )
+            .foregroundStyle(.orange)
+            Text("Grant access from the Library tab, then come back here.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// Everything `controls` shows once whole-library access is granted: the
+    /// size slider, the Sync button and its outcome, and the three standing
+    /// notices. Split out from `controls` only so `noAccessNotice` above has
+    /// something to stand in place of — nothing here changed.
+    private var authorizedControls: some View {
+        Group {
+            sizeControls
+
+            HStack(spacing: 12) {
                     Button("Sync Album") {
                         model.sync(container: modelContext.container)
                     }
@@ -1008,12 +1082,14 @@ struct ExportView: View {
 
                 // The three standing notices sit *under* the Sync button, not
                 // between it and the count (FR-8.7). Each of them appears and
-                // disappears while this tab is on screen — `albumMissing` as
-                // the direct result of pressing Sync, the other two on a
-                // return from Settings — and above the button that meant the
-                // button dropped half a card's height away from the pointer
-                // that had just clicked it. Below, they push only the preview
-                // grid, which nothing is aiming at.
+                // disappears while this tab is on screen — `albumMissing` the
+                // moment `refreshAlbumVisibility` finds the album gone,
+                // standing fact rather than the result of a press (FR-6.11),
+                // the other two on a return from Settings or the end of a
+                // sync — and above the button that meant the button dropped
+                // half a card's height away from the pointer that had just
+                // clicked it. Below, they push only the preview grid, which
+                // nothing is aiming at.
                 if model.albumMissing {
                     albumMissingNotice
                 }
@@ -1026,8 +1102,6 @@ struct ExportView: View {
                     Text(errorMessage)
                         .foregroundStyle(.red)
                 }
-            }
-            .padding(8)
         }
     }
 
