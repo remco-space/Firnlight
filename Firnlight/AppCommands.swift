@@ -223,6 +223,18 @@ struct AppCommands: Commands {
             }
         }
 
+        // FR-8.10: macOS gives every app a Help menu holding one item, "App
+        // Help", which opens a help book. Firnlight ships none — the item is
+        // there because AppKit puts it there, traces back to no requirement,
+        // and answers a press by doing nothing at all (FR-8.12's "a control
+        // that offers itself as available does what it offers", in the one
+        // place the app didn't author). Replacing the group with nothing
+        // removes the whole menu, which is what "the interface holds only
+        // what this brief calls for" means here: the app's own explanations
+        // live where the thing being explained is (FR-8.4), not behind a
+        // menu that leads nowhere.
+        CommandGroup(replacing: .help) {}
+
         CommandMenu("Photo") {
             Button("Open in Photos") {
                 guard let focusedPhoto else { return }

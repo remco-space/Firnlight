@@ -883,6 +883,9 @@ enum CandidateActions {
                 try await ranker.recordVerdicts([localIdentifier], isGood: false, flushSynchronously: true)
             } catch {
                 log.error("Failed to record bad verdict for \(localIdentifier, privacy: .private): \(error.localizedDescription, privacy: .public)")
+                ActionFailures.shared.report(
+                    "This photo wasn’t marked as not wallpaper material. \(error.localizedDescription)"
+                )
             }
         }
     }
@@ -903,6 +906,9 @@ enum CandidateActions {
                 try await ranker.clearVerdicts([localIdentifier])
             } catch {
                 log.error("Failed to clear bad verdict for \(localIdentifier, privacy: .private): \(error.localizedDescription, privacy: .public)")
+                ActionFailures.shared.report(
+                    "This photo’s mark wasn’t removed — it is still marked as not wallpaper material. \(error.localizedDescription)"
+                )
             }
         }
     }
@@ -940,13 +946,15 @@ enum CandidateActions {
         let descriptor = FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.localIdentifier == localIdentifier }
         )
-        // Logged rather than swallowed. FR-8.12 asks that no failure be
-        // silent, and this one reaches the user by the shortest possible
-        // route: anything that stops this write is the store itself, and the
-        // reload this bump triggers reads that same store — so the grid's own
-        // `loadError` says so a moment later, in words, where the photos would
-        // have been. What must not happen is the write failing and the app
-        // carrying on as if the photo had been ignored.
+        // Said, not swallowed (FR-8.12). The grid's own `loadError` covers
+        // part of this — anything that stops this write is the store itself,
+        // and the reload the bump below triggers reads that same store — but
+        // only where the grid is what the user is looking at: the same toggle
+        // from the Photo menu bar, or from a duel card, has no grid on screen
+        // to say anything. So the failure also goes to the app-level channel
+        // every other route into `CandidateActions` uses. What must not
+        // happen is the write failing and the app carrying on as if the photo
+        // had been ignored.
         do {
             guard let record = try modelContext.fetch(descriptor).first else { return }
             modelContext.insert(IgnoreRecord(photoKey: record.judgmentKey, isIgnored: ignored, timestamp: Date()))
@@ -954,6 +962,11 @@ enum CandidateActions {
             try modelContext.save()
         } catch {
             log.error("Failed to \(ignored ? "ignore" : "un-ignore") \(localIdentifier, privacy: .private): \(error.localizedDescription, privacy: .public)")
+            ActionFailures.shared.report(
+                ignored
+                    ? "This photo wasn’t ignored. \(error.localizedDescription)"
+                    : "This photo wasn’t brought back. \(error.localizedDescription)"
+            )
         }
         RankingClock.shared.bump() // grid + export preview + suggestion reload
     }

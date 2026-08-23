@@ -78,6 +78,19 @@ actor PreferenceRanker {
         let timestamp: Date
     }
 
+    /// The same durable receipt for exactly the `VerdictRecord`s
+    /// `recordVerdicts` just wrote — every key it filed under, and the one
+    /// timestamp they all share. `undoVerdicts` voids precisely these rows,
+    /// which is what keeps an in-the-moment correction (FR-5.12) from
+    /// touching any *other* verdict the same photos carry: see
+    /// `VerdictRecord.isVoided` for what appending a clearing record instead
+    /// would silently throw away.
+    struct VerdictReceipt: Sendable, Equatable {
+        let keys: [String]
+        let isGood: Bool
+        let timestamp: Date
+    }
+
     /// FR-8.12: a control that offers Undo has to be honoring a judgment that
     /// was actually recorded. `record`/`recordVerdicts`/`undoLastChoice` throw
     /// these rather than silently doing nothing when a photo the caller named
@@ -373,7 +386,11 @@ actor PreferenceRanker {
     func pair(first: String, second: String) -> DuelPair? {
         guard first != second,
               let firstIndex = indexByID[first], let secondIndex = indexByID[second],
-              !judgedPairs.contains(Self.pairKey(first, second)) else {
+              // `judgedPairs` is keyed by `judgmentKey`, not by local
+              // identifier (FR-9.2 files judgments under the cloud-stable
+              // key), so the resumed identifiers must be translated before
+              // the set can answer "was this pair already judged?".
+              !judgedPairs.contains(Self.pairKey(entries[firstIndex].key, entries[secondIndex].key)) else {
             return nil
         }
         return DuelPair(first: candidate(for: entries[firstIndex]), second: candidate(for: entries[secondIndex]))
@@ -528,7 +545,7 @@ actor PreferenceRanker {
             guard i != j else { continue }
             let a = pool[i], b = pool[j]
 
-            guard !judgedPairs.contains(Self.pairKey(a.id, b.id)) else { continue }
+            guard !judgedPairs.contains(Self.pairKey(a.key, b.key)) else { continue }
             guard vDSP.distanceSquared(a.vector, b.vector) >= thresholdSquared else { continue }
 
             let delta = abs(a.score - b.score)
@@ -548,7 +565,7 @@ actor PreferenceRanker {
             let shuffled = pool.shuffled()
             outer: for i in shuffled.indices {
                 for j in shuffled.indices[(i + 1)...] {
-                    guard !judgedPairs.contains(Self.pairKey(shuffled[i].id, shuffled[j].id)) else { continue }
+                    guard !judgedPairs.contains(Self.pairKey(shuffled[i].key, shuffled[j].key)) else { continue }
                     guard vDSP.distanceSquared(shuffled[i].vector, shuffled[j].vector) >= thresholdSquared else { continue }
                     best = (shuffled[i], shuffled[j], 0)
                     break outer
@@ -625,7 +642,8 @@ actor PreferenceRanker {
     ///   the next relaunch. A single grid click writing once is not the rapid
     ///   dueling case FR-8.2 guards against, so flushing it synchronously is
     ///   safe.
-    func recordVerdicts(_ localIdentifiers: [String], isGood: Bool, flushSynchronously: Bool = false) throws {
+    @discardableResult
+    func recordVerdicts(_ localIdentifiers: [String], isGood: Bool, flushSynchronously: Bool = false) throws -> VerdictReceipt {
         let now = Date()
         // Callers hand over local identifiers (that is what the UI and
         // PhotoKit deal in); the verdict is filed under the device-independent
@@ -645,8 +663,9 @@ actor PreferenceRanker {
             modelContext.insert(VerdictRecord(photoKey: key, isGood: isGood, timestamp: now))
         }
         try modelContext.save()
+        let receipt = VerdictReceipt(keys: keys, isGood: isGood, timestamp: now)
 
-        guard !isGood else { return }
+        guard !isGood else { return receipt }
         for key in keys {
             penalizeBadVerdict(key: key)
             weights.judgmentCount = (weights.judgmentCount ?? 0) + 1
@@ -658,6 +677,7 @@ actor PreferenceRanker {
         } else {
             scheduleCacheFlush()
         }
+        return receipt
     }
 
     /// FR-4.6's toggle un-doing a bad verdict, and FR-4.7's "return to normal
@@ -813,6 +833,60 @@ actor PreferenceRanker {
             throw RankerError.nothingToUndo
         }
         match.isVoided = true
+        try modelContext.save()
+
+        isPrepared = false
+        try prepare()
+
+        Task { @MainActor in RankingClock.shared.bump() }
+    }
+
+    /// FR-5.12 for "Both Are Great"/"Both Are Bad": reverses exactly the
+    /// `recordVerdicts` call that produced `receipt` — the Duel tab's Undo,
+    /// offered in the moment right after the verdict.
+    ///
+    /// Deliberately not `clearVerdicts`, which this used to call. Clearing is
+    /// FR-4.6's toggle and speaks about the photo's whole standing: it retires
+    /// every bad verdict the photo carries, from any surface and any device.
+    /// Undo speaks about one judgment. A photo already marked Not Wallpaper
+    /// Material in the Library, then given a slipped "Both Are Great" here,
+    /// would have come out of the Undo *unmarked* — a judgment the user never
+    /// took back, dropped as a side effect of correcting a different one, and
+    /// the opposite of FR-5.12's "outcome as if the corrected judgment had
+    /// always been the one given". Voiding precisely the rows the receipt
+    /// names leaves everything else the photo stands for exactly where it was.
+    ///
+    /// All-or-nothing, and matched on the receipt's own triple (keys, verdict
+    /// side, timestamp) rather than "the photo's most recent verdict", for the
+    /// same reasons `undoLastChoice` documents: a receipt for rows that aren't
+    /// there — never written, or already voided — throws
+    /// `RankerError.nothingToUndo` instead of quietly voiding some other
+    /// verdict, or nothing at all while reporting success (FR-8.12).
+    ///
+    /// Forces the same full-replay rebuild as `undoLastChoice`/`clearVerdicts`:
+    /// a bad verdict took an SGD step, and SGD has no inverse, so un-applying
+    /// it is only possible by leaving it out of a fresh replay. A *good*
+    /// verdict trains nothing and would need no replay, but it does feed the
+    /// album-size calibration, which `prepare()` is what refreshes — and one
+    /// path for both is worth more here than saving a rebuild on the rarer of
+    /// two rare actions.
+    func undoVerdicts(_ receipt: VerdictReceipt) throws {
+        let timestamp = receipt.timestamp
+        let isGood = receipt.isGood
+        let candidates = try modelContext.fetch(FetchDescriptor<VerdictRecord>(
+            predicate: #Predicate {
+                $0.timestamp == timestamp && $0.isGood == isGood
+                    && !$0.isVoided && !$0.isCleared
+            }
+        ))
+        let wanted = Set(receipt.keys)
+        let matches = candidates.filter { wanted.contains($0.photoKey) }
+        guard Set(matches.map(\.photoKey)) == wanted else {
+            throw RankerError.nothingToUndo
+        }
+        for match in matches {
+            match.isVoided = true
+        }
         try modelContext.save()
 
         isPrepared = false

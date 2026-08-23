@@ -12,6 +12,8 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-08-23
+
 ### Added
 
 - The app now notices, on its own, when the system's Vision framework starts
@@ -36,6 +38,37 @@ heading when that version is released (FR-10.3).
 
 ### Fixed
 
+- A pair the user has already judged is no longer offered again: the check
+  that refuses to re-ask a decided pair was comparing the two photos by their
+  identity on this device, while judgments are filed under the identity that
+  travels between devices, so it recognised almost nothing and the same pair
+  could come back — training the ranking twice on one decision (FR-5.5). The
+  same applies to the pair restored on relaunch.
+- Taking back a "Both Are Great"/"Both Are Bad" verdict now takes back exactly
+  that verdict. It used to clear the photo's standing outright, so undoing a
+  slipped verdict in a duel also silently removed a "Not Wallpaper Material"
+  mark the user had set in the Library and never took back (FR-5.12). That
+  correction now travels with a copied-out set of judgments, the same way an
+  undone duel choice already did.
+- Skipping a pair no longer withdraws the offer to undo the judgment before
+  it. A skip says nothing about any photo, and FR-5.12 spends the correction
+  moment only on the next judgment — so a slipped choice followed by a reflex
+  skip, both one keystroke apart while judging quickly, is still correctable.
+- Copying judgments off a device that has never set its own album-size
+  standard no longer carries an invented one. The copy claimed the device had
+  chosen "exactly as many as suggested"; restoring that onto a fresh device
+  counted as a choice it had made, which then blocked the user's real standard
+  from ever arriving (FR-7.4).
+- Marking, un-marking or ignoring a photo from the Library grid, a context
+  menu, or the Photo menu now says so when it fails, instead of carrying on as
+  though it had worked. The same judgments taken in a duel already reported
+  their failures; the other routes to them only wrote to the log (FR-8.12).
+- The Mac's Help menu no longer carries a "Firnlight Help" item that opens
+  nothing — the app ships no help book, and its explanations live beside the
+  things they explain (FR-8.10).
+- The release workflow now verifies that the packaged app actually launches
+  before publishing it, rather than inferring it from a successful build
+  (FR-10.2).
 - The Export tab now says a device can't yet see the "Firnlight" album as a
   standing fact the moment the tab appears, instead of only after a failed
   Sync press (FR-6.11), and clears a stale sync success tally (or error)

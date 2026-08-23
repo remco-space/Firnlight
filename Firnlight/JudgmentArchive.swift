@@ -34,23 +34,24 @@ import os
 /// and for the same reason: a replayed duel choice is not a harmless duplicate
 /// but a second SGD step the user never made.
 ///
-/// **A correction still updates a row already here.** `VerdictRecord.isCleared`
-/// and `IgnoreRecord.isIgnored` are append-only — a correction is a *new* row
-/// with a later timestamp, so it always has fresh identity and is never
-/// mistaken for a duplicate. `ChoiceRecord.isVoided` (FR-5.12) is the one
-/// exception: undoing a choice marks the *same* row in place rather than
-/// appending one (see `ChoiceRecord`'s doc comment for why), so its identity
-/// — winner, loser, timestamp — never changes. Without special handling, an
-/// archive exported after an undo would look like a plain duplicate of a
-/// choice this device already imported before the undo, and the correction
-/// would silently never arrive: exactly what FR-5.12 forbids now that it says
-/// a correction "travels wherever, and by whatever route, the judgment it
-/// corrects travels (FR-9.1) — and a correction that arrives after the
-/// judgment it corrects still wins." So a matching identity is not simply
-/// skipped: if the incoming row is voided and the local one isn't, the local
-/// row is corrected in place. Voiding a choice has no undo of its own
-/// (`DuelModel` never re-offers Undo for the same action twice), so this is a
-/// safe one-way merge — never the reverse.
+/// **A correction still updates a row already here.** A *toggle's* correction
+/// — `VerdictRecord.isCleared`, `IgnoreRecord.isIgnored` — is append-only: a
+/// new row with a later timestamp, so it always has fresh identity and is
+/// never mistaken for a duplicate. FR-5.12's in-the-moment undo is the
+/// exception, for both judgment kinds it applies to (`ChoiceRecord.isVoided`,
+/// `VerdictRecord.isVoided`): taking a judgment back marks the *same* row in
+/// place rather than appending one (see those doc comments for why), so its
+/// identity never changes. Without special handling, an archive exported
+/// after an undo would look like a plain duplicate of a judgment this device
+/// already imported before the undo, and the correction would silently never
+/// arrive: exactly what FR-5.12 forbids now that it says a correction
+/// "travels wherever, and by whatever route, the judgment it corrects travels
+/// (FR-9.1) — and a correction that arrives after the judgment it corrects
+/// still wins." So a matching identity is not simply skipped: if the incoming
+/// row is voided and the local one isn't, the local row is corrected in
+/// place. Voiding has no undo of its own (`DuelModel` never re-offers Undo
+/// for the same action twice), so this is a safe one-way merge — never the
+/// reverse.
 nonisolated enum JudgmentArchive {
     private static let log = Logger(subsystem: "space.remco.Firnlight", category: "JudgmentArchive")
 
@@ -87,11 +88,11 @@ nonisolated enum JudgmentArchive {
         /// FR-6.12's album-size standard, held the same way `ExportModel`
         /// holds it: a ratio against the suggestion, not a photo count, so it
         /// still means "half as many as you think" on a device whose
-        /// suggestion differs. `nil` only when reading an archive written
-        /// before this field existed — every export from this build writes
-        /// one, defaulting to `1.0` for a device that has never moved the
-        /// slider, which is exactly the ratio an untouched control already
-        /// behaves as (see `ExportModel.strictness`).
+        /// suggestion differs. `nil` means the archive names no standard —
+        /// either it was written before this field existed, or the device
+        /// that wrote it had never set a standard of its own (see
+        /// `currentStandard`), which is not the same as having chosen `1.0`
+        /// and must not be exported as though it were.
         var standard: Double?
 
         struct Choice: Codable {
@@ -111,6 +112,12 @@ nonisolated enum JudgmentArchive {
             var isGood: Bool
             var isCleared: Bool
             var timestamp: Date
+            /// FR-5.12's in-the-moment correction of this verdict, carried
+            /// exactly as `Choice.isVoided` is and optional for the same
+            /// reason — see there. Distinct from `isCleared`, which is a
+            /// separate row saying the photo's whole standing was toggled
+            /// off; see `VerdictRecord.isVoided`.
+            var isVoided: Bool?
         }
 
         struct Ignore: Codable {
@@ -127,7 +134,7 @@ nonisolated enum JudgmentArchive {
         var verdicts = 0
         var ignores = 0
         var skipped = 0
-        /// How many already-present duel choices this restore corrected —
+        /// How many already-present judgments this restore corrected —
         /// i.e. the archive said voided (FR-5.12) where this device's copy
         /// didn't yet. Counted apart from `choices`, which is rows newly
         /// added: a correction adds no row, it updates one already here. Not
@@ -166,7 +173,8 @@ nonisolated enum JudgmentArchive {
             Archive.Choice(winnerKey: $0.winnerKey, loserKey: $0.loserKey, timestamp: $0.timestamp, isVoided: $0.isVoided)
         }
         archive.verdicts = try context.fetch(FetchDescriptor<VerdictRecord>()).map {
-            Archive.Verdict(photoKey: $0.photoKey, isGood: $0.isGood, isCleared: $0.isCleared, timestamp: $0.timestamp)
+            Archive.Verdict(photoKey: $0.photoKey, isGood: $0.isGood, isCleared: $0.isCleared,
+                            timestamp: $0.timestamp, isVoided: $0.isVoided)
         }
         archive.ignores = try context.fetch(FetchDescriptor<IgnoreRecord>()).map {
             Archive.Ignore(photoKey: $0.photoKey, isIgnored: $0.isIgnored, timestamp: $0.timestamp)
@@ -175,24 +183,32 @@ nonisolated enum JudgmentArchive {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        log.info("Exported \(archive.choices.count) choices, \(archive.verdicts.count) verdicts, \(archive.ignores.count) ignores, standard \(archive.standard ?? 0)")
+        log.info("Exported \(archive.choices.count) choices, \(archive.verdicts.count) verdicts, \(archive.ignores.count) ignores, standard \(archive.standard.map { "\($0)" } ?? "never set")")
         return try encoder.encode(archive)
     }
 
-    /// This device's album-size standard (FR-6.12), read the same way
-    /// `ExportModel.strictness` reads it: `UserDefaults.double(forKey:)`
-    /// returns `0` for a key never written, and `0` is not a ratio any
-    /// choice can produce, so it doubles as "never set" — in which case the
-    /// device is simply following the suggestion, the same as an explicit
-    /// ratio of `1`.
+    /// This device's album-size standard (FR-6.12), or `nil` if it has never
+    /// set one. Read the same way `ExportModel.strictness` reads it:
+    /// `UserDefaults.double(forKey:)` returns `0` for a key never written,
+    /// and `0` is not a ratio any choice can produce, so it doubles as
+    /// "never set" — the device is simply following the suggestion (FR-6.4).
+    ///
+    /// A never-set device exports no standard at all, rather than the `1.0`
+    /// it currently behaves as. The two look alike on the exporting device
+    /// and are opposites on the receiving one: `restore` adopts an archive's
+    /// standard only into a device that has never chosen one, so a phantom
+    /// `1.0` would be adopted as an explicit choice and would then block the
+    /// user's real standard from ever arriving — a slider nobody touched,
+    /// silently overriding one they did. Nothing may be carried out of a
+    /// device that the user never put there (FR-7.4).
     ///
     /// Reads `UserDefaults` directly rather than going through an
     /// `ExportModel` instance: the standard lives at the device level, not in
     /// the SwiftData store the rest of this file walks, and `ExportModel` is
     /// `@MainActor`-isolated while this function runs `@concurrent` off it.
-    private static func currentStandard() -> Double {
+    private static func currentStandard() -> Double? {
         let stored = UserDefaults.standard.double(forKey: ExportModel.strictnessDefaultsKey)
-        return stored > 0 ? stored : 1
+        return stored > 0 ? stored : nil
     }
 
     /// Merges an archive into this device's judgments (FR-7.4's other half).
@@ -213,8 +229,10 @@ nonisolated enum JudgmentArchive {
         for record in try context.fetch(FetchDescriptor<ChoiceRecord>()) {
             existingChoicesByKey[identity(record.winnerKey, record.loserKey, record.timestamp)] = record
         }
-        var existingVerdicts = Set(try context.fetch(FetchDescriptor<VerdictRecord>())
-            .map { identity($0.photoKey, "\($0.isGood)|\($0.isCleared)", $0.timestamp) })
+        var existingVerdictsByKey: [String: VerdictRecord] = [:]
+        for record in try context.fetch(FetchDescriptor<VerdictRecord>()) {
+            existingVerdictsByKey[identity(record.photoKey, "\(record.isGood)|\(record.isCleared)", record.timestamp)] = record
+        }
         var existingIgnores = Set(try context.fetch(FetchDescriptor<IgnoreRecord>())
             .map { identity($0.photoKey, "\($0.isIgnored)", $0.timestamp) })
 
@@ -247,13 +265,27 @@ nonisolated enum JudgmentArchive {
         }
         for verdict in archive.verdicts {
             let key = identity(verdict.photoKey, "\(verdict.isGood)|\(verdict.isCleared)", verdict.timestamp)
-            guard existingVerdicts.insert(key).inserted else { summary.skipped += 1; continue }
-            context.insert(VerdictRecord(
+            if let existing = existingVerdictsByKey[key] {
+                // Same one-way correction merge the choices above take: an
+                // undo that arrives after the verdict it corrects still wins
+                // (FR-5.12/FR-9.1), and voiding has no undo of its own.
+                if (verdict.isVoided ?? false) && !existing.isVoided {
+                    existing.isVoided = true
+                    summary.corrections += 1
+                } else {
+                    summary.skipped += 1
+                }
+                continue
+            }
+            let record = VerdictRecord(
                 photoKey: verdict.photoKey,
                 isGood: verdict.isGood,
                 isCleared: verdict.isCleared,
-                timestamp: verdict.timestamp
-            ))
+                timestamp: verdict.timestamp,
+                isVoided: verdict.isVoided ?? false
+            )
+            context.insert(record)
+            existingVerdictsByKey[key] = record
             summary.verdicts += 1
         }
         for ignore in archive.ignores {
