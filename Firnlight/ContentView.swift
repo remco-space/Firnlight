@@ -214,6 +214,13 @@ private struct LibraryTab: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
+    /// `CandidateGridView`'s own load state (FR-8.7's honesty requirement,
+    /// see `pendingRestoreTargetY`'s doc comment): the growth-driven restore
+    /// below needs a real "is the grid still loading" signal, not just "has
+    /// layout gone quiet for a while", and this is the one the app already
+    /// publishes for `AppCommands` — `.focusedSceneValue(\.libraryGridModel,
+    /// _)` in `CandidateGridView`.
+    @FocusedValue(\.libraryGridModel) private var gridModel
 
     // FR-8.1: restore roughly where the user had scrolled to. Seeded from the
     // persisted vertical offset at view-creation time, so SwiftUI applies it
@@ -265,12 +272,31 @@ private struct LibraryTab: View {
     /// `contentSize.height` is still growing (for fidelity — most restores
     /// land well short of any edge, and should return to the same *region*,
     /// not snap to the bottom). Once growth has been quiet for a short debounce
-    /// window, if the live offset still falls short of that target, the
-    /// shortfall means the target was at or past the content's true end when
-    /// it was saved (a target genuinely inside the scrollable range is never
-    /// clamped down) — so finish with `ScrollPosition(edge: .bottom)`, which
-    /// lands wherever the *current* content's real end actually is, not
-    /// wherever the arithmetic above says it should be.
+    /// window, if the live offset still falls short of that target, that is
+    /// treated as *maybe* the target having been at or past the content's true
+    /// end when it was saved — but 250ms of layout quiet is a debounce on
+    /// churn, not a load-completion signal: a slow scan can space growth
+    /// events further apart than that even while still mid-load, so the
+    /// window elapsing doesn't by itself mean the grid is done. The fallback
+    /// therefore also checks `gridModel?.isLoading`: while it reads `true`,
+    /// this pass backs off and leaves `pendingRestoreTargetY` set for the
+    /// *next* growth event's debounce to re-examine, rather than finishing
+    /// against a `contentSize` that is still short of final and snapping to
+    /// an intermediate "bottom" the user never scrolled to. Only once loading
+    /// has genuinely settled does a persisting shortfall get resolved with
+    /// `ScrollPosition(edge: .bottom)`, which lands wherever the *current*
+    /// content's real end actually is, not wherever the arithmetic above says
+    /// it should be.
+    ///
+    /// Separately (FR-8.7): every re-application of the target below is only
+    /// ever the app restoring what the user already had, never a jump away
+    /// from where they are now — so it stops the instant the user starts
+    /// scrolling. `onScrollPhaseChange` below clears `pendingRestoreTargetY`
+    /// as soon as a `.tracking` phase (the user's finger actually driving the
+    /// content) is observed, which both stops any further re-application and
+    /// invalidates the in-flight debounce `Task` via `restoreGeneration`, so
+    /// a scan that is still growing content minutes into a scan can never
+    /// yank a scrolling user back to the saved offset.
     @State private var pendingRestoreTargetY: CGFloat? = {
         let saved = CGFloat(UserDefaults.standard.double(forKey: "libraryScrollOffsetY"))
         return saved > 0 ? saved : nil
@@ -339,10 +365,22 @@ private struct LibraryTab: View {
                 Task {
                     try? await Task.sleep(for: .milliseconds(250))
                     guard myGeneration == restoreGeneration, pendingRestoreTargetY != nil else { return }
+                    // Quiet layout isn't the same thing as "done loading" —
+                    // see `pendingRestoreTargetY`'s doc comment. Back off and
+                    // let the next growth step's debounce re-examine.
+                    if gridModel?.isLoading == true { return }
                     pendingRestoreTargetY = nil
                     if currentScrollOffsetY < target - 1 {
                         scrollPosition = ScrollPosition(edge: .bottom)
                     }
+                }
+            }
+            // FR-8.7: the user's own scroll always wins over the restore —
+            // see `pendingRestoreTargetY`'s doc comment.
+            .onScrollPhaseChange { _, newPhase in
+                if newPhase == .tracking, pendingRestoreTargetY != nil {
+                    pendingRestoreTargetY = nil
+                    restoreGeneration += 1
                 }
             }
             // Persist on leaving .active rather than on every scroll frame:

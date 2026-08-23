@@ -86,6 +86,25 @@ heading when that version is released (FR-10.3).
   position across launches and let this fix be verified there the same
   way: seeding, relaunching, and screenshotting the fully-visible button,
   clear of the bar, light and dark.
+- Fixed two defects in the growth-triggered scroll restore just above.
+  First, re-applying the saved target on every content-growth step had no
+  guard against the user's own scrolling (FR-8.7): a user who started
+  scrolling during a long-running scan — the window during which growth
+  events keep arriving — was yanked back to the saved offset by the next
+  one. It now stops the instant a `.tracking` scroll phase (the user's own
+  finger driving the content) is observed. Second, the `edge: .bottom`
+  fallback fired once layout had gone quiet for a fixed window, which is a
+  debounce on layout churn, not a load-completion signal — a slow scan or
+  an iCloud-backed load can space growth events further apart than that
+  window while still mid-load, so the fallback could fire against
+  incomplete content and snap to an intermediate "bottom" the user never
+  visited, with no way to correct itself afterward. It now also checks the
+  page's own "still loading" signal (the Library grid's `GridModel
+  .isLoading`, the Export tab's `model.totalAccepted == nil`) and backs off
+  to let the next growth step's debounce re-examine rather than finishing
+  early. The prior claim that "a target genuinely inside the scrollable
+  range is never clamped down" overstated what a layout-quiet debounce can
+  actually guarantee; the fix above is what makes that true.
 - The database contexts the ranking pipeline's background workers use are now
   created by the worker that uses them, not on the main thread that happened
   to construct the worker — ending the repeated "Unbinding from the main

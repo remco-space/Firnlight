@@ -927,7 +927,12 @@ struct ExportView: View {
         // See `LibraryTab`'s identical hook for the full explanation: this
         // re-clamps the one-shot restore as `model.preview` loads, then
         // falls back to the ScrollView's own real bottom edge if the target
-        // still can't be reached once loading settles.
+        // still can't be reached once loading settles — but only once
+        // `model.totalAccepted` (the same "still loading" signal
+        // `exportContent`'s own `ProgressView` reads) confirms the load has
+        // actually finished, not merely that layout has gone quiet for
+        // 250ms; a slow scan can space growth events further apart than that
+        // while `refreshPreview` is still running.
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             geometry.contentSize.height
         } action: { _, _ in
@@ -938,10 +943,19 @@ struct ExportView: View {
             Task {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard myGeneration == restoreGeneration, pendingRestoreTargetY != nil else { return }
+                if model.totalAccepted == nil { return }
                 pendingRestoreTargetY = nil
                 if currentScrollOffsetY < target - 1 {
                     scrollPosition = ScrollPosition(edge: .bottom)
                 }
+            }
+        }
+        // FR-8.7: the user's own scroll always wins over the restore — see
+        // `LibraryTab`'s identical hook.
+        .onScrollPhaseChange { _, newPhase in
+            if newPhase == .tracking, pendingRestoreTargetY != nil {
+                pendingRestoreTargetY = nil
+                restoreGeneration += 1
             }
         }
         // Persist on leaving .active, same reasoning as `LibraryTab`.
