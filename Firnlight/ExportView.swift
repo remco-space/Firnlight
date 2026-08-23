@@ -821,6 +821,14 @@ struct ExportView: View {
     /// scrolled away with the rest, and this tab's Settings entry had
     /// nowhere but the scrolling content itself to live, which is what let it
     /// rest under the floating tab bar (see `exportContent`'s own comment).
+    ///
+    /// Wrapped one level further out than this `NavigationStack`, in
+    /// `ContentView.tabContent`, is a `GeometryReader` — required for
+    /// `exportContent`'s `ScrollView` to keep the floating tab bar's bottom
+    /// safe-area accommodation once a `NavigationStack` sits between them;
+    /// see that function's doc comment for the measured, reproducible
+    /// SDK-27-beta bug it works around, and how it was isolated.
+    ///
     /// The Mac is untouched: it already has a menu bar (FR-8.3) and a
     /// standard Settings window, and none of its tabs rendered under a
     /// bottom bar to begin with — this is iOS/iPadOS HIG guidance, not a

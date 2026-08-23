@@ -62,13 +62,13 @@ struct ContentView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             Tab("Library", systemImage: "photo.on.rectangle.angled", value: AppTab.library) {
-                LibraryTab(authorization: authorization, catchUp: catchUp, updates: updates)
+                tabContent { LibraryTab(authorization: authorization, catchUp: catchUp, updates: updates) }
             }
             Tab("Duel", systemImage: "rectangle.split.2x1", value: AppTab.duel) {
-                DuelView(model: duelModel, authorization: authorization)
+                tabContent { DuelView(model: duelModel, authorization: authorization) }
             }
             Tab("Export", systemImage: "square.and.arrow.up", value: AppTab.export) {
-                ExportView()
+                tabContent { ExportView() }
             }
         }
         // No minimum size here: on the Mac the window owns that (see
@@ -138,6 +138,51 @@ struct ContentView: View {
             Text("Firnlight is downloaded from GitHub rather than an app store, so it can only tell you a newer version exists by asking GitHub. It sends nothing about you or your library, and you can change this in Settings.")
         }
     }
+
+    /// FR-8.1 (HIG, tab-based apps): every tab's own content, on iOS, sits
+    /// inside a `GeometryReader` here — before, not inside, its own
+    /// `NavigationStack` (`LibraryTab`, `DuelView`, and `ExportView` each
+    /// wrap themselves; see their own `body`).
+    ///
+    /// This `GeometryReader` does nothing with the geometry it reads — it
+    /// exists purely because its presence is the fix. Measured, not guessed
+    /// (2026-08-23, iOS 27 simulator): a `NavigationStack` nested directly
+    /// inside a `Tab`'s content costs every descendant `ScrollView` the
+    /// floating tab bar's own bottom safe-area accommodation — screenshot-
+    /// confirmed with the Library tab's last two Analysis stat rows and the
+    /// Export tab's "Create Album" button and notice text rendering directly
+    /// under the glass tab bar (FR-8.5: "Nothing the user needs to see is
+    /// half-hidden under a bar"). A debug overlay reading
+    /// `proxy.safeAreaInsets.bottom` confirmed the mechanism: measured at a
+    /// `GeometryReader` positioned as `Tab`'s *direct* content, with the
+    /// `NavigationStack` nested one level inside it, the value read a
+    /// correct 83pt (the tab bar's own height) and every tab's content
+    /// cleared the bar cleanly; without the `GeometryReader` — `NavigationStack`
+    /// as `Tab`'s direct content — the same descendant content overlapped the
+    /// bar. Trying the reverse nesting (one `NavigationStack` wrapping the
+    /// whole `TabView` from outside, title driven by `selectedTab`) reproduced
+    /// the identical overlap, ruling out "nested vs. shared" as the variable;
+    /// dropping `NavigationStack` entirely restored correct spacing but with
+    /// `.navigationTitle`/`.toolbar` silently inert, confirming a real
+    /// `NavigationStack` ancestor is what a title/toolbar requires. The
+    /// `GeometryReader` is the one configuration that keeps both: a working
+    /// `NavigationStack` and the tab bar's safe area. Root cause not
+    /// otherwise established — nothing in the 27 SDK's release notes or
+    /// header comments documents this interaction — so this is recorded as a
+    /// measured, reproducible workaround for a specific beta build, not an
+    /// explained one; revisit on the next Xcode 27 beta or GA release.
+    ///
+    /// No-op on macOS, which has neither a floating tab bar nor this bug.
+    @ViewBuilder
+    private func tabContent<Content: View>(@ViewBuilder _ content: @escaping () -> Content) -> some View {
+        #if os(macOS)
+        content()
+        #else
+        GeometryReader { _ in
+            content()
+        }
+        #endif
+    }
 }
 
 /// Library tab: Photos authorization, then the pipeline's progress and the
@@ -180,9 +225,12 @@ private struct LibraryTab: View {
     @State private var currentScrollOffsetY = CGFloat(UserDefaults.standard.double(forKey: "libraryScrollOffsetY"))
 
     /// FR-8.1 (HIG, tab-based apps): iPhone and iPad get a `NavigationStack`
-    /// with this tab's own title, matching `ExportView` and `DuelView` — see
-    /// `ExportView.body`'s doc comment for why none of the three tabs had
-    /// this before. The Mac is untouched: no bottom bar there to establish
+    /// with this tab's own title, matching `ExportView` and `DuelView`.
+    /// Wrapped one level further out, in `ContentView.tabContent`, is a
+    /// `GeometryReader` — required for this `ScrollView` to keep the floating
+    /// tab bar's bottom safe-area accommodation; see that function's doc
+    /// comment for the measured, reproducible SDK-27-beta bug it works
+    /// around. The Mac is untouched: no bottom bar there to establish
     /// hierarchy against, and it already has its menu bar (FR-8.3).
     var body: some View {
         #if os(macOS)
@@ -374,7 +422,16 @@ private struct LibraryStatusView: View {
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Library")
+                // FR-8.10/FR-4.13: named "Library Scan", not "Library" — this
+                // card sits directly under the Library tab's own navigation
+                // title on iPhone and iPad (FR-8.1), and two headings reading
+                // "Library" in the same screen is one heading too many for
+                // one thing. "Library Scan" also does what a heading should:
+                // it says what this specific card covers (catching up with
+                // the library, FR-2.4) rather than repeating the tab's own
+                // name, matching how the "Vision Analysis" card beneath it is
+                // already named for its own job rather than the tab's.
+                Text("Library Scan")
                     .font(.headline)
 
                 // Fixed order, every phase: blurb, progress, outcome. The only
