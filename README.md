@@ -27,7 +27,7 @@ wallpaper.*
 
 *Your top picks land in a Photos album System Settings can rotate for you.*
 
-Screens as of v0.14.1.
+Screens as of v0.21.0.
 
 See [REQUIREMENTS.md](REQUIREMENTS.md) for exactly what the app does and why.
 
