@@ -68,6 +68,24 @@ heading when that version is released (FR-10.3).
 - The Library tab's scan-status card is now titled "Library Scan" rather
   than "Library" — it used to repeat, word for word, the navigation title
   now shown directly above it on iPhone and iPad (FR-8.10/FR-4.13).
+- Fixed a residual FR-8.5 defect the fixes above left behind: at the Library
+  tab's maximum reachable scroll, "No Candidates Yet"'s second description
+  line stayed permanently under the tab bar — unreachable at any scroll
+  offset. Measured cause: the persisted-scroll restore (FR-8.1) is a
+  one-shot `ScrollPosition(y:)` applied before the ranked-candidate grid's
+  own async load finishes growing the content, and re-issuing that same
+  absolute offset once the grid settles clamps to the same short position
+  regardless — `ScrollPosition(y:)` against this `ScrollView`'s own
+  reported geometry isn't to be trusted at this content size on the 27
+  beta. Fixed by falling back to `ScrollPosition(edge: .bottom)` — the
+  ScrollView's own idea of its real end — whenever the one-shot restore
+  settles short of its target. The Export tab's "Create Album" button had
+  the identical, previously unverified defect (no persisted scroll offset
+  existed there to seed and confirm it); it now has one (FR-8.1, matching
+  the Library tab), which both restores the Export tab's own scroll
+  position across launches and let this fix be verified there the same
+  way: seeding, relaunching, and screenshotting the fully-visible button,
+  clear of the bar, light and dark.
 - The database contexts the ranking pipeline's background workers use are now
   created by the worker that uses them, not on the main thread that happened
   to construct the worker — ending the repeated "Unbinding from the main

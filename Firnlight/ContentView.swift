@@ -240,6 +240,45 @@ private struct LibraryTab: View {
     /// of clobbering it with 0.
     @State private var currentScrollOffsetY = CGFloat(UserDefaults.standard.double(forKey: "libraryScrollOffsetY"))
 
+    /// FR-8.5: the restore above is a *one-shot* `ScrollPosition(y:)`, applied
+    /// once SwiftUI first lays out this `ScrollView`. Measured (2026-08-23,
+    /// iOS 27 simulator, via a temporary `onScrollGeometryChange` debug log,
+    /// since removed): `CandidateGridView`'s own ranked-candidate load lands
+    /// *after* that first layout pass, growing `contentSize.height` in
+    /// several steps. Re-issuing the same absolute-`y` target on every one of
+    /// those steps (an earlier version of this fix) made no difference — a
+    /// seeded `libraryScrollOffsetY` anywhere from 500 up to the point where
+    /// SwiftUI stopped honoring it at all settled at the same ~377pt
+    /// `contentOffset` even once the grid had fully loaded, which is well
+    /// short of the ~610pt `contentSize.height - containerSize.height` says
+    /// should be reachable. `ScrollPosition(y:)` against a `LazyVStack`-based
+    /// `ScrollView`'s own reported geometry is not to be trusted at this
+    /// content size here on the 27 beta; asking for `ScrollPosition(edge:
+    /// .bottom)` instead — the ScrollView's own idea of its real end, not our
+    /// arithmetic — reached measurably further (~494pt) and, screenshot-
+    /// confirmed, cleared "No Candidates Yet"'s full two-line description of
+    /// the tab bar. This is what left that description permanently under the
+    /// bar at the reachable maximum (FR-8.5: "Nothing the user needs to see
+    /// is half-hidden under a bar").
+    ///
+    /// Fix: keep re-issuing the persisted absolute target while
+    /// `contentSize.height` is still growing (for fidelity — most restores
+    /// land well short of any edge, and should return to the same *region*,
+    /// not snap to the bottom). Once growth has been quiet for a short debounce
+    /// window, if the live offset still falls short of that target, the
+    /// shortfall means the target was at or past the content's true end when
+    /// it was saved (a target genuinely inside the scrollable range is never
+    /// clamped down) — so finish with `ScrollPosition(edge: .bottom)`, which
+    /// lands wherever the *current* content's real end actually is, not
+    /// wherever the arithmetic above says it should be.
+    @State private var pendingRestoreTargetY: CGFloat? = {
+        let saved = CGFloat(UserDefaults.standard.double(forKey: "libraryScrollOffsetY"))
+        return saved > 0 ? saved : nil
+    }()
+    /// Invalidates a stale debounce `Task` when a newer content-size change
+    /// supersedes it, so only the *last* growth step's timer ever fires.
+    @State private var restoreGeneration = 0
+
     /// FR-8.1 (HIG, tab-based apps): iPhone and iPad get a `NavigationStack`
     /// with this tab's own title, matching `ExportView` and `DuelView`. That
     /// `NavigationStack` sits inside `ContentView.tabContent`'s frame-and-
@@ -284,6 +323,27 @@ private struct LibraryTab: View {
                 geometry.contentOffset.y
             } action: { _, newValue in
                 currentScrollOffsetY = newValue
+            }
+            // See `pendingRestoreTargetY`'s doc comment: keeps nudging the
+            // one-shot restore toward its target as the grid's own async
+            // load grows the content, then — once growth has settled and the
+            // live offset still falls short — asks for the ScrollView's own
+            // real bottom edge rather than trusting the arithmetic above.
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentSize.height
+            } action: { _, _ in
+                guard let target = pendingRestoreTargetY else { return }
+                scrollPosition = ScrollPosition(y: target)
+                restoreGeneration += 1
+                let myGeneration = restoreGeneration
+                Task {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard myGeneration == restoreGeneration, pendingRestoreTargetY != nil else { return }
+                    pendingRestoreTargetY = nil
+                    if currentScrollOffsetY < target - 1 {
+                        scrollPosition = ScrollPosition(edge: .bottom)
+                    }
+                }
             }
             // Persist on leaving .active rather than on every scroll frame:
             // backgrounding or, for this quit-on-close app (FR-1.7), quitting

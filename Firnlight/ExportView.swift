@@ -796,6 +796,22 @@ struct ExportView: View {
     /// See `commitCount`.
     @State private var draftIsEdited = false
     @FocusState private var countFieldFocused: Bool
+    // FR-8.1: restore roughly where the user had scrolled to, same mechanism
+    // and same reasoning as `LibraryTab`'s `scrollPosition` — see its doc
+    // comments for the full rationale (approximate restore is deliberate;
+    // the growth-tolerant re-clamp and `edge: .bottom` fallback below exist
+    // because this tab's own `model.preview` loads asynchronously too, via
+    // the same `.task` mechanism, and hits the identical SDK-27-beta
+    // `ScrollPosition(y:)`-against-`LazyVGrid` clamp quirk).
+    @State private var scrollPosition = ScrollPosition(
+        y: CGFloat(UserDefaults.standard.double(forKey: "exportScrollOffsetY"))
+    )
+    @State private var currentScrollOffsetY = CGFloat(UserDefaults.standard.double(forKey: "exportScrollOffsetY"))
+    @State private var pendingRestoreTargetY: CGFloat? = {
+        let saved = CGFloat(UserDefaults.standard.double(forKey: "exportScrollOffsetY"))
+        return saved > 0 ? saved : nil
+    }()
+    @State private var restoreGeneration = 0
     /// Grows with the user's text size: the field has to hold the widest count
     /// the library can produce.
     @ScaledMetric private var countFieldWidth: CGFloat = 64
@@ -902,6 +918,38 @@ struct ExportView: View {
         }
         .frame(maxWidth: .infinity)
         #if !os(macOS)
+        .scrollPosition($scrollPosition)
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.contentOffset.y
+        } action: { _, newValue in
+            currentScrollOffsetY = newValue
+        }
+        // See `LibraryTab`'s identical hook for the full explanation: this
+        // re-clamps the one-shot restore as `model.preview` loads, then
+        // falls back to the ScrollView's own real bottom edge if the target
+        // still can't be reached once loading settles.
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.contentSize.height
+        } action: { _, _ in
+            guard let target = pendingRestoreTargetY else { return }
+            scrollPosition = ScrollPosition(y: target)
+            restoreGeneration += 1
+            let myGeneration = restoreGeneration
+            Task {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard myGeneration == restoreGeneration, pendingRestoreTargetY != nil else { return }
+                pendingRestoreTargetY = nil
+                if currentScrollOffsetY < target - 1 {
+                    scrollPosition = ScrollPosition(edge: .bottom)
+                }
+            }
+        }
+        // Persist on leaving .active, same reasoning as `LibraryTab`.
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase != .active {
+                UserDefaults.standard.set(Double(currentScrollOffsetY), forKey: "exportScrollOffsetY")
+            }
+        }
         .sheet(isPresented: $isShowingSettings) {
             NavigationStack {
                 SettingsView()
