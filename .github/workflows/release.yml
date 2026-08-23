@@ -11,6 +11,9 @@ name: Release
 # put back the tag trigger below, and move runs-on and the Xcode-selection
 # step from 26 to 27, once a 27 image exists.
 #
+# Publishing is gated on the packaged app actually launching (FR-10.2), not
+# on the build succeeding — see the verification step below.
+#
 # Ad-hoc signing (CODE_SIGN_IDENTITY=-, no team) is deliberate, not a
 # shortcut: this project has no Developer ID and no notarization (see
 # CLAUDE.md's Release process), so nothing here needs the maintainer's own
@@ -98,6 +101,61 @@ jobs:
           # extended attributes the way Finder's "Compress" does.
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_NAME"
           echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+
+      - name: Verify the packaged app launches
+        run: |
+          # FR-10.2: "That it launches is verified before publishing, never
+          # inferred from a successful build." A build that compiles and links
+          # can still fail to open — a bad signature, a missing bundle
+          # resource, a crash before the first frame — and every one of those
+          # reaches the user as an app that does nothing when double-clicked.
+          #
+          # Verified against the zip this job is about to publish, unpacked
+          # again, not against the build directory: the artifact is what the
+          # user gets, and the round trip through ditto is itself part of what
+          # could break the bundle.
+          VERIFY_DIR="$(mktemp -d)"
+          ditto -x -k "$ZIP_NAME" "$VERIFY_DIR"
+          APP_PATH="$(find "$VERIFY_DIR" -maxdepth 1 -name '*.app' | head -1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::No .app inside $ZIP_NAME"
+            exit 1
+          fi
+
+          # The ad-hoc signature has to survive packaging, or first launch
+          # fails outright instead of with the one warning FR-10.2 admits.
+          codesign --verify --strict --verbose=2 "$APP_PATH"
+
+          # `open`, not the executable directly: this is the double-click the
+          # user performs, including LaunchServices' own checks.
+          open -a "$APP_PATH"
+          BINARY="$APP_PATH/Contents/MacOS/$(defaults read "$APP_PATH/Contents/Info" CFBundleExecutable)"
+
+          # Two questions, in order: did it come up at all, and was it still
+          # up a moment later — a crash during launch would otherwise pass a
+          # bare "did the process ever exist" check.
+          for _ in $(seq 1 20); do
+            if pgrep -f "$BINARY" > /dev/null; then break; fi
+            sleep 1
+          done
+          if ! pgrep -f "$BINARY" > /dev/null; then
+            echo "::error::The packaged app did not launch"
+            ls -l ~/Library/Logs/DiagnosticReports 2>/dev/null || true
+            exit 1
+          fi
+          sleep 10
+          if ! pgrep -f "$BINARY" > /dev/null; then
+            echo "::error::The packaged app launched and then exited before it could be used"
+            ls -l ~/Library/Logs/DiagnosticReports 2>/dev/null || true
+            exit 1
+          fi
+          echo "Launched and stayed up."
+
+          # Nothing here grants Photos access, so the app is sitting on its
+          # own authorization screen (FR-1.1) — which is exactly the first
+          # thing a new user sees, and enough to prove it opens. Quit it so
+          # the runner isn't left with a GUI app holding the session.
+          pkill -f "$BINARY" || true
 
       - name: Extract changelog entry for this version
         env:

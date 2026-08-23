@@ -106,16 +106,19 @@ final class DuelModel {
     /// asks for. A raw duel choice or a "Both Are Great" verdict has no such
     /// persistent, visible mark anywhere else in the app, so the floor FR-5.12
     /// sets — correctable in the moment right after — is answered here
-    /// instead: `canUndo` is true only for the single most recent action, and
-    /// goes false the instant any further action (another choice, a verdict,
-    /// a skip, an ignore) moves past it. Never persisted across launches, for
+    /// instead: `canUndo` is true only for the single most recent judgment,
+    /// and goes false the instant a further *judgment* (another choice, a
+    /// verdict) moves past it. Only a judgment spends the moment, per
+    /// FR-5.12: skipping a pair says nothing about any photo (FR-5.7) and
+    /// leaves the offer standing, as does looking at another tab and back.
+    /// Never persisted across launches, for
     /// the same reason the in-progress pair above is UI-restoration state, not
     /// durable data — the durable correction path for a *lasting* judgment
     /// stays FR-4.6's toggle.
     private(set) var canUndo = false
     private enum PendingUndo {
         case choice(PreferenceRanker.ChoiceReceipt)
-        case verdict(ids: [String])
+        case verdict(PreferenceRanker.VerdictReceipt)
     }
     private var pendingUndo: PendingUndo?
     /// The pair that was on screen when the pending action was taken, so
@@ -272,10 +275,15 @@ final class DuelModel {
 
     func skip() {
         guard !isRecording, let ranker else { return }
-        // Skip records nothing (FR-5.7), but it does move past whatever
-        // preceded it — FR-5.12's window is "the moment after", and this is
-        // the next moment.
-        clearPendingUndo()
+        // Skip deliberately leaves any pending Undo standing. It records
+        // nothing (FR-5.7) — it is the user declining to judge this pair —
+        // and FR-5.12 says the correction moment "is spent only by the next
+        // judgment, never by the user's gaze". Passing on a pair is nearer to
+        // a glance than to a judgment: it says nothing about any photo, so it
+        // cannot be what supersedes the judgment before it. This used to
+        // clear the offer, which meant a slipped choice followed by a reflex
+        // skip — both one keystroke away in rapid judging (FR-5.11) — became
+        // permanent with nothing having been said in between.
         Task { setPair(await ranker.nextPair()) }
     }
 
@@ -287,16 +295,13 @@ final class DuelModel {
         let shownPair = pair
         Task {
             do {
-                try await ranker.recordVerdicts(
+                let receipt = try await ranker.recordVerdicts(
                     [shownPair.first.localIdentifier, shownPair.second.localIdentifier],
                     isGood: isGood
                 )
                 suppressNextReload = true // verdicts don't change the pool
                 RankingClock.shared.bump() // suggestion recalibrates
-                setPendingUndo(
-                    .verdict(ids: [shownPair.first.localIdentifier, shownPair.second.localIdentifier]),
-                    shownPair: shownPair
-                )
+                setPendingUndo(.verdict(receipt), shownPair: shownPair)
             } catch {
                 reportActionFailure(error.localizedDescription)
                 clearPendingUndo()
@@ -322,8 +327,8 @@ final class DuelModel {
                 case .choice(let receipt):
                     try await ranker.undoLastChoice(receipt)
                     choiceCount = await ranker.choiceCount
-                case .verdict(let ids):
-                    try await ranker.clearVerdicts(ids)
+                case .verdict(let receipt):
+                    try await ranker.undoVerdicts(receipt)
                 }
                 clearPendingUndo()
                 suppressNextReload = true

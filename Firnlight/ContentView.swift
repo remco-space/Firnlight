@@ -12,7 +12,58 @@ private enum AppTab: String {
     case library, duel, export
 }
 
+/// FR-8.12's alert channel for actions that have no view of their own to
+/// report into.
+///
+/// The Duel tab's judgments already report failure where they happen: the
+/// duel *is* the surface that took the action, so `DuelModel` queues the
+/// message and its own alert shows it. Every other route to the same
+/// judgments — the thumbnail overlay, a context menu, the Photo menu bar —
+/// is a fire-and-forget static call in `CandidateActions` with no view and
+/// no error channel, so a failed verdict there used to reach the log alone
+/// while the interface carried on as though the photo had been marked.
+/// FR-8.12 admits no such asymmetry: the same failure, taken by a different
+/// route, must be as visible.
+///
+/// Shared and app-level rather than passed down, because those call sites
+/// span three surfaces (grid, context menu, menu bar commands) with no view
+/// in common below the window; `ContentView` presents it once for all of
+/// them, and is always mounted whichever tab is selected. The queue, the
+/// deferred pop and the double-dismissal guard are `DuelModel.dismissError`'s
+/// exactly — see there for why each is needed; a second failure arriving
+/// while the first is on screen must still get its own turn rather than be
+/// discarded by the first one's dismissal.
+@MainActor
+@Observable
+final class ActionFailures {
+    static let shared = ActionFailures()
+
+    private(set) var messages: [String] = []
+    private var isDismissing = false
+
+    private init() {}
+
+    func report(_ message: String) {
+        messages.append(message)
+    }
+
+    func dismissFirst() {
+        guard !messages.isEmpty, !isDismissing else { return }
+        isDismissing = true
+        Task { @MainActor in
+            if !messages.isEmpty {
+                messages.removeFirst()
+            }
+            isDismissing = false
+        }
+    }
+}
+
 struct ContentView: View {
+    /// FR-8.12: see `ActionFailures`. Presented here because the actions that
+    /// feed it belong to no single tab.
+    private let actionFailures = ActionFailures.shared
+
     @State private var authorization = PhotoLibraryAuthorization()
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
@@ -136,6 +187,22 @@ struct ContentView: View {
             Button("Check for Releases") { updates.setConsent(true) }
         } message: {
             Text("Firnlight is downloaded from GitHub rather than an app store, so it can only tell you a newer version exists by asking GitHub. It sends nothing about you or your library, and you can change this in Settings.")
+        }
+        // FR-8.12: whatever a grid, context-menu or menu-bar action failed to
+        // do, said in words rather than left to the log. `isPresented` bound
+        // to "the queue is non-empty", with the dismissal popping exactly one
+        // message — the same shape and the same reasons as the Duel tab's
+        // alert.
+        .alert(
+            "Couldn’t Record That",
+            isPresented: Binding(
+                get: { !actionFailures.messages.isEmpty },
+                set: { if !$0 { actionFailures.dismissFirst() } }
+            )
+        ) {
+            Button("OK") {} // the binding above does the popping
+        } message: {
+            Text(actionFailures.messages.first ?? "")
         }
     }
 

@@ -24,12 +24,35 @@ final class VerdictRecord {
     /// delete racing a sync) can express that. Defaulted like every other
     /// attribute here so the shape stays CloudKit-mirrorable the same way.
     var isCleared: Bool = false
+    /// FR-5.12's in-the-moment correction, the exact counterpart of
+    /// `ChoiceRecord.isVoided` — see its doc comment for why a taken-back
+    /// judgment is marked in place rather than answered with a new row.
+    ///
+    /// `isCleared` above is *not* that path, which is the distinction this
+    /// flag exists to draw. Clearing is FR-4.6's toggle: it says "this photo
+    /// is no longer marked", and it retires the photo's whole standing —
+    /// every bad verdict it ever collected, from any device and any surface.
+    /// Undoing the verdict just given says something much narrower: *this
+    /// one* verdict was a slip and never happened, and whatever the photo
+    /// stood at before it stands again. Answering the second with the first
+    /// is what FR-5.12 forbids ("the outcome as if the corrected judgment had
+    /// always been the one given"): a photo marked Not Wallpaper Material in
+    /// the Library, then given a slipped "Both Are Great" in a duel, would
+    /// come out of the Undo unmarked — a mark the user never took back,
+    /// silently dropped by the correction of a different judgment entirely.
+    /// So `PreferenceRanker.undoVerdicts` voids exactly the rows its receipt
+    /// names, and every reader below treats a voided row as one that was
+    /// never written.
+    /// Defaulted, like every other attribute here, so the shape stays
+    /// CloudKit-mirrorable.
+    var isVoided: Bool = false
 
-    init(photoKey: String, isGood: Bool, isCleared: Bool = false, timestamp: Date) {
+    init(photoKey: String, isGood: Bool, isCleared: Bool = false, timestamp: Date, isVoided: Bool = false) {
         self.photoKey = photoKey
         self.isGood = isGood
         self.isCleared = isCleared
         self.timestamp = timestamp
+        self.isVoided = isVoided
     }
 }
 
@@ -48,7 +71,12 @@ nonisolated enum VerdictCalibration {
     static func latestByPhoto(_ verdicts: [VerdictRecord]) -> [String: Bool] {
         var latest: [String: Bool] = [:]
         for verdict in verdicts {
-            if verdict.isCleared {
+            // A voided row (FR-5.12) was taken back in the moment it was
+            // given: it never counted, so it neither sets nor clears anything
+            // here, and the standing it interrupted survives it untouched.
+            if verdict.isVoided {
+                continue
+            } else if verdict.isCleared {
                 latest[verdict.photoKey] = nil
             } else {
                 latest[verdict.photoKey] = verdict.isGood
@@ -77,7 +105,10 @@ nonisolated enum VerdictCalibration {
     static func trainingBadVerdicts(_ verdicts: [VerdictRecord]) -> [VerdictRecord] {
         var accumulated: [String: [VerdictRecord]] = [:]
         for verdict in verdicts {
-            if verdict.isCleared {
+            // Voided rows never trained — see `latestByPhoto`.
+            if verdict.isVoided {
+                continue
+            } else if verdict.isCleared {
                 accumulated[verdict.photoKey] = nil
             } else if !verdict.isGood {
                 accumulated[verdict.photoKey, default: []].append(verdict)
