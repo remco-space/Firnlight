@@ -406,13 +406,6 @@ nonisolated enum Thresholds {
     /// is an estimate to show at all.
     static let defaultWallpaperCount = 50
 
-    /// Middle-zone candidates the knee may sample when no bad verdict caps
-    /// the walk early (`FeatureStore.zoneScores`) — the knee needs a sample of
-    /// the curve's shape, not the whole library. The great zone (FR-6.4) has
-    /// no such cap: if every candidate clears it, the album is the whole
-    /// library.
-    static let albumSuggestionScanLimit = 500
-
     /// Minimum normalized score spread required to trust the knee detection.
     static let albumSuggestionMinimumSpread: Float = 0.05
 
@@ -624,4 +617,16 @@ nonisolated enum Thresholds {
     /// far sits under 0.1. One real still life and two real scenes as data
     /// points — tune from real library data via the ImageAnalyzer debug log.
     static let outdoorCorroborationThreshold: Float = 0.25
+
+    // MARK: Touch targets (HIG, FR-8.1)
+
+    /// Apple's Human Interface Guidelines minimum tappable size on iOS/iPadOS
+    /// ("Layout" — hit targets should measure at least 44x44pt). FR-8.1 defers
+    /// the app's whole native-feel checklist to the HIG, so the small
+    /// glass-circle controls overlaid on thumbnails (`CandidateGridView`'s
+    /// verdict toggles and iOS actions menu) size their *invisible* touch
+    /// area to this constant on iOS, independent of how small their visible
+    /// glass glyph stays — see those call sites for why the two are kept
+    /// separate rather than drawing the glass itself this large.
+    static let minimumTouchTarget: CGFloat = 44
 }

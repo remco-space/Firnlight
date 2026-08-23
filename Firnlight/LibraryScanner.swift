@@ -310,23 +310,30 @@ final class LibraryScanner {
     /// can't freeze the UI (FR-8.2). Per-photo failures arrive as `.failure`
     /// in the `Result` and are simply omitted.
     ///
-    /// Uses `PHCloudIdentifier.stringValue`, not the newer `archivalStringValue`
-    /// its header deprecates it in favor of: the CI runner's Xcode 26.6
-    /// (macOS26.5 SDK) is missing `archivalStringValue` outright, despite
-    /// Apple's Xcode 27 headers annotating it available since macOS 15.2 — a
-    /// genuine SDK gap in that Xcode release, not a beta-only symbol. Verified
-    /// on-device across 20 real `PHCloudIdentifier`s from this library that
-    /// both accessors produce byte-identical strings, so switching carries no
-    /// risk to `PhotoRecord.cloudIdentifier` values already persisted or
-    /// synced under FR-9.1/FR-9.2 — nothing here ever reconstructs a
-    /// `PHCloudIdentifier` from the stored string, so it only ever needs to
-    /// compare equal to itself.
+    /// Uses `PHCloudIdentifier.archivalStringValue`, not the older
+    /// `stringValue` it replaces: this project's required toolchain is Xcode
+    /// 27+ (see CLAUDE.md), whose SDK both declares `archivalStringValue`
+    /// (available since macOS 15.2/iOS 18.2 — well under the app's macOS/iOS
+    /// 27+ floor) and marks `stringValue` deprecated, so the deprecated
+    /// accessor is a standing warning on the one toolchain this project
+    /// builds with. (An older Xcode 26.6 runner was once a reason to keep
+    /// `stringValue` instead — that runner's SDK lacked
+    /// `archivalStringValue` outright — but both CI build workflows are
+    /// dormant (CLAUDE.md's Release process), so nothing currently compiles
+    /// this file against that SDK; if a workflow is ever revived on pre-27
+    /// Xcode, this line needs revisiting.) Verified on-device across 20 real
+    /// `PHCloudIdentifier`s from this library that `stringValue` and
+    /// `archivalStringValue` produce byte-identical strings, so switching
+    /// carries no risk to `PhotoRecord.cloudIdentifier` values already
+    /// persisted or synced under FR-9.1/FR-9.2 — nothing here ever
+    /// reconstructs a `PHCloudIdentifier` from the stored string, so it only
+    /// ever needs to compare equal to itself.
     @concurrent
     private static func cloudIdentifiers(for localIdentifiers: [String]) async -> [String: String] {
         let mappings = PHPhotoLibrary.shared().cloudIdentifierMappings(forLocalIdentifiers: localIdentifiers)
         return mappings.reduce(into: [:]) { result, pair in
             if case .success(let cloud) = pair.value {
-                result[pair.key] = cloud.stringValue
+                result[pair.key] = cloud.archivalStringValue
             }
         }
     }

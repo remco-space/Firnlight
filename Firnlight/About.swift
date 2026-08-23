@@ -111,9 +111,17 @@ struct AboutCommand: Commands {
                         .foregroundColor: NSColor.secondaryLabelColor
                     ]
                 )
+                // `applicationIconImage` is declared `NSImage!` — AppKit
+                // guarantees it once a bundle icon exists (which Firnlight's
+                // build always provides), but the implicitly-unwrapped
+                // optional still needs unwrapping to coerce into this
+                // `[NSApplication.AboutPanelOptionKey: Any]` dictionary
+                // literal; left as-is the coercion silently drops the
+                // optional-ness rather than unwrapping it, which is exactly
+                // what the compiler now warns about.
                 NSApplication.shared.orderFrontStandardAboutPanel(options: [
                     .credits: credits,
-                    .applicationIcon: NSApplication.shared.applicationIconImage
+                    .applicationIcon: NSApplication.shared.applicationIconImage!
                 ])
                 // The panel opens behind the main window if the app isn't
                 // frontmost (e.g. the item was picked from the menu bar while

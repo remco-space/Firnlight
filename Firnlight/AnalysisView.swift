@@ -104,7 +104,14 @@ final class AnalysisModel {
         // The shared owner, not a fresh one per run: see ContinuedAnalysisTask.
         let continued = ContinuedAnalysisTask.shared
         stoppedInBackground = false
-        Task { await continued.begin(onCancel: { [weak self] in self?.stopFromBackground() }) }
+        // `[weak self]` repeated on the outer `Task` too, matching the
+        // compiler's own fix-it: with only the inner closure marked weak,
+        // Swift 6.2 flags the mismatch against this scope's own implicit
+        // strong capture — nothing in the outer closure's body reads `self`,
+        // but the capture-list mismatch is what it warns about, not an
+        // actual retain. No behavior changes: the outer `Task` never touches
+        // `self` either way.
+        Task { [weak self] in await continued.begin(onCancel: { [weak self] in self?.stopFromBackground() }) }
         #endif
 
         let task = Task {
@@ -623,10 +630,14 @@ struct AnalysisView: View {
         // transfer) nothing is coming down, and the waiting label under the
         // controls says what for. Claiming otherwise is exactly the false progress FR-3.4
         // rules out.
+        //
+        // FR-8.1: every count below is locale-grouped, and "photo"/
+        // "candidate" agree with the count each quantifies (`stats.skipped`,
+        // `stats.total` respectively) rather than always reading plural.
         if model.isRunning && model.waitingReason == nil && stats.pending == 0 && stats.skipped > 0 {
-            "\(stats.completed) of \(stats.total) — downloading \(stats.skipped) photos from iCloud…"
+            "\(stats.completed.formatted()) of \(stats.total.formatted()) — downloading \(stats.skipped.counted("photo")) from iCloud…"
         } else {
-            "\(stats.completed) of \(stats.total) candidates analyzed"
+            "\(stats.completed.formatted()) of \(stats.total.formatted()) \(stats.total.agreeing("candidate")) analyzed"
         }
     }
 
@@ -642,7 +653,8 @@ struct AnalysisView: View {
                 .help(help)
                 .opacity(visible ? 1 : 0)
                 .accessibilityHidden(!visible)
-            Text("\(value)")
+            // FR-8.1: locale-grouped, same as every other count in this card.
+            Text(value.formatted())
                 .gridColumnAlignment(.trailing)
                 .opacity(visible ? 1 : 0)
                 .accessibilityHidden(!visible)

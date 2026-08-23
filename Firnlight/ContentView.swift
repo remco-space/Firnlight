@@ -62,13 +62,13 @@ struct ContentView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             Tab("Library", systemImage: "photo.on.rectangle.angled", value: AppTab.library) {
-                LibraryTab(authorization: authorization, catchUp: catchUp, updates: updates)
+                tabContent { LibraryTab(authorization: authorization, catchUp: catchUp, updates: updates) }
             }
             Tab("Duel", systemImage: "rectangle.split.2x1", value: AppTab.duel) {
-                DuelView(model: duelModel, authorization: authorization)
+                tabContent { DuelView(model: duelModel, authorization: authorization) }
             }
             Tab("Export", systemImage: "square.and.arrow.up", value: AppTab.export) {
-                ExportView()
+                tabContent { ExportView() }
             }
         }
         // No minimum size here: on the Mac the window owns that (see
@@ -138,6 +138,67 @@ struct ContentView: View {
             Text("Firnlight is downloaded from GitHub rather than an app store, so it can only tell you a newer version exists by asking GitHub. It sends nothing about you or your library, and you can change this in Settings.")
         }
     }
+
+    /// FR-8.1 (HIG, tab-based apps): every tab's own content, on iOS, sits
+    /// inside a `GeometryReader` here — before, not inside, its own
+    /// `NavigationStack` (`LibraryTab`, `DuelView`, and `ExportView` each
+    /// wrap themselves; see their own `body`).
+    ///
+    /// Measured, not guessed (2026-08-23, iOS 27 simulator): a
+    /// `NavigationStack` nested directly inside a `Tab`'s content costs every
+    /// descendant `ScrollView` the floating tab bar's own bottom safe-area
+    /// accommodation — screenshot-confirmed with the Library tab's Analysis
+    /// stat rows and the Export tab's "Create Album" button and notice text
+    /// rendering directly under the glass tab bar (FR-8.5: "Nothing the user
+    /// needs to see is half-hidden under a bar").
+    ///
+    /// A prior version of this fix constrained `content()`'s frame to
+    /// `proxy.size.height - proxy.safeAreaInsets.bottom` — subtracting the
+    /// tab bar's own inset a *second* time. Debug-overlay measurement showed
+    /// why: at this `GeometryReader` (a `Tab`'s direct content, ahead of
+    /// `NavigationStack`), `proxy.size.height` is *already* the screen's
+    /// content height short of the tab bar's own footprint — this
+    /// `GeometryReader` sits downstream of `TabView`'s own accounting for
+    /// the floating bar, which a `GeometryReader` placed as a sibling of the
+    /// whole `TabView` does not yet reflect (confirmed by comparing both
+    /// readings side by side). Subtracting `safeAreaInsets.bottom` again
+    /// shrank the frame by the bar's height *twice*, which is what produced
+    /// 838cbd4's regression: a dead gap roughly the bar's own height, with
+    /// content — the Library tab's per-reason `Grid` and the Export tab's
+    /// "Create Album" button — clipped well short of it instead of merely
+    /// stopping short of the bar.
+    ///
+    /// The corrected fix uses `proxy.size.height` as-is (no further
+    /// subtraction) and adds `.clipped()`: `NavigationStack`, even given an
+    /// already-correct proposed height, does not itself clip a descendant
+    /// `ScrollView` to it — screenshot-confirmed as a sliver of the last row
+    /// bleeding through the glass tab bar without `.clipped()` — so this
+    /// enforces the boundary `proxy.size.height` already gets right. At
+    /// rest, content stops at (or a hair short of) the tab bar with no dead
+    /// gap; content taller than that still scrolls to reveal the rest —
+    /// confirmed for the Library tab by seeding its persisted scroll offset
+    /// (`UserDefaults` key `libraryScrollOffsetY`) past the fold and
+    /// relaunching: the full per-reason `Grid` and the tab's remaining cards
+    /// render, ending flush with (not under) the bar. Root cause of the
+    /// double-accounting not otherwise established — nothing in the 27
+    /// SDK's release notes or header comments documents it — so this remains
+    /// a measured, reproducible workaround for a specific beta build, not an
+    /// explained one; revisit on the next Xcode 27 beta or GA release, and
+    /// re-verify by screenshot before trusting it.
+    ///
+    /// No-op on macOS, which has neither a floating tab bar nor this bug.
+    @ViewBuilder
+    private func tabContent<Content: View>(@ViewBuilder _ content: @escaping () -> Content) -> some View {
+        #if os(macOS)
+        content()
+        #else
+        GeometryReader { proxy in
+            content()
+                .frame(height: proxy.size.height, alignment: .top)
+                .clipped()
+        }
+        #endif
+    }
 }
 
 /// Library tab: Photos authorization, then the pipeline's progress and the
@@ -153,6 +214,20 @@ private struct LibraryTab: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
+    /// `CandidateGridView`'s own load state (FR-8.7's honesty requirement,
+    /// see `pendingRestoreTargetY`'s doc comment): the growth-driven restore
+    /// below needs a real "is the grid still loading" signal, not just "has
+    /// layout gone quiet for a while".
+    ///
+    /// Owned here rather than read back via `@FocusedValue(\.libraryGridModel)`
+    /// (which is what `AppCommands` uses, and what an earlier version of this
+    /// fix relied on too): `.focusedSceneValue` only publishes while this
+    /// tab's view is mounted *and the scene holds focus* (see
+    /// AppCommands.swift's doc comment) — not guaranteed during a slow or
+    /// backgrounded scan, which is exactly when this check matters most. With
+    /// the model owned here and handed down to `CandidateGridView`, it's live
+    /// state present for the whole time this tab is showing, focus or no.
+    @State private var gridModel = GridModel()
 
     // FR-8.1: restore roughly where the user had scrolled to. Seeded from the
     // persisted vertical offset at view-creation time, so SwiftUI applies it
@@ -179,7 +254,86 @@ private struct LibraryTab: View {
     /// of clobbering it with 0.
     @State private var currentScrollOffsetY = CGFloat(UserDefaults.standard.double(forKey: "libraryScrollOffsetY"))
 
+    /// FR-8.5: the restore above is a *one-shot* `ScrollPosition(y:)`, applied
+    /// once SwiftUI first lays out this `ScrollView`. Measured (2026-08-23,
+    /// iOS 27 simulator, via a temporary `onScrollGeometryChange` debug log,
+    /// since removed): `CandidateGridView`'s own ranked-candidate load lands
+    /// *after* that first layout pass, growing `contentSize.height` in
+    /// several steps. Re-issuing the same absolute-`y` target on every one of
+    /// those steps (an earlier version of this fix) made no difference — a
+    /// seeded `libraryScrollOffsetY` anywhere from 500 up to the point where
+    /// SwiftUI stopped honoring it at all settled at the same ~377pt
+    /// `contentOffset` even once the grid had fully loaded, which is well
+    /// short of the ~610pt `contentSize.height - containerSize.height` says
+    /// should be reachable. `ScrollPosition(y:)` against a `LazyVStack`-based
+    /// `ScrollView`'s own reported geometry is not to be trusted at this
+    /// content size here on the 27 beta; asking for `ScrollPosition(edge:
+    /// .bottom)` instead — the ScrollView's own idea of its real end, not our
+    /// arithmetic — reached measurably further (~494pt) and, screenshot-
+    /// confirmed, cleared "No Candidates Yet"'s full two-line description of
+    /// the tab bar. This is what left that description permanently under the
+    /// bar at the reachable maximum (FR-8.5: "Nothing the user needs to see
+    /// is half-hidden under a bar").
+    ///
+    /// Fix: keep re-issuing the persisted absolute target while
+    /// `contentSize.height` is still growing (for fidelity — most restores
+    /// land well short of any edge, and should return to the same *region*,
+    /// not snap to the bottom). Once growth has been quiet for a short debounce
+    /// window, if the live offset still falls short of that target, that is
+    /// treated as *maybe* the target having been at or past the content's true
+    /// end when it was saved — but 250ms of layout quiet is a debounce on
+    /// churn, not a load-completion signal: a slow scan can space growth
+    /// events further apart than that even while still mid-load, so the
+    /// window elapsing doesn't by itself mean the grid is done. The fallback
+    /// therefore also checks `gridModel.isLoading`: while it reads `true`,
+    /// this pass backs off and leaves `pendingRestoreTargetY` set for the
+    /// *next* growth event's debounce to re-examine, rather than finishing
+    /// against a `contentSize` that is still short of final and snapping to
+    /// an intermediate "bottom" the user never scrolled to. Only once loading
+    /// has genuinely settled does a persisting shortfall get resolved with
+    /// `ScrollPosition(edge: .bottom)`, which lands wherever the *current*
+    /// content's real end actually is, not wherever the arithmetic above says
+    /// it should be.
+    ///
+    /// Separately (FR-8.7): every re-application of the target below is only
+    /// ever the app restoring what the user already had, never a jump away
+    /// from where they are now — so it stops the instant the user starts
+    /// scrolling. `onScrollPhaseChange` below clears `pendingRestoreTargetY`
+    /// as soon as a `.tracking` phase (the user's finger actually driving the
+    /// content) is observed, which both stops any further re-application and
+    /// invalidates the in-flight debounce `Task` via `restoreGeneration`, so
+    /// a scan that is still growing content minutes into a scan can never
+    /// yank a scrolling user back to the saved offset.
+    @State private var pendingRestoreTargetY: CGFloat? = {
+        let saved = CGFloat(UserDefaults.standard.double(forKey: "libraryScrollOffsetY"))
+        return saved > 0 ? saved : nil
+    }()
+    /// Invalidates a stale debounce `Task` when a newer content-size change
+    /// supersedes it, so only the *last* growth step's timer ever fires.
+    @State private var restoreGeneration = 0
+
+    /// FR-8.1 (HIG, tab-based apps): iPhone and iPad get a `NavigationStack`
+    /// with this tab's own title, matching `ExportView` and `DuelView`. That
+    /// `NavigationStack` sits inside `ContentView.tabContent`'s frame-and-
+    /// `.clipped()`-constrained `GeometryReader`, which is what keeps
+    /// `libraryContent`'s `ScrollView` clear of the floating tab bar — see
+    /// that function's doc comment for the measured, reproducible SDK-27-
+    /// beta bug behind it. The Mac is untouched: no bottom bar there to
+    /// establish hierarchy against, and it already has its menu bar
+    /// (FR-8.3).
     var body: some View {
+        #if os(macOS)
+        libraryContent
+        #else
+        NavigationStack {
+            libraryContent
+                .navigationTitle("Library")
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private var libraryContent: some View {
         if authorization.isAuthorized {
             ScrollView {
                 VStack(spacing: 20) {
@@ -192,7 +346,7 @@ private struct LibraryTab: View {
                     }
                     .frame(maxWidth: 560)
 
-                    CandidateGridView()
+                    CandidateGridView(model: gridModel)
                 }
                 .padding(24)
             }
@@ -202,6 +356,53 @@ private struct LibraryTab: View {
                 geometry.contentOffset.y
             } action: { _, newValue in
                 currentScrollOffsetY = newValue
+            }
+            // See `pendingRestoreTargetY`'s doc comment: keeps nudging the
+            // one-shot restore toward its target as the grid's own async
+            // load grows the content, then — once growth has settled and the
+            // live offset still falls short — asks for the ScrollView's own
+            // real bottom edge rather than trusting the arithmetic above.
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentSize.height
+            } action: { _, _ in
+                guard let target = pendingRestoreTargetY else { return }
+                scrollPosition = ScrollPosition(y: target)
+                restoreGeneration += 1
+                let myGeneration = restoreGeneration
+                Task {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard myGeneration == restoreGeneration, pendingRestoreTargetY != nil else { return }
+                    // Quiet layout isn't the same thing as "done loading" —
+                    // see `pendingRestoreTargetY`'s doc comment. Back off and
+                    // let the next growth step's debounce re-examine.
+                    if gridModel.isLoading { return }
+                    pendingRestoreTargetY = nil
+                    if currentScrollOffsetY < target - 1 {
+                        scrollPosition = ScrollPosition(edge: .bottom)
+                    }
+                }
+            }
+            // FR-8.7: the user's own scroll always wins over the restore —
+            // see `pendingRestoreTargetY`'s doc comment. `.tracking` alone
+            // (an earlier version of this guard) only covers a drag or
+            // flick; user-driven motion that never tracks — a status-bar
+            // tap-to-top, or keyboard/VoiceOver-driven scrolling — passed
+            // straight through it, leaving a later growth event free to yank
+            // that position back to the restore target. `ScrollPhase
+            // .isScrolling` is true for every non-idle phase (`.tracking`,
+            // `.interacting`, `.decelerating`, `.animating`), which covers
+            // all of those. Confirmed self-safe (2026-08-23, iOS 27
+            // simulator, via a temporary debug log on this same hook, since
+            // removed): the restore's own writes below — both the plain
+            // `ScrollPosition(y:)` re-application and the `edge: .bottom`
+            // fallback — never move the phase off `.idle`, so this can't
+            // cancel itself the way checking `.animating` alone might risk
+            // for an *animated* programmatic scroll.
+            .onScrollPhaseChange { _, newPhase in
+                if newPhase.isScrolling, pendingRestoreTargetY != nil {
+                    pendingRestoreTargetY = nil
+                    restoreGeneration += 1
+                }
             }
             // Persist on leaving .active rather than on every scroll frame:
             // backgrounding or, for this quit-on-close app (FR-1.7), quitting
@@ -357,7 +558,16 @@ private struct LibraryStatusView: View {
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Library")
+                // FR-8.10/FR-4.13: named "Library Scan", not "Library" — this
+                // card sits directly under the Library tab's own navigation
+                // title on iPhone and iPad (FR-8.1), and two headings reading
+                // "Library" in the same screen is one heading too many for
+                // one thing. "Library Scan" also does what a heading should:
+                // it says what this specific card covers (catching up with
+                // the library, FR-2.4) rather than repeating the tab's own
+                // name, matching how the "Vision Analysis" card beneath it is
+                // already named for its own job rather than the tab's.
+                Text("Library Scan")
                     .font(.headline)
 
                 // Fixed order, every phase: blurb, progress, outcome. The only
@@ -432,7 +642,9 @@ private struct LibraryStatusView: View {
         guard case .scanning(let examined, let total) = scanner.phase, total > 0 else {
             return (nil, 1, "Preparing…")
         }
-        return (Double(examined), Double(total), "\(examined) of \(total) photos examined")
+        // FR-8.1: locale-grouped digits and "photo" agreeing with `total`
+        // (the count it quantifies — "of 1 photo", not "of 1 photos").
+        return (Double(examined), Double(total), "\(examined.formatted()) of \(total.formatted()) \(total.agreeing("photo")) examined")
     }
 
     /// What the app last found in the library.
@@ -454,9 +666,26 @@ private struct LibraryStatusView: View {
     private func outcomeContent(_ outcome: LibraryScanner.Outcome) -> some View {
         switch outcome {
         case .finished(let candidates, let examined, let newlyAdded, let editedQueued, let removed):
-            Label("\(candidates) wallpaper candidates", systemImage: "photo.stack")
+            // FR-4.13: this count and the Analysis card's "Wallpaper
+            // candidates" stat below it are two different numbers over the
+            // same word — this one is everything that merely qualifies by
+            // size and shape, Vision hasn't looked yet; that one is what
+            // survived Vision's checks and can actually compete for the
+            // album. They used to share the same visible phrase
+            // ("N wallpaper candidates" over "Wallpaper candidates N"),
+            // distinguished only by a `.help()` tooltip — invisible to
+            // keyboard, VoiceOver, and touch, so those users saw two
+            // contradicting-looking numbers with no explanation at all
+            // (observed live: "3 wallpaper candidates" over "Wallpaper
+            // candidates 0"). "Possible" plus the sentence below now carries
+            // that distinction in words everyone can read.
+            Label("\(candidates.counted("possible candidate found", "possible candidates found"))", systemImage: "photo.stack")
                 .font(.callout.weight(.semibold))
-                .help("Photos whose size and shape qualify them for the wallpaper pipeline; Vision analysis filters them further.")
+                .help("Photos whose size and shape qualify them for the wallpaper pipeline; Vision analysis below filters them further.")
+            Text("Vision analysis narrows this to the wallpaper candidates shown below.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Text(scanSummary(examined: examined, newlyAdded: newlyAdded, editedQueued: editedQueued, removed: removed))
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -476,12 +705,15 @@ private struct LibraryStatusView: View {
     }
 
     private func scanSummary(examined: Int, newlyAdded: Int, editedQueued: Int, removed: Int) -> String {
-        var parts = ["Examined \(examined) photos", "added \(newlyAdded) new"]
+        // FR-8.1: locale-grouped digits throughout, and "photo"/"photos"
+        // agreeing with `examined` — the others ("new", "edited", with no
+        // noun of their own) have nothing to agree.
+        var parts = ["Examined \(examined.counted("photo"))", "added \(newlyAdded.formatted()) new"]
         if editedQueued > 0 {
-            parts.append("queued \(editedQueued) edited for re-analysis")
+            parts.append("queued \(editedQueued.formatted()) edited for re-analysis")
         }
         if removed > 0 {
-            parts.append("removed \(removed)")
+            parts.append("removed \(removed.formatted())")
         }
         return parts.joined(separator: ", ") + "."
     }

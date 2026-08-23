@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Photos
 #if os(macOS)
 import AppKit
 #else
@@ -37,6 +38,16 @@ final class ExportModel {
     /// another one (FR-6.10). See `WallpaperAlbumSync.restoreInterruptedSync`.
     private(set) var hasInterruptedSync = false
     private(set) var isRestoring = false
+    /// FR-8.13: whether this device has whole-library Photos access (FR-1.8).
+    /// Without it `LibraryCatchUp` never scans, so the candidate pool stays
+    /// permanently empty — `totalAccepted` reads a true 0 that otherwise
+    /// looks identical to "ready, but genuinely nothing qualifies yet". Read
+    /// directly via PhotoKit rather than the Library tab's own
+    /// `PhotoLibraryAuthorization` object: `TabView` mounts only the
+    /// selected tab, so `ExportView` has no live reference to it, and a
+    /// second observable object threaded in for one status read would be
+    /// more machinery than the check itself.
+    private(set) var isAuthorized = false
     /// One reused model actor (and its ModelContext) for both reload tasks.
     /// Spinning up a fresh FeatureStore per keystroke/re-rank churned contexts
     /// against the store; `.task(id:)` already cancels a superseded run, so a
@@ -67,7 +78,48 @@ final class ExportModel {
     private var isAsking = false
 
     func refreshAccess() {
+        isAuthorized = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
         hasInterruptedSync = WallpaperAlbumSync.hasInterruptedSync
+    }
+
+    /// FR-6.11: "the tab states it as a standing fact, before any attempt" —
+    /// checks whether the album is visible on this device *before* a sync is
+    /// ever pressed, so `albumMissing` (and the notice it drives) is on
+    /// screen the moment the tab appears rather than only discoverable from a
+    /// failed Sync press. `sync()`'s own catch of `.albumNotVisible` still
+    /// exists alongside this — a device could lose sight of the album between
+    /// this check and a later Sync — but it is no longer the *first* place the
+    /// user learns of it.
+    ///
+    /// Guarded to whole-library authorization: without it PhotoKit's album
+    /// fetch returns nothing regardless of whether the album truly exists
+    /// elsewhere, which would otherwise print a false "waiting for the album"
+    /// notice before the user has even granted access (FR-1.8 already covers
+    /// that state, in the Library tab). And skipped while a sync, a restore,
+    /// or an unanswered consent question already owns this state, so a
+    /// background poll can't clobber what one of those is in the middle of
+    /// setting for itself.
+    func refreshAlbumVisibility() {
+        guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else { return }
+        guard !isSyncing, !isRestoring, pendingChange == nil else { return }
+        let visible = WallpaperAlbumSync.isAlbumVisible
+        albumMissing = !visible
+        if !visible {
+            // FR-8.12/FR-8.13: mirrors `sync()`'s own `.albumNotVisible`
+            // catch below. Without this, a device that could see the album a
+            // moment ago (the last sync's success tally is still standing)
+            // and then loses sight of it — deleted or renamed while the app
+            // was backgrounded — would show that stale "Album has N photos"
+            // success label at the same time as the fresh "waiting for the
+            // album" notice this sets: a claimed success next to a state
+            // that says the app cannot currently confirm it, which is
+            // exactly the contradiction FR-8.12 forbids and FR-8.13 asks
+            // every on-screen state to avoid. A stale error is cleared for
+            // the same reason — it no longer describes what is standing in
+            // its place.
+            outcome = nil
+            errorMessage = nil
+        }
     }
 
     /// FR-1.9's ask, in the form the write path calls it: hand over the change
@@ -744,6 +796,22 @@ struct ExportView: View {
     /// See `commitCount`.
     @State private var draftIsEdited = false
     @FocusState private var countFieldFocused: Bool
+    // FR-8.1: restore roughly where the user had scrolled to, same mechanism
+    // and same reasoning as `LibraryTab`'s `scrollPosition` — see its doc
+    // comments for the full rationale (approximate restore is deliberate;
+    // the growth-tolerant re-clamp and `edge: .bottom` fallback below exist
+    // because this tab's own `model.preview` loads asynchronously too, via
+    // the same `.task` mechanism, and hits the identical SDK-27-beta
+    // `ScrollPosition(y:)`-against-`LazyVGrid` clamp quirk).
+    @State private var scrollPosition = ScrollPosition(
+        y: CGFloat(UserDefaults.standard.double(forKey: "exportScrollOffsetY"))
+    )
+    @State private var currentScrollOffsetY = CGFloat(UserDefaults.standard.double(forKey: "exportScrollOffsetY"))
+    @State private var pendingRestoreTargetY: CGFloat? = {
+        let saved = CGFloat(UserDefaults.standard.double(forKey: "exportScrollOffsetY"))
+        return saved > 0 ? saved : nil
+    }()
+    @State private var restoreGeneration = 0
     /// Grows with the user's text size: the field has to hold the widest count
     /// the library can produce.
     @ScaledMetric private var countFieldWidth: CGFloat = 64
@@ -761,7 +829,47 @@ struct ExportView: View {
     @State private var isShowingSettings = false
     #endif
 
+    /// FR-8.1 (HIG, tab-based apps): iPhone and iPad get a `NavigationStack`
+    /// around this tab's content, same as `LibraryTab` and `DuelView` —
+    /// before this, none of the three tabs established the navigation
+    /// structure the HIG describes for a tab bar app (a title and a home for
+    /// tab-scoped actions), each one's own title was in-content text that
+    /// scrolled away with the rest, and this tab's Settings entry had
+    /// nowhere but the scrolling content itself to live, which is what let it
+    /// rest under the floating tab bar (see `exportContent`'s own comment).
+    ///
+    /// This `NavigationStack` sits inside `ContentView.tabContent`'s
+    /// frame-and-`.clipped()`-constrained `GeometryReader`, which is what
+    /// keeps `exportContent`'s `ScrollView` clear of the floating tab bar —
+    /// see that function's doc comment for the measured, reproducible
+    /// SDK-27-beta bug behind it, and how it was isolated.
+    ///
+    /// The Mac is untouched: it already has a menu bar (FR-8.3) and a
+    /// standard Settings window, and none of its tabs rendered under a
+    /// bottom bar to begin with — this is iOS/iPadOS HIG guidance, not a
+    /// cross-platform one.
     var body: some View {
+        #if os(macOS)
+        exportContent
+        #else
+        NavigationStack {
+            exportContent
+                .navigationTitle("Export")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            isShowingSettings = true
+                        } label: {
+                            Label("Settings", systemImage: "gearshape")
+                        }
+                        .accessibilityLabel("Settings")
+                    }
+                }
+        }
+        #endif
+    }
+
+    private var exportContent: some View {
         ScrollView {
             VStack(spacing: 16) {
                 controls
@@ -783,20 +891,26 @@ struct ExportView: View {
                 }
 
                 #if !os(macOS)
-                // The way into the app's settings on a platform with no
-                // Settings window and no menu bar to put one behind (FR-8.4:
-                // every command reachable by touch, none of them only behind a
-                // gesture). It sits with the identity footer at the foot of
-                // the app's one bounded screen, for the same reason About does
-                // — see About.swift. On the Mac this is the standard Settings
-                // window instead (⌘,), so there is nothing here.
-                Button("Settings…") { isShowingSettings = true }
-                    .padding(.top, 24)
-
                 // FR-8.8's iPhone and iPad half: the app's identity at the
                 // foot of its last screen, where macOS has an About box
                 // instead. Static, so it never shifts anything above it
                 // (FR-8.7). See About.swift for why here.
+                //
+                // The way into the app's settings used to sit right above
+                // this as a plain scrolled `Button`, on a platform with no
+                // Settings window and no menu bar to put one behind (FR-8.4:
+                // every command reachable by touch, none of them only behind
+                // a gesture). At this screen's resting scroll position it
+                // rendered partly beneath the floating tab bar — its text
+                // visible through the glass over the "Duel" label
+                // (screenshot-confirmed 2026-08-23) — which is exactly what
+                // FR-8.5 forbids ("Nothing the user needs to see is
+                // half-hidden under a bar"). It now lives in `body`'s own
+                // navigation bar toolbar instead (the gear button), which the
+                // HIG's tab-bar guidance already expects every tab to have
+                // for this kind of tab-scoped, non-primary action — a
+                // navigation bar is never behind the floating tab bar, so the
+                // question of overlap doesn't arise there at all.
                 AboutFooter()
                 #endif
             }
@@ -804,6 +918,54 @@ struct ExportView: View {
         }
         .frame(maxWidth: .infinity)
         #if !os(macOS)
+        .scrollPosition($scrollPosition)
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.contentOffset.y
+        } action: { _, newValue in
+            currentScrollOffsetY = newValue
+        }
+        // See `LibraryTab`'s identical hook for the full explanation: this
+        // re-clamps the one-shot restore as `model.preview` loads, then
+        // falls back to the ScrollView's own real bottom edge if the target
+        // still can't be reached once loading settles — but only once
+        // `model.totalAccepted` (the same "still loading" signal
+        // `exportContent`'s own `ProgressView` reads) confirms the load has
+        // actually finished, not merely that layout has gone quiet for
+        // 250ms; a slow scan can space growth events further apart than that
+        // while `refreshPreview` is still running.
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.contentSize.height
+        } action: { _, _ in
+            guard let target = pendingRestoreTargetY else { return }
+            scrollPosition = ScrollPosition(y: target)
+            restoreGeneration += 1
+            let myGeneration = restoreGeneration
+            Task {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard myGeneration == restoreGeneration, pendingRestoreTargetY != nil else { return }
+                if model.totalAccepted == nil { return }
+                pendingRestoreTargetY = nil
+                if currentScrollOffsetY < target - 1 {
+                    scrollPosition = ScrollPosition(edge: .bottom)
+                }
+            }
+        }
+        // FR-8.7: the user's own scroll always wins over the restore — see
+        // `LibraryTab`'s identical hook, including why `.isScrolling` (not
+        // just `.tracking`) is the right test and why it's self-safe here
+        // too.
+        .onScrollPhaseChange { _, newPhase in
+            if newPhase.isScrolling, pendingRestoreTargetY != nil {
+                pendingRestoreTargetY = nil
+                restoreGeneration += 1
+            }
+        }
+        // Persist on leaving .active, same reasoning as `LibraryTab`.
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase != .active {
+                UserDefaults.standard.set(Double(currentScrollOffsetY), forKey: "exportScrollOffsetY")
+            }
+        }
         .sheet(isPresented: $isShowingSettings) {
             NavigationStack {
                 SettingsView()
@@ -861,9 +1023,15 @@ struct ExportView: View {
         // app was in the background, on the tab that acts on it. `.task` covers
         // the tab appearing; `.onChange` covers returning to a tab already on
         // screen, which is exactly the Settings round-trip.
-        .task { model.refreshAccess() }
+        .task {
+            model.refreshAccess()
+            model.refreshAlbumVisibility()
+        }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active { model.refreshAccess() }
+            if newPhase == .active {
+                model.refreshAccess()
+                model.refreshAlbumVisibility()
+            }
         }
         .task(id: RankingClock.shared.version) {
             await model.refreshSuggestion(container: modelContext.container)
@@ -925,9 +1093,55 @@ struct ExportView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                sizeControls
+                // FR-8.13: without whole-library access `LibraryCatchUp`
+                // never scans, so `totalAccepted` reads a true 0 forever —
+                // indistinguishable, to the controls below, from "ready, and
+                // genuinely nothing qualifies". Left alone, this state showed
+                // the full size slider reading "Suggested: 0" with nothing on
+                // screen saying why, or what to do about it. Stated here
+                // instead, in place of controls that have nothing honest to
+                // offer without a real pool behind them.
+                if !model.isAuthorized {
+                    noAccessNotice
+                } else {
+                    authorizedControls
+                }
+            }
+            .padding(8)
+        }
+    }
 
-                HStack(spacing: 12) {
+    /// FR-1.8/FR-8.13: this device hasn't granted the whole-library access
+    /// the album needs. Named after the one thing the user can do about it
+    /// rather than left to the slider's own disabled state to explain, and
+    /// pointed at the Library tab's own grant prompt (FR-1.2) rather than
+    /// repeating a second one here (FR-8.10).
+    private var noAccessNotice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(
+                "Firnlight needs access to your whole Photos library before it can build an album.",
+                systemImage: "lock.rectangle"
+            )
+            .foregroundStyle(.orange)
+            Text("Grant access from the Library tab, then come back here.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// Everything `controls` shows once whole-library access is granted: the
+    /// size slider, the Sync button and its outcome, and the three standing
+    /// notices. Split out from `controls` only so `noAccessNotice` above has
+    /// something to stand in place of — nothing here changed.
+    private var authorizedControls: some View {
+        Group {
+            sizeControls
+
+            HStack(spacing: 12) {
                     Button("Sync Album") {
                         model.sync(container: modelContext.container)
                     }
@@ -949,9 +1163,13 @@ struct ExportView: View {
                         .shownWhileWaiting(model.isSyncing)
 
                     if let outcome = model.outcome {
+                        // FR-8.1: locale-grouped digits and "photo"/"photos"
+                        // agreeing with `outcome.total` (a sync down to the
+                        // album's own working minimum can land on exactly 1).
+                        let totalPhrase = outcome.total.counted("photo")
                         if outcome.orderVerified {
                             Label(
-                                "Album has \(outcome.total) photos (+\(outcome.added), −\(outcome.removed) this sync)",
+                                "Album has \(totalPhrase) (+\(outcome.added.formatted()), −\(outcome.removed.formatted()) this sync)",
                                 systemImage: "checkmark.circle"
                             )
                             .foregroundStyle(.green)
@@ -971,19 +1189,21 @@ struct ExportView: View {
                             )
                             .foregroundStyle(.orange)
                             .font(.callout)
-                            .help("The album has \(outcome.total) photos, but their order in Photos doesn't match the preview below. Syncing again usually fixes it.")
+                            .help("The album has \(totalPhrase), but their order in Photos doesn't match the preview below. Syncing again usually fixes it.")
                         }
                     }
                 }
 
                 // The three standing notices sit *under* the Sync button, not
                 // between it and the count (FR-8.7). Each of them appears and
-                // disappears while this tab is on screen — `albumMissing` as
-                // the direct result of pressing Sync, the other two on a
-                // return from Settings — and above the button that meant the
-                // button dropped half a card's height away from the pointer
-                // that had just clicked it. Below, they push only the preview
-                // grid, which nothing is aiming at.
+                // disappears while this tab is on screen — `albumMissing` the
+                // moment `refreshAlbumVisibility` finds the album gone,
+                // standing fact rather than the result of a press (FR-6.11),
+                // the other two on a return from Settings or the end of a
+                // sync — and above the button that meant the button dropped
+                // half a card's height away from the pointer that had just
+                // clicked it. Below, they push only the preview grid, which
+                // nothing is aiming at.
                 if model.albumMissing {
                     albumMissingNotice
                 }
@@ -996,8 +1216,6 @@ struct ExportView: View {
                     Text(errorMessage)
                         .foregroundStyle(.red)
                 }
-            }
-            .padding(8)
         }
     }
 
@@ -1152,7 +1370,11 @@ struct ExportView: View {
                 model.trackWidth = $0
             }
             .accessibilityLabel("Album size")
-            .accessibilityValue("\(model.count.formatted()) photos")
+            // FR-8.1: "photo"/"photos" agreeing with `model.count` — reachable
+            // at exactly 1 when `smallestSize` collapses to
+            // `min(Thresholds.minimumWallpaperCount, largestSize)` on a small
+            // library, and this value is VoiceOver-spoken, not just visible.
+            .accessibilityValue(model.count.counted("photo"))
             // A slider's default assistive step is a tenth of its range, which
             // on this scale is close to a doubling of the count per press —
             // about eleven counts reachable in the whole library. Left over

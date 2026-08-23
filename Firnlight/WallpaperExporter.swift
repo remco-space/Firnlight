@@ -329,6 +329,17 @@ nonisolated enum WallpaperAlbumSync {
         return outcome
     }
 
+    /// FR-6.11: whether this device can currently see the wallpaper album, as
+    /// a cheap read-only lookup with no `sync` attempt behind it — what lets
+    /// ExportView state the wait as a standing fact up front, before Sync is
+    /// ever pressed, rather than the user learning it first from a failed
+    /// press. Shares `findAlbum`'s reasoning: it deliberately never creates,
+    /// so a `false` here on a second device just-not-synced-yet is the
+    /// correct, honest answer, not a bug to paper over.
+    static var isAlbumVisible: Bool {
+        findAlbum(named: Thresholds.wallpaperAlbumName) != nil
+    }
+
     private static let storedIdentifierDefaultsKey = "WallpaperAlbumSync.albumLocalIdentifier"
     private static let interruptedMembershipDefaultsKey = "WallpaperAlbumSync.interruptedMembership"
 

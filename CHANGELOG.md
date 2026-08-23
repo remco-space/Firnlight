@@ -14,6 +14,116 @@ heading when that version is released (FR-10.3).
 
 ### Fixed
 
+- The Export tab now says a device can't yet see the "Firnlight" album as a
+  standing fact the moment the tab appears, instead of only after a failed
+  Sync press (FR-6.11), and clears a stale sync success tally (or error)
+  rather than leaving it standing beside that notice if the album later
+  drops out of sight (FR-8.12).
+- The Export tab now says plainly when it can't show a size control or a
+  suggestion because Photos access hasn't been granted yet, instead of
+  showing "Suggested: 0" with no explanation (FR-8.13).
+- The Library tab's pre-analysis candidate count no longer reads as
+  contradicting the Analysis card's own "Wallpaper candidates" count below
+  it — the two numbers measure different things, and that difference is
+  now said in visible words rather than only a hover tooltip (FR-4.13).
+- The album-size suggestion's middle-zone scan no longer caps itself at 500
+  candidates when the user has duels but no explicit "Both Are Bad"/"Not
+  Wallpaper Material" verdict — a duel choice alone was never such a
+  judgment, and the cap was a working shortcut silently narrowing the pool
+  the estimate is drawn from (FR-6.4).
+- Counts throughout the Library and Export tabs are now locale-grouped and
+  agree grammatically with what they count ("1 photo", not "1 photos"),
+  including the album-size control's VoiceOver value (FR-8.1).
+- The two verdict toggles and the iOS actions menu on every thumbnail now
+  meet the HIG's 44x44pt minimum touch target on iPhone and iPad, without
+  growing the glass controls themselves (FR-8.1).
+- The score badge on thumbnails is now also explained by a visible, named
+  menu row (Mac right-click and iOS actions menu alike), not only by a
+  VoiceOver label and a pointer-only tooltip (FR-4.13/FR-8.13).
+- iPhone and iPad now give each tab its own navigation bar and title,
+  matching the HIG's structure for tab-based apps; the Export tab's
+  Settings entry moved from the bottom of its scrolling content — where it
+  could rest partly under the floating tab bar — into that navigation bar's
+  own toolbar (FR-8.1/FR-8.5). Fixed a regression the first version of this
+  change introduced: adding each tab's `NavigationStack` cost every tab's
+  scrolling content the floating tab bar's own bottom spacing, letting the
+  Library tab's Analysis stat rows and the Export tab's "Create Album"
+  button render under the bar. Two follow-up attempts (a `GeometryReader`
+  that measured the tab bar's height but discarded it, then republishing
+  that measurement so each `ScrollView` could re-apply it as its own
+  `.safeAreaInset`) both still left short content — including the exact
+  album-missing state this bug was filed against — rendering straight
+  through the bar; a third attempt constrained each tab's own frame to the
+  tab bar's own height *subtracted from* the space a `GeometryReader`
+  measured there — but that `GeometryReader` already excludes the bar's
+  footprint, so the subtraction removed it twice, clipping the Library
+  tab's per-reason `Grid` and the Export tab's "Create Album" button well
+  short of the bar instead of merely stopping short of it. The fix that
+  survived screenshot verification constrains each tab's frame to that
+  measurement as-is, with `.clipped()` added so `NavigationStack` (which
+  does not clip a descendant `ScrollView` to a proposed frame on its own)
+  actually honors it — nothing inside is ever laid out into the tab bar's
+  space, and taller content still scrolls clear of it (light and dark,
+  Library and Export).
+- The Library tab's scan-status card is now titled "Library Scan" rather
+  than "Library" — it used to repeat, word for word, the navigation title
+  now shown directly above it on iPhone and iPad (FR-8.10/FR-4.13).
+- Fixed a residual FR-8.5 defect the fixes above left behind: at the Library
+  tab's maximum reachable scroll, "No Candidates Yet"'s second description
+  line stayed permanently under the tab bar — unreachable at any scroll
+  offset. Measured cause: the persisted-scroll restore (FR-8.1) is a
+  one-shot `ScrollPosition(y:)` applied before the ranked-candidate grid's
+  own async load finishes growing the content, and re-issuing that same
+  absolute offset once the grid settles clamps to the same short position
+  regardless — `ScrollPosition(y:)` against this `ScrollView`'s own
+  reported geometry isn't to be trusted at this content size on the 27
+  beta. Fixed by falling back to `ScrollPosition(edge: .bottom)` — the
+  ScrollView's own idea of its real end — whenever the one-shot restore
+  settles short of its target. The Export tab's "Create Album" button had
+  the identical, previously unverified defect (no persisted scroll offset
+  existed there to seed and confirm it); it now has one (FR-8.1, matching
+  the Library tab), which both restores the Export tab's own scroll
+  position across launches and let this fix be verified there the same
+  way: seeding, relaunching, and screenshotting the fully-visible button,
+  clear of the bar, light and dark.
+- Fixed two defects in the growth-triggered scroll restore just above.
+  First, re-applying the saved target on every content-growth step had no
+  guard against the user's own scrolling (FR-8.7): a user who started
+  scrolling during a long-running scan — the window during which growth
+  events keep arriving — was yanked back to the saved offset by the next
+  one. It now stops the instant a `.tracking` scroll phase (the user's own
+  finger driving the content) is observed. Second, the `edge: .bottom`
+  fallback fired once layout had gone quiet for a fixed window, which is a
+  debounce on layout churn, not a load-completion signal — a slow scan or
+  an iCloud-backed load can space growth events further apart than that
+  window while still mid-load, so the fallback could fire against
+  incomplete content and snap to an intermediate "bottom" the user never
+  visited, with no way to correct itself afterward. It now also checks the
+  page's own "still loading" signal (the Library grid's `GridModel
+  .isLoading`, the Export tab's `model.totalAccepted == nil`) and backs off
+  to let the next growth step's debounce re-examine rather than finishing
+  early. The prior claim that "a target genuinely inside the scrollable
+  range is never clamped down" overstated what a layout-quiet debounce can
+  actually guarantee; the fix above is what makes that true.
+- Fixed two defects this same guard shipped with. First, the Library tab's
+  `isLoading` check above was read through `@FocusedValue`, which
+  `.focusedSceneValue` only publishes while the Library view is mounted *and*
+  the scene holds keyboard focus — not guaranteed during a slow or
+  backgrounded scan, letting a nil read fall through as "not loading" and
+  finalize the restore against still-growing content, the exact snap this
+  guard exists to prevent. The Library tab's `GridModel` is now owned by the
+  tab itself and handed down to the grid, so `isLoading` is live state
+  present the whole time the tab is showing, focus or no — the same
+  always-present shape the Export tab's `model.totalAccepted == nil` check
+  already had (the two were not, as first written, the same kind of
+  signal). Second, the guard that lets the user's own scroll win over the
+  restore (FR-8.7) only cleared on a `.tracking` scroll phase, which covers a
+  drag or flick but passes straight through user-driven motion that never
+  tracks — a status-bar tap-to-top, or keyboard/VoiceOver-driven scrolling —
+  leaving a later growth event free to yank that position back. It now
+  clears on `ScrollPhase.isScrolling` (true for `.tracking`, `.interacting`,
+  `.decelerating`, and `.animating` alike), confirmed not to cancel the
+  restore's own writes, which never move the phase off `.idle`.
 - The database contexts the ranking pipeline's background workers use are now
   created by the worker that uses them, not on the main thread that happened
   to construct the worker — ending the repeated "Unbinding from the main
