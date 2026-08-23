@@ -27,7 +27,8 @@ import Vision
 /// `revision` property (`GenerateImageFeaturePrintRequest`,
 /// `CalculateImageAestheticsScoresRequest`, `DetectLensSmudgeRequest`,
 /// `DetectFaceRectanglesRequest`, `DetectHumanRectanglesRequest`,
-/// `ClassifyImageRequest`, `DetectHorizonRequest`).
+/// `ClassifyImageRequest`, `DetectHorizonRequest`,
+/// `GenerateAttentionBasedSaliencyImageRequest`).
 ///
 /// Honest limit: this can only see revision *labels* changing. If Apple ever
 /// updates the weights behind an existing revision case without minting a
@@ -64,6 +65,7 @@ nonisolated enum VisionRevisionFingerprint {
             "smudge:\(DetectLensSmudgeRequest().revision)",
             "horizon:\(DetectHorizonRequest().revision)",
             "featurePrint:\(GenerateImageFeaturePrintRequest().revision)",
+            "saliency:\(GenerateAttentionBasedSaliencyImageRequest().revision)",
         ].joined(separator: "|")
     }
 

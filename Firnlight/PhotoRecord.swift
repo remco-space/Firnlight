@@ -123,6 +123,37 @@ final class PhotoRecord {
     /// True once horizon detection ran, so the backfill pass can resume.
     var horizonMeasured: Bool = false
 
+    // MARK: Quantified traits the ranker weighs (FR-5.2)
+    //
+    // Each is what `ImageAnalyzer` measured, stored raw and on its own fixed,
+    // library-independent scale — never normalized against the rest of the
+    // library, which would silently rescale every trained weight the moment a
+    // scan added one new extreme (see PreferenceRanker's type doc comment).
+    // All optional, and nil means exactly one thing: this photo was not
+    // measured for it — analyzed before the trait existed, or the measurement
+    // did not resolve. FR-3.8 forbids reading that gap as a low value, so the
+    // ranker substitutes the trait's own neutral midpoint and trains nothing
+    // on it. Defaults are `nil` so SwiftData migrates existing records
+    // without a schema version; the analysis-version bump that introduced
+    // them re-measures every record in the background anyway (FR-5.2).
+
+    /// Tallest face or confident human rectangle as a fraction of frame
+    /// height — the same quantity `Thresholds.personProminenceHeight` gates
+    /// on, kept so the user's choices can weigh where inside the admitted
+    /// band their own line falls (FR-3.1).
+    var personProminence: Float?
+
+    /// Fraction of the frame covered by the largest attention-salient region;
+    /// 0 when the frame has no dominant subject.
+    var subjectProminence: Float?
+
+    /// How centred that dominant region is — 1 at the frame's centre, 0 at
+    /// the furthest corner.
+    var subjectCentrality: Float?
+
+    /// Mean relative luminance, 0 (black) … 1 (white).
+    var luminance: Float?
+
     init(localIdentifier: String, pixelWidth: Int, pixelHeight: Int, creationDate: Date?, location: CLLocation?, isFavorite: Bool) {
         self.localIdentifier = localIdentifier
         self.pixelWidth = pixelWidth
