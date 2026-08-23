@@ -154,6 +154,23 @@ final class PhotoRecord {
     /// Mean relative luminance, 0 (black) … 1 (white).
     var luminance: Float?
 
+    /// Mean chroma, 0 (fully desaturated) … 1 (fully saturated).
+    var colorfulness: Float?
+
+    /// Fraction of the frame covered by segmented foreground objects.
+    var foregroundCoverage: Float?
+
+    /// How many distinct foreground objects were separated out. Stored as the
+    /// raw count; the ranker is what puts it on a fixed 0…1 scale.
+    var subjectCount: Int?
+
+    /// Tallest recognized animal as a fraction of frame height, 0 when there
+    /// is none. Species-blind — only the geometry is kept.
+    var animalProminence: Float?
+
+    /// Fraction of the frame covered by detected text regions.
+    var textCoverage: Float?
+
     init(localIdentifier: String, pixelWidth: Int, pixelHeight: Int, creationDate: Date?, location: CLLocation?, isFavorite: Bool) {
         self.localIdentifier = localIdentifier
         self.pixelWidth = pixelWidth

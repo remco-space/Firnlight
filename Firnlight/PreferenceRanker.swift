@@ -7,9 +7,10 @@ import os
 ///
 /// Raw score: s = w·featurePrint + Σᵢ bᵢ·traitᵢ, over every `ScalarTrait` —
 /// how the photo scored, how level it is, how many pixels it has, when and
-/// where it was taken, how much the wallpaper crop discards, how prominent a
-/// person and the salient subject are, where that subject sits, and how
-/// bright the frame is. Every b weight is learned from duels, never
+/// where it was taken, how much of itself the wallpaper crop discards and in
+/// which direction, how prominent a person, an animal and the salient subject
+/// are, where that subject sits, how much foreground and text cover the
+/// frame, and how bright and how vivid it reads. Every b weight is learned from duels, never
 /// hard-coded: a low-resolution, tilted, dim, or seasonally atypical photo is
 /// penalized — or favored — only as much as the user's choices imply
 /// (FR-5.2). The set is open by design and expected to grow; `ScalarTrait`
@@ -106,6 +107,26 @@ nonisolated enum ScalarTrait: Int, CaseIterable, Sendable {
     case subjectCentrality
     /// Mean relative luminance, 0 (black) … 1 (white).
     case luminance
+    /// Mean chroma, 0 (muted) … 1 (vivid).
+    case colorfulness
+    /// Fraction of the frame covered by segmented foreground objects, 0…1.
+    /// Distinct from `subjectProminence`: saliency measures where attention
+    /// goes, segmentation measures what is physically in front.
+    case foregroundCoverage
+    /// Distinct foreground objects, 0…1, saturating at
+    /// `Thresholds.subjectCountFullScale`.
+    case subjectCount
+    /// Tallest recognized animal as a fraction of frame height, 0…1.
+    case animalProminence
+    /// Fraction of the frame covered by text regions, 0…1.
+    case textCoverage
+    /// Signed aspect mismatch, −1 (tall) … 0 (the wallpaper shape) … +1
+    /// (wide), saturating at `Thresholds.aspectSkewFullScale`. Paired with
+    /// `cropLoss` rather than replacing it: `cropLoss` is the magnitude of
+    /// the mismatch and this is its direction, and a linear model needs both
+    /// to express "any mismatch is worse" and "wide beats tall" at once —
+    /// either alone can state only one of the two.
+    case aspectSkew
 
     /// The value a photo takes on this trait when it was never measured for
     /// it (FR-3.8): the point on the trait's own scale that carries no
@@ -123,7 +144,13 @@ nonisolated enum ScalarTrait: Int, CaseIterable, Sendable {
         case .levelness: 1
         // 0…1 scales: the midpoint.
         case .resolution, .season, .solarTime, .cropLoss,
-             .personProminence, .subjectProminence, .subjectCentrality, .luminance: 0.5
+             .personProminence, .subjectProminence, .subjectCentrality,
+             .luminance, .colorfulness, .foregroundCoverage, .subjectCount,
+             .animalProminence, .textCoverage: 0.5
+        // Signed like `latitude`, so its no-information point is 0 — which
+        // is also the wallpaper shape itself, the honest thing to assume of
+        // a photo whose proportions are unknown.
+        case .aspectSkew: 0
         }
     }
 
@@ -995,6 +1022,10 @@ actor PreferenceRanker {
         let aspect = Float(record.pixelWidth) / Float(max(1, record.pixelHeight))
         let target = Float(Thresholds.desktopAspectRatio)
         traits.set(.cropLoss, 1 - min(aspect, target) / max(aspect, target))
+        // The direction of that same mismatch — see `ScalarTrait.aspectSkew`
+        // for why the magnitude alone is not enough.
+        let skewRange = log2(Thresholds.aspectSkewFullScale)
+        traits.set(.aspectSkew, min(1, max(-1, log2(aspect / target) / skewRange)))
 
         traits.set(.season, record.creationDate.map(Self.seasonFraction))
 
@@ -1017,6 +1048,18 @@ actor PreferenceRanker {
         traits.set(.subjectProminence, record.subjectProminence)
         traits.set(.subjectCentrality, record.subjectCentrality)
         traits.set(.luminance, record.luminance)
+        traits.set(.colorfulness, record.colorfulness)
+        traits.set(.foregroundCoverage, record.foregroundCoverage)
+        traits.set(.animalProminence, record.animalProminence)
+        traits.set(.textCoverage, record.textCoverage)
+
+        // Counts arrive raw and are put on their fixed scales here, so the
+        // store keeps what was actually measured and only the ranker decides
+        // where a count saturates — a saturation point can then be retuned
+        // without re-examining a single photo.
+        traits.set(.subjectCount, record.subjectCount.map {
+            min(1, Float($0) / Float(Thresholds.subjectCountFullScale))
+        })
 
         return traits
     }

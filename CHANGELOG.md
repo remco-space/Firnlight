@@ -14,6 +14,15 @@ heading when that version is released (FR-10.3).
 
 ### Added
 
+- Ranking now also weighs how vivid or muted a photo is, how much of the frame
+  its foreground objects cover and how many there are, how prominent an animal
+  in it is, how much of it is taken up by text such as signs or watermarks,
+  and whether its proportions run wide or tall of the wallpaper shape — each, again, counting only as much as the user's own
+  choices imply (FR-5.2).
+- Animals are measured by how much of the frame they fill, never by what
+  species they are; text is measured by how much of the frame it covers,
+  never by what it says. The app reads no further into a photo than the trait
+  actually needs.
 - Ranking now weighs more of what the app can measure about a photo: how
   prominent a person is, how large and how centred the frame's main subject
   is, how bright the photo is overall, what time of day its own light says it

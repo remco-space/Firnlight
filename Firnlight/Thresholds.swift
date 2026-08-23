@@ -126,7 +126,16 @@ nonisolated enum Thresholds {
     /// "notices such changes itself — including ones that arrive with a
     /// system update". Every call site outside this file should keep reading
     /// `currentAnalysisVersion`, never this constant directly.
-    private static let analysisLogicVersion = 8 // v8: quantified traits kept, not just gated on
+    /// v9 is required too: it measures six more traits per photo
+    /// (colourfulness, foreground coverage and count, animal prominence and text
+    /// coverage — see `ImageAnalyzer.Outcome`), which a v8
+    /// photo carries none of, so the two cannot be weighed on equal terms
+    /// (FR-5.2).
+    /// (v10 and v11 corrected how foreground coverage is read off Vision's
+    /// instance mask — see `ImageAnalyzer.maskCoverage`; each recorded a
+    /// different wrong number, so records carrying either must be
+    /// re-measured before being weighed against a v11 one.)
+    private static let analysisLogicVersion = 11 // v11: foreground coverage counts covered pixels
 
     /// What every ranking-affecting query treats as "this build's analysis
     /// generation" — `analysisLogicVersion`, this app's own hand-tuned
@@ -376,7 +385,27 @@ nonisolated enum Thresholds {
     /// library-independent scales (`PreferenceRanker.seasonFraction`,
     /// latitude ÷ 90) that never move under a growing library — see
     /// `PreferenceRanker`'s type doc comment.
-    static let rankerAlgorithmVersion = 8 // v8: open trait set — scalar features are enumerated, not hand-written (FR-5.2)
+    static let rankerAlgorithmVersion = 9 // v9: seven traits added to the open set (FR-5.2)
+
+    /// Distinct foreground objects at which the ranker's `subjectCount` trait
+    /// saturates at 1.
+    ///
+    /// The trait has to separate "one clean subject" from "a scattering of
+    /// them"; past a handful the frame reads as busy regardless of whether
+    /// Vision resolved nine objects or nineteen. 8 puts the saturation point
+    /// past every composition where the exact count still changes how the
+    /// picture reads.
+    static let subjectCountFullScale = 8
+
+    /// Aspect-ratio mismatch, as a factor away from `desktopAspectRatio`, at
+    /// which the ranker's `aspectSkew` trait saturates at ±1.
+    ///
+    /// One octave: a 32:10 panorama sits at +1 and an 8:10 portrait at −1,
+    /// with 16:10 itself at 0. Everything a phone or camera produces in
+    /// ordinary use falls inside that, and the shapes beyond it are already
+    /// so far from the wallpaper rectangle that further distinction buys the
+    /// ranking nothing.
+    static let aspectSkewFullScale: Float = 2
 
     /// SGD learning rate for the online Bradley–Terry ranker.
     static let rankerLearningRate: Float = 0.5
