@@ -217,10 +217,17 @@ private struct LibraryTab: View {
     /// `CandidateGridView`'s own load state (FR-8.7's honesty requirement,
     /// see `pendingRestoreTargetY`'s doc comment): the growth-driven restore
     /// below needs a real "is the grid still loading" signal, not just "has
-    /// layout gone quiet for a while", and this is the one the app already
-    /// publishes for `AppCommands` — `.focusedSceneValue(\.libraryGridModel,
-    /// _)` in `CandidateGridView`.
-    @FocusedValue(\.libraryGridModel) private var gridModel
+    /// layout gone quiet for a while".
+    ///
+    /// Owned here rather than read back via `@FocusedValue(\.libraryGridModel)`
+    /// (which is what `AppCommands` uses, and what an earlier version of this
+    /// fix relied on too): `.focusedSceneValue` only publishes while this
+    /// tab's view is mounted *and the scene holds focus* (see
+    /// AppCommands.swift's doc comment) — not guaranteed during a slow or
+    /// backgrounded scan, which is exactly when this check matters most. With
+    /// the model owned here and handed down to `CandidateGridView`, it's live
+    /// state present for the whole time this tab is showing, focus or no.
+    @State private var gridModel = GridModel()
 
     // FR-8.1: restore roughly where the user had scrolled to. Seeded from the
     // persisted vertical offset at view-creation time, so SwiftUI applies it
@@ -278,7 +285,7 @@ private struct LibraryTab: View {
     /// churn, not a load-completion signal: a slow scan can space growth
     /// events further apart than that even while still mid-load, so the
     /// window elapsing doesn't by itself mean the grid is done. The fallback
-    /// therefore also checks `gridModel?.isLoading`: while it reads `true`,
+    /// therefore also checks `gridModel.isLoading`: while it reads `true`,
     /// this pass backs off and leaves `pendingRestoreTargetY` set for the
     /// *next* growth event's debounce to re-examine, rather than finishing
     /// against a `contentSize` that is still short of final and snapping to
@@ -339,7 +346,7 @@ private struct LibraryTab: View {
                     }
                     .frame(maxWidth: 560)
 
-                    CandidateGridView()
+                    CandidateGridView(model: gridModel)
                 }
                 .padding(24)
             }
@@ -368,7 +375,7 @@ private struct LibraryTab: View {
                     // Quiet layout isn't the same thing as "done loading" —
                     // see `pendingRestoreTargetY`'s doc comment. Back off and
                     // let the next growth step's debounce re-examine.
-                    if gridModel?.isLoading == true { return }
+                    if gridModel.isLoading { return }
                     pendingRestoreTargetY = nil
                     if currentScrollOffsetY < target - 1 {
                         scrollPosition = ScrollPosition(edge: .bottom)
@@ -376,9 +383,23 @@ private struct LibraryTab: View {
                 }
             }
             // FR-8.7: the user's own scroll always wins over the restore —
-            // see `pendingRestoreTargetY`'s doc comment.
+            // see `pendingRestoreTargetY`'s doc comment. `.tracking` alone
+            // (an earlier version of this guard) only covers a drag or
+            // flick; user-driven motion that never tracks — a status-bar
+            // tap-to-top, or keyboard/VoiceOver-driven scrolling — passed
+            // straight through it, leaving a later growth event free to yank
+            // that position back to the restore target. `ScrollPhase
+            // .isScrolling` is true for every non-idle phase (`.tracking`,
+            // `.interacting`, `.decelerating`, `.animating`), which covers
+            // all of those. Confirmed self-safe (2026-08-23, iOS 27
+            // simulator, via a temporary debug log on this same hook, since
+            // removed): the restore's own writes below — both the plain
+            // `ScrollPosition(y:)` re-application and the `edge: .bottom`
+            // fallback — never move the phase off `.idle`, so this can't
+            // cancel itself the way checking `.animating` alone might risk
+            // for an *animated* programmatic scroll.
             .onScrollPhaseChange { _, newPhase in
-                if newPhase == .tracking, pendingRestoreTargetY != nil {
+                if newPhase.isScrolling, pendingRestoreTargetY != nil {
                     pendingRestoreTargetY = nil
                     restoreGeneration += 1
                 }

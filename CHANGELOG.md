@@ -105,6 +105,25 @@ heading when that version is released (FR-10.3).
   early. The prior claim that "a target genuinely inside the scrollable
   range is never clamped down" overstated what a layout-quiet debounce can
   actually guarantee; the fix above is what makes that true.
+- Fixed two defects this same guard shipped with. First, the Library tab's
+  `isLoading` check above was read through `@FocusedValue`, which
+  `.focusedSceneValue` only publishes while the Library view is mounted *and*
+  the scene holds keyboard focus — not guaranteed during a slow or
+  backgrounded scan, letting a nil read fall through as "not loading" and
+  finalize the restore against still-growing content, the exact snap this
+  guard exists to prevent. The Library tab's `GridModel` is now owned by the
+  tab itself and handed down to the grid, so `isLoading` is live state
+  present the whole time the tab is showing, focus or no — the same
+  always-present shape the Export tab's `model.totalAccepted == nil` check
+  already had (the two were not, as first written, the same kind of
+  signal). Second, the guard that lets the user's own scroll win over the
+  restore (FR-8.7) only cleared on a `.tracking` scroll phase, which covers a
+  drag or flick but passes straight through user-driven motion that never
+  tracks — a status-bar tap-to-top, or keyboard/VoiceOver-driven scrolling —
+  leaving a later growth event free to yank that position back. It now
+  clears on `ScrollPhase.isScrolling` (true for `.tracking`, `.interacting`,
+  `.decelerating`, and `.animating` alike), confirmed not to cancel the
+  restore's own writes, which never move the phase off `.idle`.
 - The database contexts the ranking pipeline's background workers use are now
   created by the worker that uses them, not on the main thread that happened
   to construct the worker — ending the repeated "Unbinding from the main

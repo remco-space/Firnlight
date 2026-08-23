@@ -951,9 +951,11 @@ struct ExportView: View {
             }
         }
         // FR-8.7: the user's own scroll always wins over the restore — see
-        // `LibraryTab`'s identical hook.
+        // `LibraryTab`'s identical hook, including why `.isScrolling` (not
+        // just `.tracking`) is the right test and why it's self-safe here
+        // too.
         .onScrollPhaseChange { _, newPhase in
-            if newPhase == .tracking, pendingRestoreTargetY != nil {
+            if newPhase.isScrolling, pendingRestoreTargetY != nil {
                 pendingRestoreTargetY = nil
                 restoreGeneration += 1
             }

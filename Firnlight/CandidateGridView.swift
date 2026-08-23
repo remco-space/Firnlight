@@ -114,7 +114,10 @@ final class GridModel {
 /// Ranked grid of top wallpaper candidates with lazy thumbnails.
 struct CandidateGridView: View {
     @Environment(\.modelContext) private var modelContext
-    @State private var model = GridModel()
+    /// Owned by `LibraryTab`, not here — see that property's doc comment for
+    /// why: `LibraryTab`'s own scroll-restore needs `isLoading` whenever this
+    /// view is mounted, not only while the scene also holds keyboard focus.
+    @Bindable var model: GridModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
