@@ -86,7 +86,12 @@ The app has three tabs matching the three stages of the journey:
   prominent enough to be the subject and no crowd, and free of the flaws that
   rule a photo out however good the scene — a finger over the lens, a badly
   blurred or smeared frame. Screenshots and other utility images are set aside
-  too.
+  too. Admission is not judgment: a trait the app measures in order to keep or
+  set aside a photo is still measured for what follows, so the user's own
+  choices can weigh it among the photos that were kept (FR-5.2). The bar for
+  keeping is set generously for that reason — it rules out only what could not
+  hang on a desktop at all, and leaves where the user's own line falls to the
+  user.
 - **FR-3.2** After analysis, the user sees how many photos were set aside and
   why, each reason named in the user's own terms.
 - **FR-3.3** Analysis can be interrupted at any time.
@@ -203,22 +208,26 @@ The app has three tabs matching the three stages of the journey:
   panoramas, where the crop can look very different from the full photo. Both
   photos are fully visible at once, however small the screen.
 - **FR-5.2** Ranking is learned entirely from the user's choices, over
-  everything the app can observe about a photo — how it looks, and what the
-  photo records of when and where it was taken. Nothing is hard-coded: no trait
-  counts for more or less than the user's own decisions imply. The same library
-  and the same judgments always produce the same ranking, and photos are always
-  compared on equal terms: nowhere — in a ranking, a duel, or any tally or
-  threshold built from photos' standings — is a photo examined the app's
-  current way weighed against one still examined an older way as though they
-  had been examined alike. When the app's understanding of photos changes, it
-  re-examines what it must, in the background, without costing the user a
-  single judgment. The app notices such changes itself — including ones that
-  arrive with a system update rather than with the app — never assuming its
-  understanding stands still. Equal terms cuts both ways: photos examined
-  alike may always be weighed together, so a change in the app's
-  understanding never empties what the user sees — the app keeps serving the
-  best picture its previous understanding supports until the new
-  understanding is at least as complete, and every part of the app hands
+  everything the app can quantify about a photo — how it looks, what the photo
+  records of itself such as when and where it was taken, and anything else the
+  app is able to measure (FR-3.6). That set is deliberately not enumerated
+  here, and it grows as the platform and the app do: whatever the app can
+  measure is a trait the user's choices may weigh, and measuring something
+  only to reach a yes-or-no decision and then discarding it is not enough.
+  Nothing is hard-coded: no trait counts for more or less than the user's own
+  decisions imply. The same library and the same judgments always produce the
+  same ranking, and photos are always compared on equal terms: nowhere — in a
+  ranking, a duel, or any tally or threshold built from photos' standings — is
+  a photo examined the app's current way weighed against one still examined an
+  older way as though they had been examined alike. When the app's
+  understanding of photos changes, it re-examines what it must, in the
+  background, without costing the user a single judgment. The app notices such
+  changes itself — including ones that arrive with a system update rather than
+  with the app — never assuming its understanding stands still. Equal terms
+  cuts both ways: photos examined alike may always be weighed together, so a
+  change in the app's understanding never empties what the user sees — the app
+  keeps serving the best picture its previous understanding supports until the
+  new understanding is at least as complete, and every part of the app hands
   over together. A change that doesn't alter how photos are examined
   re-examines nothing: already-current analysis stays current.
 - **FR-5.3** Every choice and verdict is remembered permanently — the user's

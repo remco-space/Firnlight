@@ -282,6 +282,10 @@ actor AnalysisQueue {
                 record.aestheticsScore = outcome.aestheticsScore
                 record.featurePrint = outcome.featurePrint
                 record.horizonAngleDegrees = outcome.horizonAngleDegrees
+                record.personProminence = outcome.personProminence
+                record.subjectProminence = outcome.subjectProminence
+                record.subjectCentrality = outcome.subjectCentrality
+                record.luminance = outcome.luminance
                 record.horizonMeasured = true
                 record.isSkipped = false
                 record.analysisFailed = false

@@ -110,6 +110,12 @@ nonisolated enum Thresholds {
     /// (`natureObjectLabels`), so a photo accepted under v6 — a weakly
     /// detected prominent person, or an indoor still life — must be re-judged
     /// before it can keep counting as a candidate.
+    /// v8 is required too: the pipeline now *keeps* what it measures rather
+    /// than collapsing it into a gate's yes/no answer, and measures traits it
+    /// did not before (person prominence, salient-subject prominence and
+    /// centrality, luminance — see `ImageAnalyzer.Outcome`). A photo analyzed
+    /// under v7 carries none of them, so it cannot be weighed on equal terms
+    /// against one that does (FR-5.2) and must be re-examined.
     ///
     /// This is only the *hand-tuned* half of the version: it catches changes
     /// this app's own code makes to the pipeline, because a developer bumps
@@ -120,7 +126,7 @@ nonisolated enum Thresholds {
     /// "notices such changes itself — including ones that arrive with a
     /// system update". Every call site outside this file should keep reading
     /// `currentAnalysisVersion`, never this constant directly.
-    private static let analysisLogicVersion = 7 // v7: corroborated people check; object labels need outdoor
+    private static let analysisLogicVersion = 8 // v8: quantified traits kept, not just gated on
 
     /// What every ranking-affecting query treats as "this build's analysis
     /// generation" — `analysisLogicVersion`, this app's own hand-tuned
@@ -219,6 +225,18 @@ nonisolated enum Thresholds {
     /// Five minutes bounds how long the app could work on a library it no
     /// longer fully sees without ever bothering the user with a busy loop.
     static let authorizationNarrowingRecheckInterval: Duration = .seconds(300)
+
+    /// Square edge, in pixels, that the analysis bitmap is drawn down to
+    /// before its mean luminance is taken (`ImageAnalyzer.meanLuminance`).
+    ///
+    /// The mean of a box-filtered downsample equals the mean of the original,
+    /// so this changes the cost of the measurement and not its value; 32 is
+    /// small enough that the blit and the 1024-element sum are both noise
+    /// beside the Vision requests running either side of it. Not 1×1 — which
+    /// would compute the same number in principle — because a single-pixel
+    /// destination leans entirely on the interpolator averaging every source
+    /// pixel, which Core Graphics documents no guarantee about.
+    static let luminanceSampleSize = 32
 
     /// Long-edge size of the analysis bitmap requested from PHImageManager. Never analyze full-res.
     static let analysisPixelSize = 1024
@@ -358,7 +376,7 @@ nonisolated enum Thresholds {
     /// library-independent scales (`PreferenceRanker.seasonFraction`,
     /// latitude ÷ 90) that never move under a growing library — see
     /// `PreferenceRanker`'s type doc comment.
-    static let rankerAlgorithmVersion = 7 // v7: time/location use fixed scales, not candidate-set-relative ones (FR-5.2)
+    static let rankerAlgorithmVersion = 8 // v8: open trait set — scalar features are enumerated, not hand-written (FR-5.2)
 
     /// SGD learning rate for the online Bradley–Terry ranker.
     static let rankerLearningRate: Float = 0.5

@@ -44,6 +44,23 @@ nonisolated enum ImageAnalyzer {
         var aestheticsScore: Float = 0
         var featurePrint: Data?
         var horizonAngleDegrees: Float?
+        /// Tallest face or confident human rectangle, as a fraction of frame
+        /// height (0 when the frame holds no detected person). Measured on
+        /// the *same* detections the people gate above already ran — no extra
+        /// Vision pass — and kept rather than collapsed into `hasPeople`,
+        /// because a gate's yes/no answer is not the only thing a measurement
+        /// is good for (FR-3.1, FR-5.2).
+        var personProminence: Float?
+        /// Area of the largest attention-salient region, as a fraction of the
+        /// frame (0 when Vision finds no dominant subject — an evenly
+        /// interesting field, which is itself a measurement and not a gap).
+        var subjectProminence: Float?
+        /// How centred that dominant salient region is: 1 when its centre sits
+        /// at the frame's centre, 0 at the furthest corner.
+        var subjectCentrality: Float?
+        /// Mean relative luminance of the analysis bitmap, 0 (black) … 1
+        /// (white) — how dark or bright the photo reads overall.
+        var luminance: Float?
     }
 
     private static let log = Logger(subsystem: "space.remco.Firnlight", category: "ImageAnalyzer")
@@ -83,6 +100,7 @@ nonisolated enum ImageAnalyzer {
             return outcome
         }
         let humans = try await DetectHumanRectanglesRequest().perform(on: image)
+        outcome.personProminence = Self.personProminence(faces: faces, humans: humans)
         if humans.contains(where: {
             $0.confidence >= Thresholds.humanConfidenceThreshold
                 && $0.boundingBox.height >= Thresholds.personProminenceHeight
@@ -134,11 +152,115 @@ nonisolated enum ImageAnalyzer {
             return outcome
         }
 
-        // 4. Feature print + horizon for the ranker — accepted images only.
+        // 4. The quantified traits the ranker weighs — accepted images only,
+        // for the same reason the feature print is: nothing here can change a
+        // gate's answer, so measuring it before the gates have run would be
+        // work spent on photos that are about to be set aside anyway.
         let featurePrint = try await GenerateImageFeaturePrintRequest().perform(on: image)
         outcome.featurePrint = featurePrint.data
         outcome.horizonAngleDegrees = try await measureHorizon(image)
+        let saliency = try await GenerateAttentionBasedSaliencyImageRequest().perform(on: image)
+        outcome.subjectProminence = Self.subjectProminence(saliency)
+        outcome.subjectCentrality = Self.subjectCentrality(saliency)
+        outcome.luminance = Self.meanLuminance(image)
         return outcome
+    }
+
+    /// Tallest detected person in the frame, as a fraction of frame height.
+    ///
+    /// Height rather than area, matching `Thresholds.personProminenceHeight`:
+    /// the gate and the learned trait have to be reading the same quantity, or
+    /// the band the gate admits would be measured on a different axis than the
+    /// one that decided it was admissible. Faces and human rectangles are
+    /// pooled by `max` because either can be the one that resolves — a face
+    /// carries no confidence to filter on, while a body rectangle does, so
+    /// only the latter is confidence-gated.
+    private static func personProminence(
+        faces: [FaceObservation],
+        humans: [HumanObservation]
+    ) -> Float {
+        let faceHeight = faces.map(\.boundingBox.height).max() ?? 0
+        let bodyHeight = humans
+            .filter { $0.confidence >= Thresholds.humanConfidenceThreshold }
+            .map(\.boundingBox.height)
+            .max() ?? 0
+        return Float(max(faceHeight, bodyHeight))
+    }
+
+    /// Fraction of the frame the largest attention-salient region covers.
+    ///
+    /// `salientObjects` rather than the heat map: the boxes are what Vision
+    /// has already resolved into discrete regions, so reading them costs a
+    /// property access, while reducing the heat map means walking a pixel
+    /// buffer for a number the boxes already carry. An empty list is 0, not
+    /// "unknown" — Vision ran and found no dominant subject, which is exactly
+    /// what an even field of scenery looks like and is a legitimate value for
+    /// the user's choices to weigh.
+    private static func subjectProminence(_ saliency: SaliencyImageObservation) -> Float {
+        let largest = saliency.salientObjects
+            .map { $0.boundingBox.width * $0.boundingBox.height }
+            .max() ?? 0
+        return Float(min(1, max(0, largest)))
+    }
+
+    /// How centred the dominant salient region is: 1 at the frame's centre,
+    /// 0 at the furthest corner. Normalized by the half-diagonal so the scale
+    /// is fixed and library-independent, like every other trait the ranker
+    /// weighs. Neutral (0.5) when there is no dominant subject to place —
+/// nil when there is no dominant subject to place: unlike prominence,
+    /// whose 0 is a real measurement ("no subject covers any of the frame"),
+    /// the centre of nothing is not a value on this scale at all. FR-3.8's
+    /// machinery is what that nil is for — the ranker substitutes the trait's
+    /// own neutral and trains nothing on it, rather than this code inventing
+    /// a number that would read as a measured half-off-centre subject.
+    private static func subjectCentrality(_ saliency: SaliencyImageObservation) -> Float? {
+        guard let dominant = saliency.salientObjects
+            .max(by: { $0.boundingBox.width * $0.boundingBox.height
+                     < $1.boundingBox.width * $1.boundingBox.height })
+        else { return nil }
+        let box = dominant.boundingBox
+        let dx = box.origin.x + box.width / 2 - 0.5
+        let dy = box.origin.y + box.height / 2 - 0.5
+        let halfDiagonal = (0.5 * 0.5 + 0.5 * 0.5).squareRoot()
+        return Float(max(0, 1 - (dx * dx + dy * dy).squareRoot() / halfDiagonal))
+    }
+
+    /// Mean relative luminance of the frame, 0 (black) … 1 (white).
+    ///
+    /// Drawn down to `luminanceSampleSize` square first: the mean of a
+    /// box-filtered downsample is the mean of the full bitmap, and Core
+    /// Graphics does that filtering in optimized code, so this costs a small
+    /// blit instead of a walk over a megapixel. Grey colour space rather than
+    /// averaging RGB by hand, so the channel weighting is the system's
+    /// standard one rather than a constant this app would have to justify.
+/// Returns nil only when the context cannot be created — a genuine
+    /// "could not determine", which FR-3.8 requires be distinguishable from a
+    /// measured value.
+    ///
+    /// `data: nil` lets Core Graphics own the backing store for as long as
+    /// the context lives, rather than pointing the context at a Swift array's
+    /// buffer: an array's memory is only guaranteed valid inside
+    /// `withUnsafeMutableBytes`, so a context built on it and drawn into
+    /// afterwards would be writing through a pointer the compiler is free to
+    /// have invalidated.
+    private static func meanLuminance(_ image: CGImage) -> Float? {
+        let side = Thresholds.luminanceSampleSize
+        guard let context = CGContext(
+            data: nil,
+            width: side,
+            height: side,
+            bitsPerComponent: 8,
+            bytesPerRow: side,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .medium
+        context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+        guard let data = context.data else { return nil }
+        let pixels = data.bindMemory(to: UInt8.self, capacity: side * side)
+        var total = 0
+        for index in 0..<(side * side) { total += Int(pixels[index]) }
+        return Float(total) / Float(side * side * 255)
     }
 
     /// Detected horizon tilt in degrees, or nil when no horizon is visible.

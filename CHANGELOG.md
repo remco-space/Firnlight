@@ -12,6 +12,35 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Added
+
+- Ranking now weighs more of what the app can measure about a photo: how
+  prominent a person is, how large and how centred the frame's main subject
+  is, how bright the photo is overall, what time of day its own light says it
+  was taken at, and how much of itself the wallpaper crop discards — each
+  counting only as much as the user's own choices imply, exactly like the
+  traits already learned. Nothing about these is preset (FR-5.2).
+- The set of traits the app learns on is now open by construction rather than
+  written out one at a time, so measuring one more thing about a photo costs
+  a single addition instead of six coordinated ones — the requirement's "it
+  grows as the platform and the app do", made true of the code and not just
+  of the brief.
+- Vision revision tracking now also covers the saliency request, so a subject
+  measurement that changes with an OS update is noticed and re-examined on
+  its own like every other measurement already was (FR-5.2).
+
+### Changed
+
+- Measurements the app takes in order to decide whether to keep a photo are
+  no longer thrown away once that decision is made — a photo's person
+  prominence, for instance, now goes on to count in the ranking among the
+  photos that were kept, instead of surviving only as "has people: yes/no"
+  (FR-3.1, FR-5.2).
+- Every photo is re-examined in the background to measure what it was never
+  measured for, with no judgment lost and nothing for the user to do; until
+  that finishes, the app keeps serving the best picture its previous
+  understanding supports (FR-5.2).
+
 ## [0.21.1] - 2026-08-23
 
 ### Added
