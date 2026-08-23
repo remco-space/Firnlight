@@ -280,6 +280,15 @@ The app has three tabs matching the three stages of the journey:
   still wins. *(Why: judging is rapid by design (FR-5.11), and speed
   guarantees slips; a permanent record (FR-5.3) is only trustworthy if the
   moment of recording can survive a slipped finger.)*
+- **FR-5.13** A trait may be derived rather than measured — what a photo
+  records of itself, combined with knowledge the app itself supplies, such as
+  where the sun stood given when and where the photo was taken. Two limits
+  keep that honest: the knowledge must be the app's own and computable on the
+  device, never fetched on a photo's behalf (FR-9.3); and deriving a trait
+  must never make the app pull down more of a photo than examining it already
+  requires (FR-3.4). What a photo records too little to derive is not held
+  against it (FR-3.8), and what is derived counts only as much as the user's
+  own choices imply (FR-5.2).
 
 ## 6. The wallpaper album (Export tab)
 

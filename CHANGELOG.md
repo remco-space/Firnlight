@@ -14,6 +14,23 @@ heading when that version is released (FR-10.3).
 
 ### Added
 
+- Ranking now weighs where the sun actually stood when a photo was taken —
+  how high above the horizon, whether it was morning or evening, and where it
+  sat relative to the direction the camera was pointing. Golden hour is a low
+  sun rather than a time on a clock, and shooting into the light is a
+  different picture from shooting with it behind you; both are now things the
+  user's choices can speak to (FR-5.13).
+- Ranking also weighs how high above sea level a photo was taken, which year
+  it was taken in, and whether Photos knows it as a panorama, an HDR frame, a
+  portrait-mode shot or a live photo. None of these needed anything new
+  fetched: they were already in what the app reads and were being discarded.
+- Time of year is now learned properly. It used to be a single number running
+  from January to December, which could only ever say "later in the year is
+  better" — a taste for summer and autumn but not winter and spring had no
+  way to be expressed, and December and January counted as opposites. It is
+  also now read against the hemisphere the photo was taken in, so a January
+  photo from the southern hemisphere counts as the summer photo it is.
+
 - Ranking now also weighs how vivid or muted a photo is, how much of the frame
   its foreground objects cover and how many there are, how prominent an animal
   in it is, how much of it is taken up by text such as signs or watermarks,

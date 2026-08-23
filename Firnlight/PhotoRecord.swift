@@ -1,5 +1,6 @@
 import CoreLocation
 import Foundation
+import Photos
 import SwiftData
 
 /// One row per wallpaper candidate, keyed by the asset's PhotoKit identifier.
@@ -53,6 +54,48 @@ final class PhotoRecord {
     /// observe, and keeping it costs nothing.
     var latitude: Double?
     var longitude: Double?
+
+    /// Metres above sea level, from the same `CLLocation` latitude and
+    /// longitude come from.
+    ///
+    /// Read without consulting `verticalAccuracy`, which Photos leaves at 0
+    /// on every asset in a real library even where the altitude itself is
+    /// exact — checking it, as the conventional CoreLocation idiom says to,
+    /// discards the whole trait. Verified against the originals' EXIF
+    /// `GPSAltitude`: identical to full precision.
+    var altitude: Double?
+
+    /// Degrees clockwise from true north that the camera was pointing.
+    ///
+    /// `CLLocation.course`, which for a photo is not the direction of travel
+    /// — it is populated on photos taken standing still, and matches the
+    /// originals' EXIF `GPSDestBearing` exactly. (EXIF `GPSImgDirection`
+    /// agrees except on front-camera shots, where it is the same bearing
+    /// turned 180°; those are portraits and never reach the candidate set.)
+    /// Taken from `CLLocation` rather than EXIF deliberately: reading EXIF
+    /// would mean pulling every original down from iCloud, which FR-5.13
+    /// forbids a derived trait from causing.
+    var cameraHeading: Double?
+
+    /// `PHAssetMediaSubtype`'s raw bits, stored whole rather than as the one
+    /// flag the scanner filters on: panorama, HDR, depth-effect and
+    /// live-photo are all things the app knows about a photo, and a gate's
+    /// yes/no answer is not the only use for them (FR-3.1, FR-5.2).
+    var mediaSubtypes: Int?
+
+    // The stored bits read back through Photos' own named flags rather than
+    // hand-copied bit positions — an earlier revision copied them by hand and
+    // got depth-effect and screenshot the wrong way round, since they are
+    // adjacent bits and both plausible. Nil when the record predates the
+    // field, which keeps it an honest gap rather than four false negatives.
+    private var subtypeFlags: PHAssetMediaSubtype? {
+        mediaSubtypes.map { PHAssetMediaSubtype(rawValue: UInt(bitPattern: $0)) }
+    }
+
+    var isPanorama: Bool? { subtypeFlags?.contains(.photoPanorama) }
+    var isHDR: Bool? { subtypeFlags?.contains(.photoHDR) }
+    var isDepthEffect: Bool? { subtypeFlags?.contains(.photoDepthEffect) }
+    var isLivePhoto: Bool? { subtypeFlags?.contains(.photoLive) }
 
     /// 0 = not yet analyzed. Compared against the current pipeline version.
     var analysisVersion: Int
@@ -171,13 +214,24 @@ final class PhotoRecord {
     /// Fraction of the frame covered by detected text regions.
     var textCoverage: Float?
 
-    init(localIdentifier: String, pixelWidth: Int, pixelHeight: Int, creationDate: Date?, location: CLLocation?, isFavorite: Bool) {
+    init(
+        localIdentifier: String,
+        pixelWidth: Int,
+        pixelHeight: Int,
+        creationDate: Date?,
+        location: CLLocation?,
+        isFavorite: Bool,
+        mediaSubtypes: Int?
+    ) {
         self.localIdentifier = localIdentifier
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
         self.creationDate = creationDate
         self.latitude = location?.coordinate.latitude
         self.longitude = location?.coordinate.longitude
+        self.altitude = location?.altitude
+        self.cameraHeading = (location?.course).flatMap { $0 >= 0 ? $0 : nil }
+        self.mediaSubtypes = mediaSubtypes
         self.analysisVersion = 0
         self.isNature = false
         self.hasPeople = false

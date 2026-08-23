@@ -385,7 +385,7 @@ nonisolated enum Thresholds {
     /// library-independent scales (`PreferenceRanker.seasonFraction`,
     /// latitude ÷ 90) that never move under a growing library — see
     /// `PreferenceRanker`'s type doc comment.
-    static let rankerAlgorithmVersion = 9 // v9: seven traits added to the open set (FR-5.2)
+    static let rankerAlgorithmVersion = 10 // v10: derived solar geometry, hemisphere-aware season, place and era (FR-5.13)
 
     /// Distinct foreground objects at which the ranker's `subjectCount` trait
     /// saturates at 1.
@@ -406,6 +406,38 @@ nonisolated enum Thresholds {
     /// so far from the wallpaper rectangle that further distinction buys the
     /// ranking nothing.
     static let aspectSkewFullScale: Float = 2
+
+    /// Metres above sea level at which the ranker's `altitude` trait
+    /// saturates at 1.
+    ///
+    /// 3000 m puts the top of the scale around the height of an alpine pass
+    /// or a mid-range summit — above it, "high" stops being a distinction
+    /// that changes how a landscape reads. The scale is signed, so the few
+    /// places below sea level map to a small negative rather than clamping
+    /// with everything at the shore.
+    static let altitudeFullScaleMetres: Double = 3000
+
+    /// Calendar year the ranker's `captureEra` trait treats as its zero, and
+    /// the half-span that reaches ±1 (so 1975…2075).
+    ///
+    /// Fixed years, never "years ago": an age-based scale would move every
+    /// day and quietly re-rank a library with no new judgment behind it. A
+    /// span this wide costs the trait nothing in practice — a library covers
+    /// a couple of decades, which is a comfortable fraction of the scale —
+    /// and it will not need revisiting within the app's life.
+    static let captureEraCentreYear: Float = 2025
+    static let captureEraHalfSpanYears: Float = 50
+
+    /// Degrees of solar elevation over which the `sunElevation` trait's
+    /// compression is centred — the scale on which sunlight changes near the
+    /// horizon.
+    ///
+    /// Golden hour is conventionally the sun between roughly 0° and 6°, and
+    /// blue hour the few degrees below 0°, so a scale constant of 6° puts the
+    /// whole of that interesting band inside the first unit of the
+    /// transformed scale while the flat 40°-to-90° stretch compresses into
+    /// the last. See `PreferenceRanker.sunElevationBasis`.
+    static let sunElevationHorizonScaleDegrees: Double = 6
 
     /// SGD learning rate for the online Bradley–Terry ranker.
     static let rankerLearningRate: Float = 0.5

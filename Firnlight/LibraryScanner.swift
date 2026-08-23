@@ -120,12 +120,25 @@ final class LibraryScanner {
                         // Photos lets a location be assigned or corrected after
                         // import, so this is re-synced the same way favorite is
                         // rather than captured once at insert (FR-5.2).
+                        let heading = (asset.location?.course).flatMap { $0 >= 0 ? $0 : nil }
                         if record.latitude != asset.location?.coordinate.latitude
-                            || record.longitude != asset.location?.coordinate.longitude {
+                            || record.longitude != asset.location?.coordinate.longitude
+                            || record.altitude != asset.location?.altitude
+                            || record.cameraHeading != heading {
                             record.latitude = asset.location?.coordinate.latitude
                             record.longitude = asset.location?.coordinate.longitude
+                            record.altitude = asset.location?.altitude
+                            record.cameraHeading = heading
                             unsavedChanges += 1
                             contentChanged = true // location feeds ranking (PreferenceRanker)
+                        }
+                        // Same re-sync for the subtype bits, and the path that
+                        // backfills them onto records that predate the field.
+                        let subtypes = Int(bitPattern: asset.mediaSubtypes.rawValue)
+                        if record.mediaSubtypes != subtypes {
+                            record.mediaSubtypes = subtypes
+                            unsavedChanges += 1
+                            contentChanged = true
                         }
                         // Edited since analysis (crop, adjustments, …): refresh
                         // metadata and queue for re-analysis. Only this photo
@@ -160,7 +173,8 @@ final class LibraryScanner {
                             pixelHeight: asset.pixelHeight,
                             creationDate: asset.creationDate,
                             location: asset.location,
-                            isFavorite: asset.isFavorite
+                            isFavorite: asset.isFavorite,
+                            mediaSubtypes: Int(bitPattern: asset.mediaSubtypes.rawValue)
                         ))
                         newlyAdded += 1
                         unsavedChanges += 1
