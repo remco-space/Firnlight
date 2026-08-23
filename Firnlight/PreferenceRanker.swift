@@ -84,15 +84,65 @@ nonisolated enum ScalarTrait: Int, CaseIterable, Sendable {
     /// 0 at `Thresholds.minimumCandidatePixelWidth`, 1 at
     /// `Thresholds.resolutionFullScoreWidth`, log scale between.
     case resolution
-    /// Time of year, 0…1 — FR-5.2's "when". See `seasonFraction`.
-    case season
+    // FR-5.2's "when", as two harmonics of the calendar year rather than one
+    // linear scalar — see `TraitValues.setCyclical` for why a quantity that
+    // runs on a circle needs four features before it is learnable at all.
+    case seasonCos
+    case seasonSin
+    case seasonCos2
+    case seasonSin2
+    // The first harmonic again, multiplied by sin(latitude). Seasons are a
+    // hemisphere apart: day-of-year alone calls January winter, which is
+    // wrong for half the planet, so a library spanning both teaches the
+    // ranker nothing coherent. sin(latitude) flips sign across the equator,
+    // and a sign flip on the first harmonic *is* a half-year phase shift, so
+    // "local summer" becomes one preference the weights can state worldwide.
+    // It fades to zero at the equator rather than jumping — which is true of
+    // the thing itself, since equatorial regions have no thermal seasons.
+    // The second harmonic needs no such partner: local phase is θ + π in the
+    // south, so 2θ + 2π ≡ 2θ, hemisphere-invariant already.
+    case localSeasonCos
+    case localSeasonSin
     /// Latitude ÷ 90, −1…1 — FR-5.2's "where". See `traits(of:)` for why
     /// longitude is not its partner here.
     case latitude
-    /// Local solar time of day, 0…1 wrapping at midnight — see
-    /// `solarTimeFraction`. Distinct from `season`, and the trait that
-    /// separates a golden-hour frame from a midday one.
-    case solarTime
+    // How high the sun stood, on the compressed scale `sunElevationBasis`
+    // builds — plus its square and cube, so the learned weights can put a
+    // peak anywhere along it. A single weight could only say "lower is
+    // better", which would rank deep night above golden hour; golden hour is
+    // a band a few degrees above the horizon, and a band needs a basis.
+    case sunElevation
+    case sunElevation2
+    case sunElevation3
+    // Morning versus evening. Elevation is symmetric about solar noon, so a
+    // sunrise and a sunset of identical height are one number to it; this
+    // pair is the only thing that separates them.
+    case solarTimeCos
+    case solarTimeSin
+    // Where the sun was relative to where the camera looked: cos is +1 shot
+    // straight into the sun and −1 with the sun behind the photographer, sin
+    // separates sun-left from sun-right. Backlit-at-low-sun and
+    // front-lit-at-low-sun are different photographs, and without this the
+    // ranker can only tell them apart through the feature print.
+    case sunRelativeCos
+    case sunRelativeSin
+    /// Metres above sea level on a fixed scale — sea level to high alpine.
+    case altitude
+    /// When the photo was taken, on a fixed scale of calendar years.
+    ///
+    /// Absolute date, deliberately not age: age changes every day, so a
+    /// ranking trained on it would drift with no new judgment behind it,
+    /// breaking FR-5.2's "the same library and the same judgments always
+    /// produce the same ranking". A fixed epoch carries the same preference
+    /// — older photos over newer, or the reverse — and never moves.
+    case captureEra
+    // What Photos already knows the photo is. The scanner reads all of these
+    // and used only `photoScreenshot`, as a gate; the rest are things known
+    // about the picture, and so things the user's choices may weigh.
+    case isPanorama
+    case isHDR
+    case isDepthEffect
+    case isLivePhoto
     /// Fraction of the photo's area the fixed wallpaper crop discards, 0…1.
     /// FR-5.1 judges the crop, not the whole photo, so how much of itself a
     /// photo loses on the way there is a property of the photo the user may
@@ -137,13 +187,24 @@ nonisolated enum ScalarTrait: Int, CaseIterable, Sendable {
     var neutral: Float {
         switch self {
         // Zero-centred scales: their own midpoint is 0.
-        case .aesthetics, .latitude: 0
+        case .aesthetics, .latitude, .captureEra,
+             .seasonCos, .seasonSin, .seasonCos2, .seasonSin2,
+             .localSeasonCos, .localSeasonSin,
+             .solarTimeCos, .solarTimeSin, .sunRelativeCos, .sunRelativeSin: 0
+        // Altitude's own zero is sea level, which is where a photo that says
+        // nothing about its height may as well sit.
+        case .altitude: 0
+        // A basis expansion has no meaningful midpoint — its terms are not a
+        // quantity but a shape. "Nothing known" means "no contribution", so
+        // every term is 0 rather than the middle of its range.
+        case .sunElevation, .sunElevation2, .sunElevation3: 0
         // "Nothing detected" already reads as level, so a missing horizon and
         // a level one are the same value — this is the one trait whose
         // no-information point is an end of its scale rather than its middle.
         case .levelness: 1
         // 0…1 scales: the midpoint.
-        case .resolution, .season, .solarTime, .cropLoss,
+        case .resolution, .cropLoss,
+             .isPanorama, .isHDR, .isDepthEffect, .isLivePhoto,
              .personProminence, .subjectProminence, .subjectCentrality,
              .luminance, .colorfulness, .foregroundCoverage, .subjectCount,
              .animalProminence, .textCoverage: 0.5
@@ -179,6 +240,54 @@ nonisolated struct TraitValues: Sendable {
     )
 
     subscript(trait: ScalarTrait) -> Float { values[trait.rawValue] }
+
+    /// Sets a quantity that runs on a circle — time of year, an angle — as
+    /// two harmonics: cos θ, sin θ, cos 2θ, sin 2θ, with θ a full turn of
+    /// `fraction`.
+    ///
+    /// A cyclical quantity encoded as one linear scalar is not merely
+    /// imprecise at the seam; it cannot state most preferences about itself.
+    /// One weight over day-of-year says only "later in the year is better" or
+    /// "earlier is better", because the contribution is monotonic in the
+    /// value — so "summer and autumn, but not winter and spring" has no
+    /// expression at all, and December and January land at opposite extremes
+    /// while being adjacent. That makes the trait count for something other
+    /// than what the user's decisions imply, which FR-5.2 does not allow.
+    ///
+    /// The first harmonic fixes it for any single-peaked preference:
+    /// a·cos θ + b·sin θ is R·cos(θ − φ), one peak the weights may place
+    /// anywhere on the circle, seamless everywhere. The second adds a
+    /// two-peaked component at any phase. Together they cover one peak, two
+    /// peaks, or a peak with a shoulder — the whole range of shapes a taste
+    /// in "when" takes.
+    mutating func setCyclical(
+        _ traits: (ScalarTrait, ScalarTrait, ScalarTrait, ScalarTrait),
+        turns fraction: Float?
+    ) {
+        guard let fraction else {
+            for trait in [traits.0, traits.1, traits.2, traits.3] { set(trait, nil) }
+            return
+        }
+        let angle = 2 * Float.pi * fraction
+        set(traits.0, cos(angle))
+        set(traits.1, sin(angle))
+        set(traits.2, cos(2 * angle))
+        set(traits.3, sin(2 * angle))
+    }
+
+    /// The first harmonic only, for an angle whose second harmonic would say
+    /// nothing — a compass direction, where "twice the bearing" is not a
+    /// quantity anyone has a taste about.
+    mutating func setDirection(_ traits: (ScalarTrait, ScalarTrait), degrees: Double?) {
+        guard let degrees else {
+            set(traits.0, nil)
+            set(traits.1, nil)
+            return
+        }
+        let angle = Float(degrees) * .pi / 180
+        set(traits.0, cos(angle))
+        set(traits.1, sin(angle))
+    }
 
     /// Sets a trait from an optional measurement, marking it unknown when the
     /// photo was never measured for it (FR-3.8).
@@ -1027,7 +1136,26 @@ actor PreferenceRanker {
         let skewRange = log2(Thresholds.aspectSkewFullScale)
         traits.set(.aspectSkew, min(1, max(-1, log2(aspect / target) / skewRange)))
 
-        traits.set(.season, record.creationDate.map(Self.seasonFraction))
+        let season = record.creationDate.map(Self.seasonFraction)
+        traits.setCyclical((.seasonCos, .seasonSin, .seasonCos2, .seasonSin2), turns: season)
+        // Hemisphere-corrected first harmonic; see `ScalarTrait.localSeasonCos`.
+        if let season, let latitude = record.latitude {
+            let angle = 2 * Float.pi * season
+            let hemisphere = Float(sin(latitude * .pi / 180))
+            traits.set(.localSeasonCos, cos(angle) * hemisphere)
+            traits.set(.localSeasonSin, sin(angle) * hemisphere)
+        }
+
+        traits.set(.captureEra, record.creationDate.map(Self.captureEra))
+        traits.set(.altitude, record.altitude.map {
+            Float(min(1, max(-1, $0 / Thresholds.altitudeFullScaleMetres)))
+        })
+
+        // What Photos already knows the photo is; the app only reads it.
+        traits.set(.isPanorama, record.isPanorama.map { $0 ? 1 : 0 })
+        traits.set(.isHDR, record.isHDR.map { $0 ? 1 : 0 })
+        traits.set(.isDepthEffect, record.isDepthEffect.map { $0 ? 1 : 0 })
+        traits.set(.isLivePhoto, record.isLivePhoto.map { $0 ? 1 : 0 })
 
         // Latitude alone is the "where" trait. Longitude is captured on
         // `PhotoRecord` but deliberately not its partner: a fixed linear
@@ -1040,8 +1168,30 @@ actor PreferenceRanker {
         // Longitude *is* used here, where its wraparound is the point rather
         // than a seam: it converts the stored absolute timestamp into the
         // photo's own local solar time. See `solarTimeFraction`.
-        if let created = record.creationDate, let longitude = record.longitude {
-            traits.set(.solarTime, Self.solarTimeFraction(of: created, longitude: longitude))
+        // FR-5.13: derived, not measured — the app's own astronomy applied to
+        // the instant and coordinate the photo already records. Needs all
+        // three; a photo missing any of them simply has no sun traits, which
+        // FR-3.8 makes a gap rather than a penalty.
+        if let created = record.creationDate,
+           let latitude = record.latitude,
+           let longitude = record.longitude {
+            let sun = SolarPosition.angles(date: created, latitude: latitude, longitude: longitude)
+            let basis = Self.sunElevationBasis(sun.elevation)
+            traits.set(.sunElevation, basis)
+            traits.set(.sunElevation2, basis * basis)
+            traits.set(.sunElevation3, basis * basis * basis)
+            // Hour angle runs −180…180 around solar noon; as a turn of the
+            // circle that is (H + 180) / 360.
+            let dayTurn = Float((sun.hourAngle + 180) / 360)
+            traits.set(.solarTimeCos, cos(2 * .pi * dayTurn))
+            traits.set(.solarTimeSin, sin(2 * .pi * dayTurn))
+            // Where the sun sat relative to where the lens looked. Both are
+            // degrees clockwise from true north, so the difference is the
+            // angle between them: 0° is shooting into the sun.
+            traits.setDirection(
+                (.sunRelativeCos, .sunRelativeSin),
+                degrees: record.cameraHeading.map { sun.azimuth - $0 }
+            )
         }
 
         traits.set(.personProminence, record.personProminence)
@@ -1341,37 +1491,32 @@ actor PreferenceRanker {
     /// costs the feature some precision right at the year boundary but keeps
     /// it a single scalar with a single learned weight, matching every other
     /// feature here — not worth two dimensions for one edge case.
-    /// Local solar time of day as a fraction, 0…1 (0 = solar midnight).
+    /// The photo's own date on a fixed scale of calendar years, −1…1.
     ///
-    /// Solar rather than civil time, and derived from longitude rather than
-    /// from a stored time zone, because a `PhotoRecord` has no time zone to
-    /// store: PhotoKit hands back an absolute instant, and the UTC hour of a
-    /// photo means nothing across a library that spans continents — noon in
-    /// Zermatt and noon in Vancouver would sit nine hours apart on this
-    /// trait despite looking identical. Longitude ÷ 15° per hour recovers
-    /// what the light was actually doing, which is what the trait is for: it
-    /// is the difference between a golden-hour frame and a midday one.
-    ///
-    /// It is also a better signal than civil time even where a zone *were*
-    /// available — civil zones are political, offset by up to hours from the
-    /// sun (China runs one zone across five), and shift under daylight
-    /// saving, so two photos of the same light would disagree. It ignores
-    /// the equation of time and the seasonal swing in day length, both worth
-    /// under a quarter-hour and a fraction of an hour respectively — far
-    /// inside the resolution a single learned weight over this scale can use.
-    ///
-    /// Wrapping is handled by the modulo rather than by the encoding: like
-    /// `seasonFraction` this stays one linear scalar, so 23:30 and 00:30 sit
-    /// at opposite ends despite being half an hour apart. Same trade for the
-    /// same reason — one scalar with one learned weight, and the seam falls
-    /// at solar midnight, which is the least photographed moment of the day.
-    private static func solarTimeFraction(of date: Date, longitude: Double) -> Float {
+    /// Anchored to fixed years rather than to `now`, which is the whole point:
+    /// see `ScalarTrait.captureEra`.
+    private static func captureEra(of date: Date) -> Float {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
-        let parts = calendar.dateComponents([.hour, .minute], from: date)
-        let utcHours = Double(parts.hour ?? 0) + Double(parts.minute ?? 0) / 60
-        let solarHours = (utcHours + longitude / 15).truncatingRemainder(dividingBy: 24)
-        return Float((solarHours < 0 ? solarHours + 24 : solarHours) / 24)
+        let year = Float(calendar.component(.year, from: date))
+        return min(1, max(-1, (year - Thresholds.captureEraCentreYear)
+            / Thresholds.captureEraHalfSpanYears))
+    }
+
+    /// Solar elevation, compressed so the near-horizon degrees the light
+    /// actually changes over get room on the scale.
+    ///
+    /// `asinh` rather than a plain division by 90: golden hour spans roughly
+    /// the first six degrees above the horizon, three per cent of a −90…90
+    /// range, and a polynomial over that raw range cannot resolve a band so
+    /// narrow. Illumination and colour temperature change enormously per
+    /// degree near the horizon and almost not at all between 50° and 70°, so
+    /// expanding the one end and compressing the other is a fact about
+    /// sunlight, not an assumption about taste. Signed, so the sun below the
+    /// horizon stays distinguishable from the sun above it.
+    private static func sunElevationBasis(_ elevationDegrees: Double) -> Float {
+        let scale = Thresholds.sunElevationHorizonScaleDegrees
+        return Float(asinh(elevationDegrees / scale) / asinh(90 / scale))
     }
 
     private static func seasonFraction(of date: Date) -> Float {
