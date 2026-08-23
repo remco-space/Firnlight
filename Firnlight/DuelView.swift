@@ -504,14 +504,15 @@ struct DuelView: View {
 
     /// FR-8.1 (HIG, tab-based apps): iPhone and iPad get a `NavigationStack`
     /// with this tab's own title, matching `LibraryTab` and `ExportView`.
-    /// Wrapped one level further out, in `ContentView.tabContent`, is a
-    /// `GeometryReader` — required to keep the floating tab bar's bottom
-    /// safe-area accommodation on this tab's siblings; this tab has no
-    /// `ScrollView` of its own to lose it, but the wrapping is kept uniform
-    /// across all three tabs. See `ContentView.tabContent`'s doc comment for
-    /// the measured, reproducible SDK-27-beta bug it works around. The Mac
-    /// is untouched: no bottom bar there to establish hierarchy against, and
-    /// it already has its menu bar (FR-8.3).
+    /// That `NavigationStack` sits inside `ContentView.tabContent`'s
+    /// frame-and-`.clipped()`-constrained `GeometryReader` — required to
+    /// keep the floating tab bar's bottom safe-area accommodation on this
+    /// tab's siblings; this tab has no `ScrollView` of its own to lose it,
+    /// but the wrapping is kept uniform across all three tabs. See
+    /// `ContentView.tabContent`'s doc comment for the measured, reproducible
+    /// SDK-27-beta bug behind it. The Mac is untouched: no bottom bar there
+    /// to establish hierarchy against, and it already has its menu bar
+    /// (FR-8.3).
     var body: some View {
         #if os(macOS)
         duelContent

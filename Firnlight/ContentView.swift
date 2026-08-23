@@ -150,41 +150,41 @@ struct ContentView: View {
     /// accommodation — screenshot-confirmed with the Library tab's Analysis
     /// stat rows and the Export tab's "Create Album" button and notice text
     /// rendering directly under the glass tab bar (FR-8.5: "Nothing the user
-    /// needs to see is half-hidden under a bar"). Two attempts at *reserving*
-    /// that space from a descendant failed independent, screenshot-based
-    /// verification: first, a `GeometryReader` that measured the correct 83pt
-    /// but discarded it; second, publishing that measured value down through
-    /// a custom environment key and having each `ScrollView` re-apply it as
-    /// its own `.safeAreaInset(edge: .bottom)` — this *is* the standard
-    /// SwiftUI idiom for a custom floating bar, and it does extend a
-    /// `ScrollView`'s true scrollable range correctly (confirmed: scrolled to
-    /// its new end, content clears the bar with real margin) — but it does
-    /// nothing for content short enough to need no scrolling at all: at rest
-    /// (scroll offset zero), a `NavigationStack`-nested `ScrollView` is given
-    /// a *frame* that already extends the full screen height, ignoring the
-    /// tab bar's safe area entirely, and a descendant's `.safeAreaInset`
-    /// cannot shrink a frame an ancestor already fixed — it only pads the
-    /// scrollable content within that already-oversized frame. The Export
-    /// tab's short "no album yet" state — exactly the state this bug was
-    /// filed against — never needs to scroll, so it stayed rendered straight
-    /// through the bar.
+    /// needs to see is half-hidden under a bar").
     ///
-    /// The fix that survived screenshot verification constrains the frame
-    /// itself, from here, *before* `NavigationStack`: each `Tab`'s content is
-    /// given an explicit `.frame(height:)` shrunk by the tab bar's own
-    /// safe-area inset, top-aligned. Since `NavigationStack` now receives an
-    /// already-reduced proposed height, everything inside it — its
-    /// navigation bar, and every descendant `ScrollView`'s own frame — is
-    /// correctly reduced too, so content stops short of the bar at rest with
-    /// no scrolling needed, exactly like the pre-`NavigationStack` behavior,
-    /// while genuinely taller content still scrolls (confirmed) to clear the
-    /// bar at its new end. Root cause not otherwise established — nothing in
-    /// the 27 SDK's release notes or header comments documents
-    /// `NavigationStack` discarding an ancestor's bottom safe area for its
-    /// own frame sizing — so this is recorded as a measured, reproducible
-    /// workaround for a specific beta build, not an explained one; revisit on
-    /// the next Xcode 27 beta or GA release, and re-verify by screenshot
-    /// before trusting it.
+    /// A prior version of this fix constrained `content()`'s frame to
+    /// `proxy.size.height - proxy.safeAreaInsets.bottom` — subtracting the
+    /// tab bar's own inset a *second* time. Debug-overlay measurement showed
+    /// why: at this `GeometryReader` (a `Tab`'s direct content, ahead of
+    /// `NavigationStack`), `proxy.size.height` is *already* the screen's
+    /// content height short of the tab bar's own footprint — this
+    /// `GeometryReader` sits downstream of `TabView`'s own accounting for
+    /// the floating bar, which a `GeometryReader` placed as a sibling of the
+    /// whole `TabView` does not yet reflect (confirmed by comparing both
+    /// readings side by side). Subtracting `safeAreaInsets.bottom` again
+    /// shrank the frame by the bar's height *twice*, which is what produced
+    /// 838cbd4's regression: a dead gap roughly the bar's own height, with
+    /// content — the Library tab's per-reason `Grid` and the Export tab's
+    /// "Create Album" button — clipped well short of it instead of merely
+    /// stopping short of the bar.
+    ///
+    /// The corrected fix uses `proxy.size.height` as-is (no further
+    /// subtraction) and adds `.clipped()`: `NavigationStack`, even given an
+    /// already-correct proposed height, does not itself clip a descendant
+    /// `ScrollView` to it — screenshot-confirmed as a sliver of the last row
+    /// bleeding through the glass tab bar without `.clipped()` — so this
+    /// enforces the boundary `proxy.size.height` already gets right. At
+    /// rest, content stops at (or a hair short of) the tab bar with no dead
+    /// gap; content taller than that still scrolls to reveal the rest —
+    /// confirmed for the Library tab by seeding its persisted scroll offset
+    /// (`UserDefaults` key `libraryScrollOffsetY`) past the fold and
+    /// relaunching: the full per-reason `Grid` and the tab's remaining cards
+    /// render, ending flush with (not under) the bar. Root cause of the
+    /// double-accounting not otherwise established — nothing in the 27
+    /// SDK's release notes or header comments documents it — so this remains
+    /// a measured, reproducible workaround for a specific beta build, not an
+    /// explained one; revisit on the next Xcode 27 beta or GA release, and
+    /// re-verify by screenshot before trusting it.
     ///
     /// No-op on macOS, which has neither a floating tab bar nor this bug.
     @ViewBuilder
@@ -194,7 +194,8 @@ struct ContentView: View {
         #else
         GeometryReader { proxy in
             content()
-                .frame(height: proxy.size.height - proxy.safeAreaInsets.bottom, alignment: .top)
+                .frame(height: proxy.size.height, alignment: .top)
+                .clipped()
         }
         #endif
     }
@@ -241,12 +242,13 @@ private struct LibraryTab: View {
 
     /// FR-8.1 (HIG, tab-based apps): iPhone and iPad get a `NavigationStack`
     /// with this tab's own title, matching `ExportView` and `DuelView`. That
-    /// `NavigationStack` sits inside `ContentView.tabContent`'s frame-shrunk
-    /// `GeometryReader`, which is what keeps `libraryContent`'s `ScrollView`
-    /// clear of the floating tab bar — see that function's doc comment for
-    /// the measured, reproducible SDK-27-beta bug behind it. The Mac is
-    /// untouched: no bottom bar there to establish hierarchy against, and it
-    /// already has its menu bar (FR-8.3).
+    /// `NavigationStack` sits inside `ContentView.tabContent`'s frame-and-
+    /// `.clipped()`-constrained `GeometryReader`, which is what keeps
+    /// `libraryContent`'s `ScrollView` clear of the floating tab bar — see
+    /// that function's doc comment for the measured, reproducible SDK-27-
+    /// beta bug behind it. The Mac is untouched: no bottom bar there to
+    /// establish hierarchy against, and it already has its menu bar
+    /// (FR-8.3).
     var body: some View {
         #if os(macOS)
         libraryContent

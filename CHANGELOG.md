@@ -53,10 +53,18 @@ heading when that version is released (FR-10.3).
   that measurement so each `ScrollView` could re-apply it as its own
   `.safeAreaInset`) both still left short content — including the exact
   album-missing state this bug was filed against — rendering straight
-  through the bar; the fix that survived screenshot verification instead
-  shrinks each tab's own frame by the tab bar's height before its
-  `NavigationStack`, so nothing inside it is ever laid out into that space
-  (light and dark, Library and Export).
+  through the bar; a third attempt constrained each tab's own frame to the
+  tab bar's own height *subtracted from* the space a `GeometryReader`
+  measured there — but that `GeometryReader` already excludes the bar's
+  footprint, so the subtraction removed it twice, clipping the Library
+  tab's per-reason `Grid` and the Export tab's "Create Album" button well
+  short of the bar instead of merely stopping short of it. The fix that
+  survived screenshot verification constrains each tab's frame to that
+  measurement as-is, with `.clipped()` added so `NavigationStack` (which
+  does not clip a descendant `ScrollView` to a proposed frame on its own)
+  actually honors it — nothing inside is ever laid out into the tab bar's
+  space, and taller content still scrolls clear of it (light and dark,
+  Library and Export).
 - The Library tab's scan-status card is now titled "Library Scan" rather
   than "Library" — it used to repeat, word for word, the navigation title
   now shown directly above it on iPhone and iPad (FR-8.10/FR-4.13).

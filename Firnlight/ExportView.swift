@@ -823,10 +823,10 @@ struct ExportView: View {
     /// rest under the floating tab bar (see `exportContent`'s own comment).
     ///
     /// This `NavigationStack` sits inside `ContentView.tabContent`'s
-    /// frame-shrunk `GeometryReader`, which is what keeps `exportContent`'s
-    /// `ScrollView` clear of the floating tab bar — see that function's doc
-    /// comment for the measured, reproducible SDK-27-beta bug behind it, and
-    /// how it was isolated.
+    /// frame-and-`.clipped()`-constrained `GeometryReader`, which is what
+    /// keeps `exportContent`'s `ScrollView` clear of the floating tab bar —
+    /// see that function's doc comment for the measured, reproducible
+    /// SDK-27-beta bug behind it, and how it was isolated.
     ///
     /// The Mac is untouched: it already has a menu bar (FR-8.3) and a
     /// standard Settings window, and none of its tabs rendered under a
