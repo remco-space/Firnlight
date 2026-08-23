@@ -12,56 +12,51 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-23
+
 ### Added
 
-- Ranking now weighs where the sun actually stood when a photo was taken —
-  how high above the horizon, whether it was morning or evening, and where it
-  sat relative to the direction the camera was pointing. Golden hour is a low
-  sun rather than a time on a clock, and shooting into the light is a
-  different picture from shooting with it behind you; both are now things the
-  user's choices can speak to (FR-5.13).
-- Ranking also weighs how high above sea level a photo was taken, which year
-  it was taken in, and whether Photos knows it as a panorama, an HDR frame, a
+- Ranking now learns from far more of what the app can tell about a photo, and
+  the set is open by construction rather than written out one trait at a time
+  — so measuring one more thing about a picture costs a single addition
+  instead of six coordinated ones. The brief's "it grows as the platform and
+  the app do" is now true of the code and not only of the requirement
+  (FR-5.2).
+- Ranking weighs where the sun actually stood when a photo was taken: how high
+  above the horizon, whether it was morning or evening, and where it sat
+  relative to the direction the camera was pointing. Golden hour is a low sun
+  rather than a time on a clock, and shooting into the light is a different
+  picture from shooting with it behind you (FR-5.13).
+- Time of year is learned properly. It used to be a single number running
+  January to December, which could only say "later in the year is better" — a
+  taste for summer and autumn but not winter and spring had no way to be
+  expressed, and December and January counted as opposites. It is also read
+  against the hemisphere the photo was taken in, so a January photo from the
+  southern hemisphere counts as the summer photo it is.
+- Ranking weighs how prominent a person is, how large and how centred the
+  frame's main subject is, how much of the frame its foreground objects cover
+  and how many there are, how prominent an animal in it is, how much of it is
+  taken up by text such as signs or watermarks, how bright and how vivid it
+  is, and how much of itself the wallpaper crop discards — each counting only
+  as much as the user's own choices imply, exactly like the traits already
+  learned. Nothing about any of them is preset (FR-5.2).
+- Ranking weighs how high above sea level a photo was taken, which year it was
+  taken in, and whether Photos knows it as a panorama, an HDR frame, a
   portrait-mode shot or a live photo. None of these needed anything new
-  fetched: they were already in what the app reads and were being discarded.
-- Time of year is now learned properly. It used to be a single number running
-  from January to December, which could only ever say "later in the year is
-  better" — a taste for summer and autumn but not winter and spring had no
-  way to be expressed, and December and January counted as opposites. It is
-  also now read against the hemisphere the photo was taken in, so a January
-  photo from the southern hemisphere counts as the summer photo it is.
-
-- Ranking now also weighs how vivid or muted a photo is, how much of the frame
-  its foreground objects cover and how many there are, how prominent an animal
-  in it is, how much of it is taken up by text such as signs or watermarks,
-  and whether its proportions run wide or tall of the wallpaper shape — each, again, counting only as much as the user's own
-  choices imply (FR-5.2).
+  fetched: they were already in what the app reads, and were being discarded.
 - Animals are measured by how much of the frame they fill, never by what
-  species they are; text is measured by how much of the frame it covers,
-  never by what it says. The app reads no further into a photo than the trait
-  actually needs.
-- Ranking now weighs more of what the app can measure about a photo: how
-  prominent a person is, how large and how centred the frame's main subject
-  is, how bright the photo is overall, what time of day its own light says it
-  was taken at, and how much of itself the wallpaper crop discards — each
-  counting only as much as the user's own choices imply, exactly like the
-  traits already learned. Nothing about these is preset (FR-5.2).
-- The set of traits the app learns on is now open by construction rather than
-  written out one at a time, so measuring one more thing about a photo costs
-  a single addition instead of six coordinated ones — the requirement's "it
-  grows as the platform and the app do", made true of the code and not just
-  of the brief.
-- Vision revision tracking now also covers the saliency request, so a subject
+  species they are; text by how much of the frame it covers, never by what it
+  says. The app reads no further into a photo than the trait actually needs.
+- Vision revision tracking covers every request the app now runs, so a
   measurement that changes with an OS update is noticed and re-examined on
-  its own like every other measurement already was (FR-5.2).
+  its own, like every other measurement already was (FR-5.2).
 
 ### Changed
 
-- Measurements the app takes in order to decide whether to keep a photo are
-  no longer thrown away once that decision is made — a photo's person
-  prominence, for instance, now goes on to count in the ranking among the
-  photos that were kept, instead of surviving only as "has people: yes/no"
-  (FR-3.1, FR-5.2).
+- Measurements the app takes in order to decide whether to keep a photo are no
+  longer thrown away once that decision is made. A photo's person prominence,
+  for instance, now goes on to count in the ranking among the photos that were
+  kept, instead of surviving only as "has people: yes or no" (FR-3.1, FR-5.2).
 - Every photo is re-examined in the background to measure what it was never
   measured for, with no judgment lost and nothing for the user to do; until
   that finishes, the app keeps serving the best picture its previous
