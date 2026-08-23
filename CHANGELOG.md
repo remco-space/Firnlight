@@ -12,6 +12,28 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Added
+
+- The app now notices, on its own, when the system's Vision framework starts
+  resolving a face, human, classification, aesthetics, lens-smudge, horizon,
+  or feature-print request to a different revision than it did on a previous
+  launch — including a revision that arrived with an OS update rather than
+  a Firnlight update — and, if that ever actually changes what a photo
+  measures as, re-examines affected photos in the background with no
+  judgment lost, the same way a hand-tuned pipeline change already did; on
+  an ordinary launch where nothing has changed, this adds nothing to the
+  version every already-analyzed photo already carries, so no library is
+  re-examined for a reason that never happened (FR-5.2).
+- The Duel tab now has an "Undo" command, reachable both as an on-screen
+  button (disabled, not hidden, when there is nothing to take back) and as
+  the Mac's Edit-menu ⌘Z: it reverses the single most recent duel choice or
+  "Both Are Great"/"Both Are Bad" verdict, restoring the ranking to what it
+  would have been had that judgment never been given, and re-serves the same
+  pair (FR-5.12). "Not Wallpaper Material" and "Ignore This Photo" already
+  satisfied FR-5.12 a different way — they stay visible as a toggle in the
+  Library tab for as long as they hold, and clicking again there already
+  reverses them (FR-4.6).
+
 ### Fixed
 
 - The Export tab now says a device can't yet see the "Firnlight" album as a
@@ -140,20 +162,6 @@ heading when that version is released (FR-10.3).
   first, per-photo route fails and the fallback fires from the system's own
   callback queue (the last main-actor isolation warnings in the build, now
   zero).
-
-### Added
-
-- The Duel tab now has an "Undo" command, reachable both as an on-screen
-  button (disabled, not hidden, when there is nothing to take back) and as
-  the Mac's Edit-menu ⌘Z: it reverses the single most recent duel choice or
-  "Both Are Great"/"Both Are Bad" verdict, restoring the ranking to what it
-  would have been had that judgment never been given, and re-serves the same
-  pair (FR-5.12). "Not Wallpaper Material" and "Ignore This Photo" already
-  satisfied FR-5.12 a different way — they stay visible as a toggle in the
-  Library tab for as long as they hold, and clicking again there already
-  reverses them (FR-4.6).
-
-### Fixed
 
 - Dragging the album-size slider no longer leaves the exact count beside it
   showing a stale number. Once the number field had keyboard focus — which

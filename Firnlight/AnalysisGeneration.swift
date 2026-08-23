@@ -7,7 +7,11 @@ import os
 /// terms cuts both ways".
 ///
 /// `Thresholds.currentAnalysisVersion` is what *this build's* Vision pipeline
-/// produces and what `AnalysisQueue` re-examines the library up to in the
+/// produces on *this* OS — folding in both a hand-tuned pipeline version and
+/// `VisionRevisionFingerprint`'s read of which Vision model revisions the
+/// running system actually resolved to, so a system update that changes the
+/// latter moves this exactly as a Firnlight code change moving the former
+/// always has — and what `AnalysisQueue` re-examines the library up to in the
 /// background. It is deliberately NOT what the ranker, grid, duels, verdict
 /// calibration and album filter on. Those filtered on it directly until this
 /// type existed, which made the version bump itself the outage FR-5.2 forbids:

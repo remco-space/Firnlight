@@ -110,7 +110,42 @@ nonisolated enum Thresholds {
     /// (`natureObjectLabels`), so a photo accepted under v6 — a weakly
     /// detected prominent person, or an indoor still life — must be re-judged
     /// before it can keep counting as a candidate.
-    static let currentAnalysisVersion = 7 // v7: corroborated people check; object labels need outdoor
+    ///
+    /// This is only the *hand-tuned* half of the version: it catches changes
+    /// this app's own code makes to the pipeline, because a developer bumps
+    /// it when making one. It cannot catch Apple changing what a Vision
+    /// request itself does — a better face or aesthetics model arriving in a
+    /// system update, with zero Firnlight code change. `currentAnalysisVersion`
+    /// below folds in `VisionRevisionFingerprint` for that half, per FR-5.2's
+    /// "notices such changes itself — including ones that arrive with a
+    /// system update". Every call site outside this file should keep reading
+    /// `currentAnalysisVersion`, never this constant directly.
+    private static let analysisLogicVersion = 7 // v7: corroborated people check; object labels need outdoor
+
+    /// What every ranking-affecting query treats as "this build's analysis
+    /// generation" — `analysisLogicVersion`, this app's own hand-tuned
+    /// pipeline version, combined with `VisionRevisionFingerprint.generation`,
+    /// how many times this device has observed the OS's resolved Vision
+    /// revisions actually change. Added, not packed or multiplied: either
+    /// half advancing — a developer's threshold change, or an OS-shipped
+    /// model update — still strictly increases this value and queues
+    /// affected records for the same in-place, no-judgment-lost
+    /// re-examination (`AnalysisQueue`) that a hand-tuned bump already
+    /// triggered, but addition also keeps the untouched case — no Vision
+    /// drift ever observed on this device, `generation == 0` — numerically
+    /// identical to `analysisLogicVersion` alone, exactly what every record
+    /// already carries under the plain-integer scheme that predates
+    /// `VisionRevisionFingerprint`. A packed/shifted combination doesn't
+    /// have that property (e.g. `analysisLogicVersion << 28` isn't equal to
+    /// `analysisLogicVersion`), so it would have made *introducing* this
+    /// mechanism look like an examination change to every already-analyzed
+    /// record on every device, on the very upgrade meant to fix that class
+    /// of bug — the opposite of FR-5.2's "a change that doesn't alter how
+    /// photos are examined re-examines nothing: already-current analysis
+    /// stays current".
+    static var currentAnalysisVersion: Int {
+        analysisLogicVersion + VisionRevisionFingerprint.generation
+    }
 
     /// Records analyzed and saved per batch; a killed app loses at most one batch.
     static let analysisBatchSize = 32
