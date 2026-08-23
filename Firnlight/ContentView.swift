@@ -144,33 +144,47 @@ struct ContentView: View {
     /// `NavigationStack` (`LibraryTab`, `DuelView`, and `ExportView` each
     /// wrap themselves; see their own `body`).
     ///
-    /// This `GeometryReader` does nothing with the geometry it reads — it
-    /// exists purely because its presence is the fix. Measured, not guessed
-    /// (2026-08-23, iOS 27 simulator): a `NavigationStack` nested directly
-    /// inside a `Tab`'s content costs every descendant `ScrollView` the
-    /// floating tab bar's own bottom safe-area accommodation — screenshot-
-    /// confirmed with the Library tab's last two Analysis stat rows and the
-    /// Export tab's "Create Album" button and notice text rendering directly
-    /// under the glass tab bar (FR-8.5: "Nothing the user needs to see is
-    /// half-hidden under a bar"). A debug overlay reading
-    /// `proxy.safeAreaInsets.bottom` confirmed the mechanism: measured at a
-    /// `GeometryReader` positioned as `Tab`'s *direct* content, with the
-    /// `NavigationStack` nested one level inside it, the value read a
-    /// correct 83pt (the tab bar's own height) and every tab's content
-    /// cleared the bar cleanly; without the `GeometryReader` — `NavigationStack`
-    /// as `Tab`'s direct content — the same descendant content overlapped the
-    /// bar. Trying the reverse nesting (one `NavigationStack` wrapping the
-    /// whole `TabView` from outside, title driven by `selectedTab`) reproduced
-    /// the identical overlap, ruling out "nested vs. shared" as the variable;
-    /// dropping `NavigationStack` entirely restored correct spacing but with
-    /// `.navigationTitle`/`.toolbar` silently inert, confirming a real
-    /// `NavigationStack` ancestor is what a title/toolbar requires. The
-    /// `GeometryReader` is the one configuration that keeps both: a working
-    /// `NavigationStack` and the tab bar's safe area. Root cause not
-    /// otherwise established — nothing in the 27 SDK's release notes or
-    /// header comments documents this interaction — so this is recorded as a
-    /// measured, reproducible workaround for a specific beta build, not an
-    /// explained one; revisit on the next Xcode 27 beta or GA release.
+    /// Measured, not guessed (2026-08-23, iOS 27 simulator): a
+    /// `NavigationStack` nested directly inside a `Tab`'s content costs every
+    /// descendant `ScrollView` the floating tab bar's own bottom safe-area
+    /// accommodation — screenshot-confirmed with the Library tab's Analysis
+    /// stat rows and the Export tab's "Create Album" button and notice text
+    /// rendering directly under the glass tab bar (FR-8.5: "Nothing the user
+    /// needs to see is half-hidden under a bar"). Two attempts at *reserving*
+    /// that space from a descendant failed independent, screenshot-based
+    /// verification: first, a `GeometryReader` that measured the correct 83pt
+    /// but discarded it; second, publishing that measured value down through
+    /// a custom environment key and having each `ScrollView` re-apply it as
+    /// its own `.safeAreaInset(edge: .bottom)` — this *is* the standard
+    /// SwiftUI idiom for a custom floating bar, and it does extend a
+    /// `ScrollView`'s true scrollable range correctly (confirmed: scrolled to
+    /// its new end, content clears the bar with real margin) — but it does
+    /// nothing for content short enough to need no scrolling at all: at rest
+    /// (scroll offset zero), a `NavigationStack`-nested `ScrollView` is given
+    /// a *frame* that already extends the full screen height, ignoring the
+    /// tab bar's safe area entirely, and a descendant's `.safeAreaInset`
+    /// cannot shrink a frame an ancestor already fixed — it only pads the
+    /// scrollable content within that already-oversized frame. The Export
+    /// tab's short "no album yet" state — exactly the state this bug was
+    /// filed against — never needs to scroll, so it stayed rendered straight
+    /// through the bar.
+    ///
+    /// The fix that survived screenshot verification constrains the frame
+    /// itself, from here, *before* `NavigationStack`: each `Tab`'s content is
+    /// given an explicit `.frame(height:)` shrunk by the tab bar's own
+    /// safe-area inset, top-aligned. Since `NavigationStack` now receives an
+    /// already-reduced proposed height, everything inside it — its
+    /// navigation bar, and every descendant `ScrollView`'s own frame — is
+    /// correctly reduced too, so content stops short of the bar at rest with
+    /// no scrolling needed, exactly like the pre-`NavigationStack` behavior,
+    /// while genuinely taller content still scrolls (confirmed) to clear the
+    /// bar at its new end. Root cause not otherwise established — nothing in
+    /// the 27 SDK's release notes or header comments documents
+    /// `NavigationStack` discarding an ancestor's bottom safe area for its
+    /// own frame sizing — so this is recorded as a measured, reproducible
+    /// workaround for a specific beta build, not an explained one; revisit on
+    /// the next Xcode 27 beta or GA release, and re-verify by screenshot
+    /// before trusting it.
     ///
     /// No-op on macOS, which has neither a floating tab bar nor this bug.
     @ViewBuilder
@@ -178,8 +192,9 @@ struct ContentView: View {
         #if os(macOS)
         content()
         #else
-        GeometryReader { _ in
+        GeometryReader { proxy in
             content()
+                .frame(height: proxy.size.height - proxy.safeAreaInsets.bottom, alignment: .top)
         }
         #endif
     }
@@ -225,13 +240,13 @@ private struct LibraryTab: View {
     @State private var currentScrollOffsetY = CGFloat(UserDefaults.standard.double(forKey: "libraryScrollOffsetY"))
 
     /// FR-8.1 (HIG, tab-based apps): iPhone and iPad get a `NavigationStack`
-    /// with this tab's own title, matching `ExportView` and `DuelView`.
-    /// Wrapped one level further out, in `ContentView.tabContent`, is a
-    /// `GeometryReader` — required for this `ScrollView` to keep the floating
-    /// tab bar's bottom safe-area accommodation; see that function's doc
-    /// comment for the measured, reproducible SDK-27-beta bug it works
-    /// around. The Mac is untouched: no bottom bar there to establish
-    /// hierarchy against, and it already has its menu bar (FR-8.3).
+    /// with this tab's own title, matching `ExportView` and `DuelView`. That
+    /// `NavigationStack` sits inside `ContentView.tabContent`'s frame-shrunk
+    /// `GeometryReader`, which is what keeps `libraryContent`'s `ScrollView`
+    /// clear of the floating tab bar — see that function's doc comment for
+    /// the measured, reproducible SDK-27-beta bug behind it. The Mac is
+    /// untouched: no bottom bar there to establish hierarchy against, and it
+    /// already has its menu bar (FR-8.3).
     var body: some View {
         #if os(macOS)
         libraryContent

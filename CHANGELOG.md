@@ -47,8 +47,16 @@ heading when that version is released (FR-10.3).
   own toolbar (FR-8.1/FR-8.5). Fixed a regression the first version of this
   change introduced: adding each tab's `NavigationStack` cost every tab's
   scrolling content the floating tab bar's own bottom spacing, letting the
-  Library tab's last Analysis stat rows and the Export tab's "Create Album"
-  button render under the bar — screenshot-verified fixed, light and dark.
+  Library tab's Analysis stat rows and the Export tab's "Create Album"
+  button render under the bar. Two follow-up attempts (a `GeometryReader`
+  that measured the tab bar's height but discarded it, then republishing
+  that measurement so each `ScrollView` could re-apply it as its own
+  `.safeAreaInset`) both still left short content — including the exact
+  album-missing state this bug was filed against — rendering straight
+  through the bar; the fix that survived screenshot verification instead
+  shrinks each tab's own frame by the tab bar's height before its
+  `NavigationStack`, so nothing inside it is ever laid out into that space
+  (light and dark, Library and Export).
 - The Library tab's scan-status card is now titled "Library Scan" rather
   than "Library" — it used to repeat, word for word, the navigation title
   now shown directly above it on iPhone and iPad (FR-8.10/FR-4.13).
