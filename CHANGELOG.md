@@ -12,6 +12,16 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Added
+
+- The app now notices, on its own, when the system's Vision framework starts
+  resolving a face, human, classification, aesthetics, lens-smudge, horizon,
+  or feature-print request to a different revision than it did on a previous
+  launch — including a revision that arrived with an OS update rather than
+  a Firnlight update — and re-examines affected photos in the background
+  with no judgment lost, the same way a hand-tuned pipeline change already
+  did (FR-5.2).
+
 ### Fixed
 
 - The Export tab now says a device can't yet see the "Firnlight" album as a

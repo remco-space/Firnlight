@@ -110,7 +110,33 @@ nonisolated enum Thresholds {
     /// (`natureObjectLabels`), so a photo accepted under v6 — a weakly
     /// detected prominent person, or an indoor still life — must be re-judged
     /// before it can keep counting as a candidate.
-    static let currentAnalysisVersion = 7 // v7: corroborated people check; object labels need outdoor
+    ///
+    /// This is only the *hand-tuned* half of the version: it catches changes
+    /// this app's own code makes to the pipeline, because a developer bumps
+    /// it when making one. It cannot catch Apple changing what a Vision
+    /// request itself does — a better face or aesthetics model arriving in a
+    /// system update, with zero Firnlight code change. `currentAnalysisVersion`
+    /// below folds in `VisionRevisionFingerprint` for that half, per FR-5.2's
+    /// "notices such changes itself — including ones that arrive with a
+    /// system update". Every call site outside this file should keep reading
+    /// `currentAnalysisVersion`, never this constant directly.
+    private static let analysisLogicVersion = 7 // v7: corroborated people check; object labels need outdoor
+
+    /// What every ranking-affecting query treats as "this build's analysis
+    /// generation" — `analysisLogicVersion`, this app's own hand-tuned
+    /// pipeline version, combined with `VisionRevisionFingerprint.packed`,
+    /// the OS's currently-resolved Vision model revisions. Packed rather
+    /// than compared as two separate numbers so every existing `<` check
+    /// against `PhotoRecord.analysisVersion` (a single `Int` column) keeps
+    /// working unchanged: `analysisLogicVersion` occupies the high bits,
+    /// `VisionRevisionFingerprint.packed` the low 28, so either half
+    /// advancing — a developer's threshold change, or an OS-shipped model
+    /// update — strictly increases this value and queues affected records
+    /// for the same in-place, no-judgment-lost re-examination
+    /// (`AnalysisQueue`) that a hand-tuned bump already triggered.
+    static var currentAnalysisVersion: Int {
+        (analysisLogicVersion << 28) | VisionRevisionFingerprint.packed
+    }
 
     /// Records analyzed and saved per batch; a killed app loses at most one batch.
     static let analysisBatchSize = 32
