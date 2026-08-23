@@ -26,6 +26,25 @@ heading when that version is released (FR-10.3).
   contradicting the Analysis card's own "Wallpaper candidates" count below
   it — the two numbers measure different things, and that difference is
   now said in visible words rather than only a hover tooltip (FR-4.13).
+- The album-size suggestion's middle-zone scan no longer caps itself at 500
+  candidates when the user has duels but no explicit "Both Are Bad"/"Not
+  Wallpaper Material" verdict — a duel choice alone was never such a
+  judgment, and the cap was a working shortcut silently narrowing the pool
+  the estimate is drawn from (FR-6.4).
+- Counts throughout the Library and Export tabs are now locale-grouped and
+  agree grammatically with what they count ("1 photo", not "1 photos"),
+  including the album-size control's VoiceOver value (FR-8.1).
+- The two verdict toggles and the iOS actions menu on every thumbnail now
+  meet the HIG's 44x44pt minimum touch target on iPhone and iPad, without
+  growing the glass controls themselves (FR-8.1).
+- The score badge on thumbnails is now also explained by a visible, named
+  menu row (Mac right-click and iOS actions menu alike), not only by a
+  VoiceOver label and a pointer-only tooltip (FR-4.13/FR-8.13).
+- iPhone and iPad now give each tab its own navigation bar and title,
+  matching the HIG's structure for tab-based apps; the Export tab's
+  Settings entry moved from the bottom of its scrolling content — where it
+  could rest partly under the floating tab bar — into that navigation bar's
+  own toolbar (FR-8.1/FR-8.5).
 - The database contexts the ranking pipeline's background workers use are now
   created by the worker that uses them, not on the main thread that happened
   to construct the worker — ending the repeated "Unbinding from the main

@@ -502,7 +502,24 @@ struct DuelView: View {
     /// what FR-5.1 forbids.
     private static let cardSpacing: CGFloat = 16
 
+    /// FR-8.1 (HIG, tab-based apps): iPhone and iPad get a `NavigationStack`
+    /// with this tab's own title, matching `LibraryTab` and `ExportView` —
+    /// see `ExportView.body`'s doc comment for why none of the three tabs
+    /// had this before. The Mac is untouched: no bottom bar there to
+    /// establish hierarchy against, and it already has its menu bar
+    /// (FR-8.3).
     var body: some View {
+        #if os(macOS)
+        duelContent
+        #else
+        NavigationStack {
+            duelContent
+                .navigationTitle("Duel")
+        }
+        #endif
+    }
+
+    private var duelContent: some View {
         Group {
             if !authorization.isAuthorized {
                 ContentUnavailableView(

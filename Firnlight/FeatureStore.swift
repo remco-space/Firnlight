@@ -369,14 +369,20 @@ actor FeatureStore {
     /// scales with how far the bad verdicts reach into the ranking, not with
     /// library size, whenever there is a bad verdict to stop at.
     ///
-    /// Without one, the walk has nothing to stop it early, so the middle
-    /// sample (which is all there is, when `greatFloor` is also nil) is
-    /// capped at `Thresholds.albumSuggestionScanLimit` — the knee needs a
-    /// sample of the curve's shape, not the whole library, and scanning it
-    /// all just to conclude the same knee is the O(n²) dedupe walk this
-    /// function's caller-facing doc comment (`FeatureStore`'s file header)
-    /// warns against running unbounded. The great zone is never capped: FR-6.4
-    /// asks for it uncounted only by a ceiling nobody's judgment drew.
+    /// Without one — no "Both Are Bad" or "Not Wallpaper Material" verdict
+    /// yet — the middle zone used to be capped at
+    /// `Thresholds.albumSuggestionScanLimit` (500) rather than left to run to
+    /// the end of the library. That was a working shortcut FR-6.4 forbids
+    /// outright: a user with duels but no explicit bad verdict — "a duel
+    /// choice says only which of two photos is the better one, and is no
+    /// such judgment" — got a knee computed from only the top 500
+    /// score-sorted middle-zone candidates, silently narrowing the pool the
+    /// estimate is drawn from. The middle zone is now uncapped exactly like
+    /// the great zone already is: the only things that end the walk early
+    /// are the genuine boundaries `badCeiling` and the end of the records,
+    /// never an arbitrary count. The O(n²) near-duplicate dedupe below does
+    /// cost more on a library with neither verdict yet, which is the
+    /// correctness FR-6.4 asks for, not a regression to paper over.
     private func zoneScores(
         badCeiling: Float?,
         greatFloor: Float?,
@@ -389,7 +395,6 @@ actor FeatureStore {
         // let score`, ending the walk there same as reaching `badCeiling`.
         let records = fetched.sorted { ($0.preferenceScore ?? -.greatestFiniteMagnitude) > ($1.preferenceScore ?? -.greatestFiniteMagnitude) }
         let thresholdSquared = Thresholds.nearDuplicateDistance * Thresholds.nearDuplicateDistance
-        let middleScanLimit = badCeiling == nil ? Thresholds.albumSuggestionScanLimit : Int.max
 
         var keptVectors: [[Float]] = []
         var great: [Float] = []
@@ -398,7 +403,6 @@ actor FeatureStore {
             guard let score = record.preferenceScore else { break }
             if let badCeiling, score <= badCeiling { break }
             let isGreat = greatFloor.map { score >= $0 } ?? false
-            if !isGreat && middle.count >= middleScanLimit { break }
             guard let data = record.featurePrint else { continue }
             let vector = data.floatVector
             let isNearDuplicate = keptVectors.contains {

@@ -813,7 +813,40 @@ struct ExportView: View {
     @State private var isShowingSettings = false
     #endif
 
+    /// FR-8.1 (HIG, tab-based apps): iPhone and iPad get a `NavigationStack`
+    /// around this tab's content, same as `LibraryTab` and `DuelView` —
+    /// before this, none of the three tabs established the navigation
+    /// structure the HIG describes for a tab bar app (a title and a home for
+    /// tab-scoped actions), each one's own title was in-content text that
+    /// scrolled away with the rest, and this tab's Settings entry had
+    /// nowhere but the scrolling content itself to live, which is what let it
+    /// rest under the floating tab bar (see `exportContent`'s own comment).
+    /// The Mac is untouched: it already has a menu bar (FR-8.3) and a
+    /// standard Settings window, and none of its tabs rendered under a
+    /// bottom bar to begin with — this is iOS/iPadOS HIG guidance, not a
+    /// cross-platform one.
     var body: some View {
+        #if os(macOS)
+        exportContent
+        #else
+        NavigationStack {
+            exportContent
+                .navigationTitle("Export")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            isShowingSettings = true
+                        } label: {
+                            Label("Settings", systemImage: "gearshape")
+                        }
+                        .accessibilityLabel("Settings")
+                    }
+                }
+        }
+        #endif
+    }
+
+    private var exportContent: some View {
         ScrollView {
             VStack(spacing: 16) {
                 controls
@@ -835,20 +868,26 @@ struct ExportView: View {
                 }
 
                 #if !os(macOS)
-                // The way into the app's settings on a platform with no
-                // Settings window and no menu bar to put one behind (FR-8.4:
-                // every command reachable by touch, none of them only behind a
-                // gesture). It sits with the identity footer at the foot of
-                // the app's one bounded screen, for the same reason About does
-                // — see About.swift. On the Mac this is the standard Settings
-                // window instead (⌘,), so there is nothing here.
-                Button("Settings…") { isShowingSettings = true }
-                    .padding(.top, 24)
-
                 // FR-8.8's iPhone and iPad half: the app's identity at the
                 // foot of its last screen, where macOS has an About box
                 // instead. Static, so it never shifts anything above it
                 // (FR-8.7). See About.swift for why here.
+                //
+                // The way into the app's settings used to sit right above
+                // this as a plain scrolled `Button`, on a platform with no
+                // Settings window and no menu bar to put one behind (FR-8.4:
+                // every command reachable by touch, none of them only behind
+                // a gesture). At this screen's resting scroll position it
+                // rendered partly beneath the floating tab bar — its text
+                // visible through the glass over the "Duel" label
+                // (screenshot-confirmed 2026-08-23) — which is exactly what
+                // FR-8.5 forbids ("Nothing the user needs to see is
+                // half-hidden under a bar"). It now lives in `body`'s own
+                // navigation bar toolbar instead (the gear button), which the
+                // HIG's tab-bar guidance already expects every tab to have
+                // for this kind of tab-scoped, non-primary action — a
+                // navigation bar is never behind the floating tab bar, so the
+                // question of overlap doesn't arise there at all.
                 AboutFooter()
                 #endif
             }
@@ -1053,9 +1092,13 @@ struct ExportView: View {
                         .shownWhileWaiting(model.isSyncing)
 
                     if let outcome = model.outcome {
+                        // FR-8.1: locale-grouped digits and "photo"/"photos"
+                        // agreeing with `outcome.total` (a sync down to the
+                        // album's own working minimum can land on exactly 1).
+                        let totalPhrase = outcome.total.counted("photo")
                         if outcome.orderVerified {
                             Label(
-                                "Album has \(outcome.total) photos (+\(outcome.added), −\(outcome.removed) this sync)",
+                                "Album has \(totalPhrase) (+\(outcome.added.formatted()), −\(outcome.removed.formatted()) this sync)",
                                 systemImage: "checkmark.circle"
                             )
                             .foregroundStyle(.green)
@@ -1075,7 +1118,7 @@ struct ExportView: View {
                             )
                             .foregroundStyle(.orange)
                             .font(.callout)
-                            .help("The album has \(outcome.total) photos, but their order in Photos doesn't match the preview below. Syncing again usually fixes it.")
+                            .help("The album has \(totalPhrase), but their order in Photos doesn't match the preview below. Syncing again usually fixes it.")
                         }
                     }
                 }
@@ -1256,7 +1299,11 @@ struct ExportView: View {
                 model.trackWidth = $0
             }
             .accessibilityLabel("Album size")
-            .accessibilityValue("\(model.count.formatted()) photos")
+            // FR-8.1: "photo"/"photos" agreeing with `model.count` — reachable
+            // at exactly 1 when `smallestSize` collapses to
+            // `min(Thresholds.minimumWallpaperCount, largestSize)` on a small
+            // library, and this value is VoiceOver-spoken, not just visible.
+            .accessibilityValue(model.count.counted("photo"))
             // A slider's default assistive step is a tenth of its range, which
             // on this scale is close to a doubling of the count per press —
             // about eleven counts reachable in the whole library. Left over

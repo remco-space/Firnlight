@@ -257,7 +257,9 @@ struct CandidateGridView: View {
                 .font(.headline)
 
             if let result = model.result, model.selection == .library {
-                Text("\(result.candidates.count) of \(result.acceptedCount) accepted · \(result.suppressedCount) near-duplicates hidden")
+                // FR-8.1: locale-grouped digits, and "near-duplicate(s)"
+                // agreeing with the count it quantifies.
+                Text("\(result.candidates.count.formatted()) of \(result.acceptedCount.formatted()) accepted · \(result.suppressedCount.counted("near-duplicate", "near-duplicates")) hidden")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -333,6 +335,38 @@ struct CandidateGridView: View {
             .controlSize(.small)
             .accessibilityLabel("Library view")
         }
+    }
+}
+
+extension View {
+    /// FR-8.1 (HIG "Layout" — hit targets at least 44x44pt): grows a
+    /// control's *tappable* area to `Thresholds.minimumTouchTarget` on
+    /// iPhone and iPad, without growing what it draws.
+    ///
+    /// Applied as a `.frame(minWidth:minHeight:)` after the button's own
+    /// `.glassEffect()`, not before: SwiftUI sizes a shape modifier like
+    /// `.glassEffect(in:)` to the view's size *at the point it's applied* —
+    /// its small glass circle, sized off `.caption` glyph plus a few points
+    /// of padding — so a `.frame` layered on afterward only proposes a
+    /// larger minimum layout box for that already-sized content to be
+    /// centered within. The glass circle a photo's thumbnail shows stays the
+    /// small, tightly-grouped mark FR-4.14 asks for; the invisible box
+    /// SwiftUI hit-tests against grows to meet the HIG. Two siblings in an
+    /// `HStack` (`verdictToggles`' pair) each keeping their own non-
+    /// overlapping 44pt slot is exactly how stack layout already works — no
+    /// per-side asymmetric padding needed to keep two adjacent 44pt targets
+    /// from stealing each other's taps.
+    ///
+    /// No-op on macOS: the HIG's 44pt figure is iOS/iPadOS touch guidance:
+    /// pointer-driven clicks need no such floor, and macOS keeps every one
+    /// of these controls exactly as tightly grouped as before.
+    @ViewBuilder
+    func touchTarget() -> some View {
+        #if os(macOS)
+        self
+        #else
+        frame(minWidth: Thresholds.minimumTouchTarget, minHeight: Thresholds.minimumTouchTarget)
+        #endif
     }
 }
 
@@ -491,6 +525,7 @@ struct ThumbnailCell: View {
             // alone only reaches a pointer. The hint restates the same text
             // through the route touch and VoiceOver users get instead.
             .accessibilityHint(verdictToggleHelp)
+            .touchTarget()
 
             Button {
                 CandidateActions.setIgnored(candidate.localIdentifier, !candidate.isIgnored, in: modelContext)
@@ -509,6 +544,7 @@ struct ThumbnailCell: View {
             // Wallpaper Material" verdict) reaches touch and VoiceOver
             // through the hint, not just a pointer through `.help()`.
             .accessibilityHint(candidate.isIgnored ? "Returns this photo to the grid, duels, and the wallpaper album." : "Removes this photo from the grid, duels, and the wallpaper album without teaching the app anything — unlike a quality verdict, which keeps it in the ranking.")
+            .touchTarget()
         }
         .padding(5)
     }
@@ -557,6 +593,7 @@ struct ThumbnailCell: View {
                 .padding(6)
         }
         .glassEffect(.regular.interactive(), in: .circle)
+        .touchTarget()
         .padding(5)
         .accessibilityLabel("Photo actions")
         #endif
@@ -649,6 +686,21 @@ struct ThumbnailCell: View {
         Button("Open in Photos") {
             CandidateActions.openInPhotos(candidate.localIdentifier, using: openURL)
         }
+        Divider()
+        // FR-4.13/FR-8.13: the score badge is a bare decimal whose meaning
+        // used to be carried only by the cell's `accessibilityLabel`
+        // (VoiceOver) and `badge`'s own `.help()` tooltip (pointer) — no
+        // visible words and no named command, so a sighted touch user had no
+        // route to what the number means at all. Same disabled-informational
+        // pattern as the favorite row below: a score isn't an act to name,
+        // only a consequence to explain, reachable here on every platform
+        // (this same `menu` backs the Mac's right-click menu and touch's
+        // `actionsMenu`).
+        Button {} label: {
+            Text("Score: \(candidate.displayScore.formatted(.number.precision(.fractionLength(2))))")
+            Text("Predicted wallpaper appeal, 0 to 1 — higher scores rank earlier, learned from your duel choices.")
+        }
+        .disabled(true)
         if candidate.isFavorite {
             Divider()
             // A disabled, action-less row: purely informational, same

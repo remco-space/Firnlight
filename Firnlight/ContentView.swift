@@ -179,7 +179,24 @@ private struct LibraryTab: View {
     /// of clobbering it with 0.
     @State private var currentScrollOffsetY = CGFloat(UserDefaults.standard.double(forKey: "libraryScrollOffsetY"))
 
+    /// FR-8.1 (HIG, tab-based apps): iPhone and iPad get a `NavigationStack`
+    /// with this tab's own title, matching `ExportView` and `DuelView` — see
+    /// `ExportView.body`'s doc comment for why none of the three tabs had
+    /// this before. The Mac is untouched: no bottom bar there to establish
+    /// hierarchy against, and it already has its menu bar (FR-8.3).
     var body: some View {
+        #if os(macOS)
+        libraryContent
+        #else
+        NavigationStack {
+            libraryContent
+                .navigationTitle("Library")
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private var libraryContent: some View {
         if authorization.isAuthorized {
             ScrollView {
                 VStack(spacing: 20) {
@@ -432,7 +449,9 @@ private struct LibraryStatusView: View {
         guard case .scanning(let examined, let total) = scanner.phase, total > 0 else {
             return (nil, 1, "Preparing…")
         }
-        return (Double(examined), Double(total), "\(examined) of \(total) photos examined")
+        // FR-8.1: locale-grouped digits and "photo" agreeing with `total`
+        // (the count it quantifies — "of 1 photo", not "of 1 photos").
+        return (Double(examined), Double(total), "\(examined.formatted()) of \(total.formatted()) \(total.agreeing("photo")) examined")
     }
 
     /// What the app last found in the library.
@@ -467,7 +486,7 @@ private struct LibraryStatusView: View {
             // (observed live: "3 wallpaper candidates" over "Wallpaper
             // candidates 0"). "Possible" plus the sentence below now carries
             // that distinction in words everyone can read.
-            Label("\(candidates) possible candidates found", systemImage: "photo.stack")
+            Label("\(candidates.counted("possible candidate found", "possible candidates found"))", systemImage: "photo.stack")
                 .font(.callout.weight(.semibold))
                 .help("Photos whose size and shape qualify them for the wallpaper pipeline; Vision analysis below filters them further.")
             Text("Vision analysis narrows this to the wallpaper candidates shown below.")
@@ -493,12 +512,15 @@ private struct LibraryStatusView: View {
     }
 
     private func scanSummary(examined: Int, newlyAdded: Int, editedQueued: Int, removed: Int) -> String {
-        var parts = ["Examined \(examined) photos", "added \(newlyAdded) new"]
+        // FR-8.1: locale-grouped digits throughout, and "photo"/"photos"
+        // agreeing with `examined` — the others ("new", "edited", with no
+        // noun of their own) have nothing to agree.
+        var parts = ["Examined \(examined.counted("photo"))", "added \(newlyAdded.formatted()) new"]
         if editedQueued > 0 {
-            parts.append("queued \(editedQueued) edited for re-analysis")
+            parts.append("queued \(editedQueued.formatted()) edited for re-analysis")
         }
         if removed > 0 {
-            parts.append("removed \(removed)")
+            parts.append("removed \(removed.formatted())")
         }
         return parts.joined(separator: ", ") + "."
     }
