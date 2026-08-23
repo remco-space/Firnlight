@@ -286,6 +286,11 @@ actor AnalysisQueue {
                 record.subjectProminence = outcome.subjectProminence
                 record.subjectCentrality = outcome.subjectCentrality
                 record.luminance = outcome.luminance
+                record.colorfulness = outcome.colorfulness
+                record.foregroundCoverage = outcome.foregroundCoverage
+                record.subjectCount = outcome.subjectCount
+                record.animalProminence = outcome.animalProminence
+                record.textCoverage = outcome.textCoverage
                 record.horizonMeasured = true
                 record.isSkipped = false
                 record.analysisFailed = false

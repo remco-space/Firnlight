@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreVideo
 import Vision
 import os
 
@@ -61,9 +62,23 @@ nonisolated enum ImageAnalyzer {
         /// Mean relative luminance of the analysis bitmap, 0 (black) … 1
         /// (white) — how dark or bright the photo reads overall.
         var luminance: Float?
+        /// Mean chroma, 0 (fully desaturated) … 1 (fully saturated) — how
+        /// muted or vivid the photo reads overall.
+        var colorfulness: Float?
+        /// Fraction of the frame covered by segmented foreground objects.
+        var foregroundCoverage: Float?
+        /// How many distinct foreground objects Vision separated out.
+        var subjectCount: Int?
+        /// Tallest recognized animal as a fraction of frame height (0 when
+        /// there is none). Species-blind: only the geometry is kept.
+        var animalProminence: Float?
+        /// Fraction of the frame covered by detected text regions — signs,
+        /// watermarks, burned-in timestamps.
+        var textCoverage: Float?
     }
 
     private static let log = Logger(subsystem: "space.remco.Firnlight", category: "ImageAnalyzer")
+
 
     static func analyze(_ image: CGImage) async throws -> Outcome {
         var outcome = Outcome()
@@ -162,7 +177,35 @@ nonisolated enum ImageAnalyzer {
         let saliency = try await GenerateAttentionBasedSaliencyImageRequest().perform(on: image)
         outcome.subjectProminence = Self.subjectProminence(saliency)
         outcome.subjectCentrality = Self.subjectCentrality(saliency)
-        outcome.luminance = Self.meanLuminance(image)
+
+        if let foreground = try await GenerateForegroundInstanceMaskRequest().perform(on: image) {
+            outcome.subjectCount = foreground.allInstances.count
+            outcome.foregroundCoverage = Self.maskCoverage(foreground.allInstancesMask)
+        } else {
+            // Vision ran and separated nothing from the background — an open
+            // expanse with no foreground object. A real measurement of 0, not
+            // a gap, so it is recorded rather than left nil (FR-3.8).
+            outcome.subjectCount = 0
+            outcome.foregroundCoverage = 0
+        }
+
+        // Species-blind by construction: `RecognizeAnimalsRequest` reports
+        // which animal it saw, and only the bounding geometry is read off it.
+        // A wallpaper is affected by a deer standing in the frame, not by its
+        // being a deer, and the narrower reading is the one to keep.
+        let animals = try await RecognizeAnimalsRequest().perform(on: image)
+        outcome.animalProminence = Float(animals.map(\.boundingBox.height).max() ?? 0)
+
+        // Rectangles, not recognition: this needs to know how much of the
+        // frame is text, never what the text says. `RecognizeTextRequest`
+        // would answer the same question by reading every sign, receipt and
+        // note in the user's library, which is both slower and more than the
+        // trait requires.
+        let text = try await DetectTextRectanglesRequest().perform(on: image)
+        outcome.textCoverage = Float(min(1, text.reduce(0) { $0 + $1.boundingBox.width * $1.boundingBox.height }))
+
+        outcome.luminance = Self.meanGrey(image)
+        outcome.colorfulness = Self.meanChroma(image)
         return outcome
     }
 
@@ -225,6 +268,53 @@ nonisolated enum ImageAnalyzer {
         return Float(max(0, 1 - (dx * dx + dy * dy).squareRoot() / halfDiagonal))
     }
 
+    /// Fraction of the frame a segmentation mask marks as foreground.
+    ///
+/// `allInstancesMask` is an *instance-index* map, not a coverage mask:
+    /// a background pixel holds 0 and a covered pixel holds which instance
+    /// covers it — 1, 2, 3 — never a full-scale 255. So coverage is the count
+    /// of non-zero pixels, and anything that averages the values instead
+    /// answers a different question entirely. Two earlier revisions did
+    /// average them, once through the mask's `cgImage` and once from the
+    /// buffer, and both recorded coverages around a two-hundredth of the
+    /// truth: small, consistent, plausible, and wrong. Counting is also why
+    /// the format switch below only has to locate the component, never
+    /// interpret its scale.
+    private static func maskCoverage(_ observation: PixelBufferObservation) -> Float? {
+        observation.pixelBuffer.withUnsafeBuffer { buffer -> Float? in
+            guard CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { return nil }
+            defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+            guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
+            let width = CVPixelBufferGetWidth(buffer)
+            let height = CVPixelBufferGetHeight(buffer)
+            let rowBytes = CVPixelBufferGetBytesPerRow(buffer)
+            guard width > 0, height > 0 else { return nil }
+            var covered = 0
+            switch CVPixelBufferGetPixelFormatType(buffer) {
+            case kCVPixelFormatType_OneComponent8:
+                for y in 0..<height {
+                    let row = base.advanced(by: y * rowBytes).bindMemory(to: UInt8.self, capacity: width)
+                    for x in 0..<width where row[x] != 0 { covered += 1 }
+                }
+            case kCVPixelFormatType_OneComponent16Half:
+                for y in 0..<height {
+                    let row = base.advanced(by: y * rowBytes).bindMemory(to: Float16.self, capacity: width)
+                    for x in 0..<width where row[x] != 0 { covered += 1 }
+                }
+            case kCVPixelFormatType_OneComponent32Float:
+                for y in 0..<height {
+                    let row = base.advanced(by: y * rowBytes).bindMemory(to: Float.self, capacity: width)
+                    for x in 0..<width where row[x] != 0 { covered += 1 }
+                }
+            default:
+                // An unrecognized format is "could not determine", never a
+                // number this code guessed at (FR-3.8).
+                return nil
+            }
+            return Float(Double(covered) / Double(width * height))
+        }
+    }
+
     /// Mean relative luminance of the frame, 0 (black) … 1 (white).
     ///
     /// Drawn down to `luminanceSampleSize` square first: the mean of a
@@ -243,7 +333,7 @@ nonisolated enum ImageAnalyzer {
     /// `withUnsafeMutableBytes`, so a context built on it and drawn into
     /// afterwards would be writing through a pointer the compiler is free to
     /// have invalidated.
-    private static func meanLuminance(_ image: CGImage) -> Float? {
+    private static func meanGrey(_ image: CGImage) -> Float? {
         let side = Thresholds.luminanceSampleSize
         guard let context = CGContext(
             data: nil,
@@ -260,6 +350,43 @@ nonisolated enum ImageAnalyzer {
         let pixels = data.bindMemory(to: UInt8.self, capacity: side * side)
         var total = 0
         for index in 0..<(side * side) { total += Int(pixels[index]) }
+        return Float(total) / Float(side * side * 255)
+    }
+
+    /// Mean chroma of the frame, 0 (every pixel grey) … 1 (every pixel fully
+    /// saturated) — muted versus vivid.
+    ///
+    /// Per pixel this is max(R,G,B) − min(R,G,B), the saturation term of the
+    /// HSV model, averaged. Chosen over the better-known Hasler–Süsstrunk
+    /// colourfulness metric because that one is unbounded and its scale is
+    /// calibrated against a particular image population — exactly the
+    /// library-relative property every trait here has to avoid. Chroma is
+    /// bounded 0…1 by construction, so the same photo maps to the same value
+    /// on any device against any library.
+    ///
+    /// Drawn down the same way and for the same reason as `meanGrey`; see its
+    /// comment for why Core Graphics owns the buffer.
+    private static func meanChroma(_ image: CGImage) -> Float? {
+        let side = Thresholds.luminanceSampleSize
+        let bytesPerRow = side * 4
+        guard let context = CGContext(
+            data: nil,
+            width: side,
+            height: side,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .medium
+        context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+        guard let data = context.data else { return nil }
+        let pixels = data.bindMemory(to: UInt8.self, capacity: bytesPerRow * side)
+        var total = 0
+        for index in stride(from: 0, to: bytesPerRow * side, by: 4) {
+            let red = Int(pixels[index]), green = Int(pixels[index + 1]), blue = Int(pixels[index + 2])
+            total += max(red, green, blue) - min(red, green, blue)
+        }
         return Float(total) / Float(side * side * 255)
     }
 

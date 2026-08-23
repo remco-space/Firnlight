@@ -28,7 +28,9 @@ import Vision
 /// `CalculateImageAestheticsScoresRequest`, `DetectLensSmudgeRequest`,
 /// `DetectFaceRectanglesRequest`, `DetectHumanRectanglesRequest`,
 /// `ClassifyImageRequest`, `DetectHorizonRequest`,
-/// `GenerateAttentionBasedSaliencyImageRequest`).
+/// `GenerateAttentionBasedSaliencyImageRequest`,
+/// `GenerateForegroundInstanceMaskRequest`, `RecognizeAnimalsRequest`,
+/// `DetectTextRectanglesRequest`).
 ///
 /// Honest limit: this can only see revision *labels* changing. If Apple ever
 /// updates the weights behind an existing revision case without minting a
@@ -66,6 +68,9 @@ nonisolated enum VisionRevisionFingerprint {
             "horizon:\(DetectHorizonRequest().revision)",
             "featurePrint:\(GenerateImageFeaturePrintRequest().revision)",
             "saliency:\(GenerateAttentionBasedSaliencyImageRequest().revision)",
+            "foreground:\(GenerateForegroundInstanceMaskRequest().revision)",
+            "animals:\(RecognizeAnimalsRequest().revision)",
+            "textRects:\(DetectTextRectanglesRequest().revision)",
         ].joined(separator: "|")
     }
 
