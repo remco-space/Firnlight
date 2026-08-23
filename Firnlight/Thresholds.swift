@@ -124,18 +124,27 @@ nonisolated enum Thresholds {
 
     /// What every ranking-affecting query treats as "this build's analysis
     /// generation" — `analysisLogicVersion`, this app's own hand-tuned
-    /// pipeline version, combined with `VisionRevisionFingerprint.packed`,
-    /// the OS's currently-resolved Vision model revisions. Packed rather
-    /// than compared as two separate numbers so every existing `<` check
-    /// against `PhotoRecord.analysisVersion` (a single `Int` column) keeps
-    /// working unchanged: `analysisLogicVersion` occupies the high bits,
-    /// `VisionRevisionFingerprint.packed` the low 28, so either half
-    /// advancing — a developer's threshold change, or an OS-shipped model
-    /// update — strictly increases this value and queues affected records
-    /// for the same in-place, no-judgment-lost re-examination
-    /// (`AnalysisQueue`) that a hand-tuned bump already triggered.
+    /// pipeline version, combined with `VisionRevisionFingerprint.generation`,
+    /// how many times this device has observed the OS's resolved Vision
+    /// revisions actually change. Added, not packed or multiplied: either
+    /// half advancing — a developer's threshold change, or an OS-shipped
+    /// model update — still strictly increases this value and queues
+    /// affected records for the same in-place, no-judgment-lost
+    /// re-examination (`AnalysisQueue`) that a hand-tuned bump already
+    /// triggered, but addition also keeps the untouched case — no Vision
+    /// drift ever observed on this device, `generation == 0` — numerically
+    /// identical to `analysisLogicVersion` alone, exactly what every record
+    /// already carries under the plain-integer scheme that predates
+    /// `VisionRevisionFingerprint`. A packed/shifted combination doesn't
+    /// have that property (e.g. `analysisLogicVersion << 28` isn't equal to
+    /// `analysisLogicVersion`), so it would have made *introducing* this
+    /// mechanism look like an examination change to every already-analyzed
+    /// record on every device, on the very upgrade meant to fix that class
+    /// of bug — the opposite of FR-5.2's "a change that doesn't alter how
+    /// photos are examined re-examines nothing: already-current analysis
+    /// stays current".
     static var currentAnalysisVersion: Int {
-        (analysisLogicVersion << 28) | VisionRevisionFingerprint.packed
+        analysisLogicVersion + VisionRevisionFingerprint.generation
     }
 
     /// Records analyzed and saved per batch; a killed app loses at most one batch.
