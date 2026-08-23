@@ -35,6 +35,23 @@ import os
 /// well-exposed, sharp frame's aesthetics score alone would miss. Either gate
 /// rejects the photo before it is ever scored for nature content — "however
 /// good the scene" in the requirement's own words.
+/// Measured and rejected on cost (FR-5.2 asks for everything the app can
+/// quantify, and FR-5.13 bounds it at what the app already fetches — so what
+/// was tried and found too expensive belongs here, or it gets tried again):
+/// - `DetectContoursRequest`, for a "visual busyness" trait, cost **2333 ms
+///   per photo** against 6–30 ms for every other request in this pipeline —
+///   92% of all Vision time, turning a ten-minute library pass into ten
+///   hours. Removing it took throughput from 2.6 to 34 photos/sec. Its
+///   `maximumImageDimension` would cut that, but even a fourfold saving
+///   leaves it costing more than everything here combined.
+/// - EXIF (focal length, aperture, ISO, shutter, flash) needs the *original*
+///   file, not the rendition this pipeline already requests. Sampled against
+///   a real library with originals in iCloud: 399 of 405 photos returned
+///   nothing with the network refused, and reading them costs ~474 ms and
+///   ~2.9 MB each — tens of gigabytes of downloads for a library this size.
+///   FR-5.13's second limit forbids exactly this. Note that altitude and
+///   camera heading do *not* need it: both ride on `PHAsset.location` (see
+///   `PhotoRecord.altitude` / `cameraHeading`).
 /// `nonisolated`: must run off the main actor inside the AnalysisQueue's task group.
 nonisolated enum ImageAnalyzer {
     struct Outcome: Sendable {
