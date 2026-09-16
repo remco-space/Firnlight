@@ -258,9 +258,52 @@ direction; `refractivity` + `blur-material` on the Prism act on the beam layer
 *behind* it, so the system bends and blurs the sun's light through the glass
 (dispersion geometry documented in `Assets/light.svg`). Four visible groups is
 the ceiling — a fifth is rejected with `too-many-visible-groups`. The six
-appearances are *derived* from this one composition;
-`fill-specializations` / `image-name-specializations` parse but do nothing in
-Xcode 27 betas, so per-appearance artwork is not authorable.
+appearances are *derived* from this one composition.
+
+**Design generation 27** (Xcode 27 GA's Icon Composer 2.0 "sharper rendering
+mode", `ictool --design-generation 27`) is the only one a macOS/iOS 27+ app
+ever shows a user — generation 26 (the app's pre-27 floor default) is kept
+only as an `ictool`-rendered reference, never tuned for. Generation 27 adds
+real outside specular and deeper shadow, but only if you ask for it on each
+glass group: `specular: true` alone (the generation-26 property) renders a
+flat, grey, unlit face in generation 27 — no visible highlight, refraction
+barely readable. Two more group keys, undocumented in the JSON reference but
+present as GA's own schema (`IconComposerFoundation`'s symbol table, and
+confirmed by rendering both ways and diffing), turn generation 27's glass on:
+`"specular-highlight-placement": "outside"` (also takes `"inside"` or
+`"automatic"`; Apple's Icon Composer help calls this the group inspector's
+Specular pop-up) is what actually produces the rim highlight FR-8.6 asks for
+— Prism and Ridge both set it; and `"is-glass": true` with
+`"material-strength"` (0–1, we use 0.9 on the Prism and 0.75 on the Ridge)
+strengthens the same response further. `refractivity.depth` /
+`refractivity.strength` (nested, not the flat `refractivity-depth-*` /
+`refractivity-strength-*` keys the symbol table also carries — those decode
+as *legacy* aliases for the same nested object, per the same binary strings,
+so keep using the nested form) is what generation 27 actually bends and blurs
+the beam behind the glass by — pushed to 0.85/1.0 on the Prism for the bold
+brief. `ictool` does **not** validate JSON strictly: an unrecognised key is
+silently ignored (no diagnostic, no render change), and a recognised key with
+the wrong shape for its value fails the whole render with *"The data couldn't
+be read because it isn't in the correct format"* — so a new key's effect (or
+lack of one) can only be confirmed by rendering both ways and diffing, not by
+trusting `ictool` to flag a mistake.
+
+`fill-specializations` / `image-name-specializations` (and every other
+`*-specializations` key in the symbol table — `opacity-`, `blur-material-`,
+`shadow-`, `translucency-`, `specular-`, `blend-mode-`, `lighting-`,
+`position-`, `glass-`, `hidden-`) are read by `ictool` (a well-formed override,
+e.g. `"fill-specializations": {"dark": {"solid": "…"}}`, decodes without
+error — the valid slot names are `base`/`light`/`dark`/`tinted`, read out of
+the same symbol table) but still do nothing to the exported image: overriding
+a layer's `fill-specializations.dark` left the Dark rendition identical to
+the un-specialized one, confirmed by diffing against the same layer's *base*
+`fill` changed outright (which does change Dark, so the renderer does honour
+per-appearance colour — specializations specifically are inert). This was
+tested only through `ictool --export-image`; the Icon Composer GUI's own
+"Vary for Dark / Mono" picker (Apple's Style inspector, per-property, driven
+by these same JSON keys) was not exercised and may write and honour them on a
+path `ictool` doesn't take. Per-appearance artwork stays unauthorable through
+this CLI either way, generation 26 or 27.
 
 Two ways to get *no icon at all*, both silent — no warning, build still
 succeeds:
@@ -276,15 +319,21 @@ failures above for no proven gain. (Why the bundle's several icon renderings are
 not interchangeable, and what each surface actually draws, is in `About.swift`;
 the IconServices cache trap and its only cure are in `build-and-run.sh`.)
 
-Validate and preview without opening the GUI:
+Preview without opening the GUI (GA's `ictool` has only `--export-image` and
+`--version` — the beta-era `--export-intermediate-representation` diagnostics
+command is gone, and with it the "empty array == valid" check; malformed JSON
+now only surfaces as an `--export-image` failure, per the design-generation-27
+paragraph above):
 
 ```bash
 ICT="/Applications/Xcode<version>.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool"
-# Diagnostics (empty array == valid):
-"$ICT" Firnlight/AppIcon.icon --export-intermediate-representation --output-directory /tmp/ir --platform macOS
-# Render one of Default/Dark/ClearLight/ClearDark/TintedLight/TintedDark:
+# Render one of Default/Dark/ClearLight/ClearDark/TintedLight/TintedDark, in
+# the generation users on macOS/iOS 27+ actually see:
 "$ICT" Firnlight/AppIcon.icon --export-image --output-file /tmp/icon.png \
-  --platform macOS --rendition Default --width 512 --height 512 --scale 1
+  --platform macOS --rendition Default --width 512 --height 512 --scale 1 \
+  --design-generation 27
+# Omit --design-generation, or pass 26, only to check the pre-27 fallback —
+# never tune for it.
 ```
 
 Runtime logs go to the unified logging system under subsystem

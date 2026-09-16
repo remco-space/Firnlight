@@ -1,166 +1,172 @@
 {
-  "features" : [
+  "features": [
     "refractivity"
   ],
-  "fill" : {
-    "linear-gradient" : [
-      "srgb:0.21569,0.20000,0.49020,1.00000",
-      "srgb:1.00000,0.54902,0.45098,1.00000"
+  "fill": {
+    "linear-gradient": [
+      "srgb:0.13725,0.10980,0.38431,1.00000",
+      "srgb:1.00000,0.38039,0.30980,1.00000"
     ],
-    "orientation" : {
-      "start" : {
-        "x" : 0.3,
-        "y" : 0
+    "orientation": {
+      "start": {
+        "x": 0.3,
+        "y": 0
       },
-      "stop" : {
-        "x" : 0.7,
-        "y" : 1
+      "stop": {
+        "x": 0.7,
+        "y": 1
       }
     }
   },
-  "groups" : [
+  "groups": [
     {
-      "blend-mode" : "normal",
-      "blur-material" : 0.25,
-      "layers" : [
+      "blend-mode": "normal",
+      "blur-material": 0.35,
+      "is-glass": true,
+      "layers": [
         {
-          "fill" : {
-            "solid" : "srgb:0.93725,0.96078,1.00000,1.00000"
+          "fill": {
+            "solid": "srgb:0.93725,0.96078,1.00000,1.00000"
           },
-          "image-name" : "glass.svg",
-          "name" : "Glass Face",
-          "opacity" : 0.3
+          "image-name": "glass.svg",
+          "name": "Glass Face",
+          "opacity": 0.3
         }
       ],
-      "lighting" : "individual",
-      "name" : "Prism",
-      "position" : {
-        "scale" : 1,
-        "translation-in-points" : [
+      "lighting": "individual",
+      "material-strength": 0.9,
+      "name": "Prism",
+      "position": {
+        "scale": 1,
+        "translation-in-points": [
           0,
           0
         ]
       },
-      "refractivity" : {
-        "depth" : 0.7,
-        "enabled" : true,
-        "strength" : 0.9
+      "refractivity": {
+        "depth": 0.85,
+        "enabled": true,
+        "strength": 1.0
       },
-      "shadow" : {
-        "kind" : "layer-color",
-        "opacity" : 0.45
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.65
       },
-      "specular" : true,
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.65
+      "specular": true,
+      "specular-highlight-placement": "outside",
+      "translucency": {
+        "enabled": true,
+        "value": 0.72
       }
     },
     {
-      "blend-mode" : "plus-lighter",
-      "blur-material" : 0.15,
-      "layers" : [
+      "blend-mode": "plus-lighter",
+      "blur-material": 0.18,
+      "layers": [
         {
-          "image-name" : "light.svg",
-          "name" : "Beam and Spectrum",
-          "opacity" : 0.9
+          "image-name": "light.svg",
+          "name": "Beam and Spectrum",
+          "opacity": 0.9
         }
       ],
-      "lighting" : "individual",
-      "name" : "Light",
-      "position" : {
-        "scale" : 1,
-        "translation-in-points" : [
+      "lighting": "individual",
+      "name": "Light",
+      "position": {
+        "scale": 1,
+        "translation-in-points": [
           0,
           0
         ]
       },
-      "shadow" : {
-        "kind" : "none",
-        "opacity" : 0
+      "shadow": {
+        "kind": "none",
+        "opacity": 0
       },
-      "specular" : false,
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.5
+      "specular": false,
+      "translucency": {
+        "enabled": true,
+        "value": 0.55
       }
     },
     {
-      "blend-mode" : "normal",
-      "blur-material" : 0.3,
-      "layers" : [
+      "blend-mode": "normal",
+      "blur-material": 0.32,
+      "is-glass": true,
+      "layers": [
         {
-          "fill" : {
-            "solid" : "srgb:0.93725,0.96078,1.00000,1.00000"
+          "fill": {
+            "solid": "srgb:0.93725,0.96078,1.00000,1.00000"
           },
-          "image-name" : "shoulder.svg",
-          "name" : "Shoulder Glass",
-          "opacity" : 0.35
+          "image-name": "shoulder.svg",
+          "name": "Shoulder Glass",
+          "opacity": 0.35
         },
         {
-          "fill" : {
-            "solid" : "srgb:0.05882,0.05490,0.16471,1.00000"
+          "fill": {
+            "solid": "srgb:0.05882,0.05490,0.16471,1.00000"
           },
-          "image-name" : "range.svg",
-          "name" : "Range",
-          "opacity" : 0.98
+          "image-name": "range.svg",
+          "name": "Range",
+          "opacity": 0.98
         }
       ],
-      "lighting" : "individual",
-      "name" : "Ridge",
-      "position" : {
-        "scale" : 1,
-        "translation-in-points" : [
+      "lighting": "individual",
+      "material-strength": 0.75,
+      "name": "Ridge",
+      "position": {
+        "scale": 1,
+        "translation-in-points": [
           0,
           0
         ]
       },
-      "refractivity" : {
-        "depth" : 0.5,
-        "enabled" : true,
-        "strength" : 0.6
+      "refractivity": {
+        "depth": 0.6,
+        "enabled": true,
+        "strength": 0.75
       },
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.5
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.7
       },
-      "specular" : true,
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.25
+      "specular": true,
+      "specular-highlight-placement": "outside",
+      "translucency": {
+        "enabled": true,
+        "value": 0.32
       }
     },
     {
-      "blend-mode" : "normal",
-      "blur-material" : 0.25,
-      "layers" : [
+      "blend-mode": "normal",
+      "blur-material": 0.25,
+      "layers": [
         {
-          "image-name" : "sun.svg",
-          "name" : "Disc"
+          "image-name": "sun.svg",
+          "name": "Disc"
         }
       ],
-      "lighting" : "individual",
-      "name" : "Sun",
-      "position" : {
-        "scale" : 1,
-        "translation-in-points" : [
+      "lighting": "individual",
+      "name": "Sun",
+      "position": {
+        "scale": 1,
+        "translation-in-points": [
           0,
           0
         ]
       },
-      "shadow" : {
-        "kind" : "none",
-        "opacity" : 0
+      "shadow": {
+        "kind": "none",
+        "opacity": 0
       },
-      "specular" : true,
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.15
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.15
       }
     }
   ],
-  "supported-platforms" : {
-    "squares" : [
+  "supported-platforms": {
+    "squares": [
       "iOS",
       "macOS"
     ]
