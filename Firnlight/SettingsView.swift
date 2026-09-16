@@ -271,8 +271,13 @@ struct SettingsView: View {
 /// never mutated — `exportJudgments()` below builds a fresh instance right
 /// before presenting the exporter — so there is no changing state for
 /// `@Observable` to track. The type itself stays at the project's default
-/// `MainActor` isolation (`SWIFT_DEFAULT_ACTOR_ISOLATION`); only
-/// `writer(configuration:)` opts out — see its own comment for why.
+/// `MainActor` isolation (`SWIFT_DEFAULT_ACTOR_ISOLATION`), which makes this
+/// an *isolated conformance*: `writableContentTypes` satisfies the protocol's
+/// unannotated (nonisolated) requirement as a main-actor member because
+/// SwiftUI only ever consults it from the main actor, and the compiler
+/// accepts that under approachable concurrency's `InferIsolatedConformances`
+/// (`SWIFT_APPROACHABLE_CONCURRENCY`). Only `writer(configuration:)` opts
+/// out — see its own comment for why.
 final class JudgmentArchiveDocument: WritableDocument {
     static var writableContentTypes: [UTType] { [JudgmentArchive.contentType] }
 

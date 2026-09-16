@@ -28,7 +28,7 @@ done
 [ "$missing" -eq 1 ] || exit 0   # already present — nothing to do, silent
 
 # Best-effort: no Xcode 27 / no `agent skills export` subcommand shouldn't
-# break session start — the app just won't get these two skills until a
+# break session start — the app just won't get these skills until a
 # toolchain that has them is selected.
 command -v xcrun >/dev/null 2>&1 || exit 0
 EXPORT_DIR="$(mktemp -d)"

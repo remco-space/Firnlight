@@ -19,10 +19,20 @@
 # this can't run in the iOS Simulator: Vision doesn't analyze anything
 # there); and the Screen Recording grant for whatever runs this script —
 # screencapture fails *silently*, returning a solid black image with a zero
-# exit code, which the size check below exists to catch.
+# exit code, which the size check below exists to catch. The window frame is
+# read through System Events, so the runner also needs the Accessibility
+# grant; without it the capture stops at "window never appeared".
+#
+# `--icon-only` renders just docs/store/icon.png and leaves the tab
+# screenshots and the README caption alone: the icon needs none of the
+# above beyond ictool, so an icon-only change (or a machine without the
+# grants) can still keep that one picture current.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+ICON_ONLY=0
+[[ "${1:-}" == "--icon-only" ]] && ICON_ONLY=1
 
 APP_NAME="Firnlight"
 BUNDLE_ID="space.remco.Firnlight"
@@ -45,6 +55,29 @@ check_size() {
   fi
 }
 
+echo "==> Rendering the icon…"
+XCODE_ROOT="${DEVELOPER_DIR:-$(xcode-select -p)}"
+XCODE_ROOT="${XCODE_ROOT%/Contents/Developer}"
+ICT="$XCODE_ROOT/Contents/Applications/Icon Composer.app/Contents/Executables/ictool"
+[[ -x "$ICT" ]] || { echo "error: ictool not found at: $ICT" >&2; exit 1; }
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+# Design generation 27 is what the platforms the app runs on draw; it is
+# also ictool's default, but the picture is the icon's public face (FR-10.10)
+# and should not depend on a default that a future ictool may move.
+"$ICT" Firnlight/AppIcon.icon --export-image --output-file "$WORK/icon.png" \
+  --platform macOS --rendition Default --width 1024 --height 1024 --scale 1 \
+  --design-generation 27
+sips -Z 256 "$WORK/icon.png" --out "$OUT_DIR/icon.png" >/dev/null
+check_size "$OUT_DIR/icon.png"
+
+if (( ICON_ONLY )); then
+  echo "==> Done — docs/store/icon.png is current; tab screenshots and the README caption were left alone."
+  exit 0
+fi
+
 echo "==> Building $APP_NAME (Debug)…"
 xcodebuild -project Firnlight.xcodeproj -scheme "$APP_NAME" -configuration Debug build
 
@@ -58,20 +91,6 @@ APP_PATH="$(
 '
 )"
 [[ -d "$APP_PATH" ]] || { echo "error: build reported success but no app at: $APP_PATH" >&2; exit 1; }
-
-echo "==> Rendering the icon…"
-XCODE_ROOT="$(xcode-select -p)"
-XCODE_ROOT="${XCODE_ROOT%/Contents/Developer}"
-ICT="$XCODE_ROOT/Contents/Applications/Icon Composer.app/Contents/Executables/ictool"
-[[ -x "$ICT" ]] || { echo "error: ictool not found at: $ICT" >&2; exit 1; }
-
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
-
-"$ICT" Firnlight/AppIcon.icon --export-image --output-file "$WORK/icon.png" \
-  --platform macOS --rendition Default --width 1024 --height 1024 --scale 1
-sips -Z 256 "$WORK/icon.png" --out "$OUT_DIR/icon.png" >/dev/null
-check_size "$OUT_DIR/icon.png"
 
 quit_app() {
   osascript -e "tell application \"$APP_NAME\" to quit" 2>/dev/null || true

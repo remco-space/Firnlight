@@ -222,7 +222,7 @@ library, and the app needs interactive Photos authorization to do anything.
 signing). macOS TCC binds the Photos grant to the code signature, so changing
 the signing identity forces the user to re-grant access.
 
-**Swift upcoming features** are opted into as they land, one at a time, each
+**Swift upcoming features** are opted into as the toolchain offers them, each
 verified clean against the whole target before enabling — `MemberImportVisibility`,
 `ExistentialAny` and `InternalImportsByDefault` are on via their own
 `SWIFT_UPCOMING_FEATURE_*` build settings (Xcode 27's Swift build-setting spec
