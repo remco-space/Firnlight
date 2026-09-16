@@ -57,10 +57,12 @@ whatever their license. Two mechanisms obtain them fresh:
   (`.claude/hooks/skills-submodule-update.sh`) advances both submodules to each
   one's latest **tagged release** — not the branch tip, since SKILL.md loads
   straight into context as instructions and a tag is a bounded, named point.
-- `swiftui-specialist` and `swiftui-whats-new-27` are Apple's own, published
+- `swiftui-specialist`, `swiftui-whats-new-27` and
+  `building-document-based-swiftui-applications` are Apple's own, published
   only via the local toolchain (`xcrun agent skills export`), so there is
   nothing to point a submodule at. `.claude/hooks/apple-skills-export.sh` runs
-  that export on `SessionStart` when they're missing. Both are gitignored.
+  that export on `SessionStart` when any of the three are missing. All three
+  are gitignored.
 
 See `.claude/skills/README.md` for the provenance table and how to pin a
 revision if a release regresses, and `THIRD_PARTY_NOTICES.md` for license
@@ -219,6 +221,19 @@ library, and the app needs interactive Photos authorization to do anything.
 **Signing must stay stable** (`DEVELOPMENT_TEAM = VGZ5MZ2P8B`, automatic
 signing). macOS TCC binds the Photos grant to the code signature, so changing
 the signing identity forces the user to re-grant access.
+
+**Swift upcoming features** are opted into as they land, one at a time, each
+verified clean against the whole target before enabling — `MemberImportVisibility`,
+`ExistentialAny` and `InternalImportsByDefault` are on via their own
+`SWIFT_UPCOMING_FEATURE_*` build settings (Xcode 27's Swift build-setting spec
+gives each of these its own named setting; `xcodebuild -showBuildSettings`
+confirms each resolves to `YES`). `ImmutableWeakCaptures` has no such setting
+in Xcode 27.0 — `swiftc -print-supported-features` lists it as a Swift 7
+upcoming feature, but `Swift.xcspec` has no `SWIFT_UPCOMING_FEATURE_*` entry
+for it yet — so it's enabled the fallback way, via
+`OTHER_SWIFT_FLAGS = "-enable-upcoming-feature ImmutableWeakCaptures"`. Revisit
+this once a future Xcode adds the dedicated setting, and fold it in next to the
+other three.
 
 **Versioning (FR-8.9)** lives in two build settings, the only place a version
 can live and still be the one the app is running:

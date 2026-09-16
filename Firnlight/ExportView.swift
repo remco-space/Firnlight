@@ -1243,7 +1243,7 @@ struct ExportView: View {
                     .labelsHidden()
                     .frame(width: countFieldWidth)
                     .multilineTextAlignment(.trailing)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.bordered)
                     .focused($countFieldFocused)
                     // FR-6.5: no count at all until there is a true one to
                     // show — a greyed-out 50 is still a default count, and
