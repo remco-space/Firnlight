@@ -301,7 +301,16 @@ struct AppCommands: Commands {
                     gridModel?.selection = view
                 } label: {
                     if gridModel?.selection == view {
+                        // macOS 27 hides symbol images on menu-item labels in
+                        // most contexts by default, so the plain
+                        // `Label(_:systemImage:)` below would render as just
+                        // the title, indistinguishable from the unselected
+                        // branch's `Text`. `.titleAndIcon` is SwiftUI's opt
+                        // back in to always showing the icon, which is what
+                        // this checkmark needs to still read as a selection
+                        // indicator.
                         Label(view.title, systemImage: "checkmark")
+                            .labelStyle(.titleAndIcon)
                     } else {
                         Text(view.title)
                     }

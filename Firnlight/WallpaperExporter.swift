@@ -155,7 +155,7 @@ nonisolated enum WallpaperAlbumSync {
         /// staying a silent `try?`, so the user finds out (via ExportView's
         /// `errorMessage`) rather than discovering a blank wallpaper rotation
         /// later with no explanation.
-        case syncFailedAndRollbackFailed(underlying: Error)
+        case syncFailedAndRollbackFailed(underlying: any Error)
 
         var errorDescription: String? {
             switch self {

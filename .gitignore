@@ -57,6 +57,7 @@ __pycache__/
 # .claude/hooks/apple-skills-export.sh — see .claude/skills/README.md.
 .claude/skills/swiftui-specialist/
 .claude/skills/swiftui-whats-new-27/
+.claude/skills/building-document-based-swiftui-applications/
 
 # ---- Editor / misc ----
 *.swp
