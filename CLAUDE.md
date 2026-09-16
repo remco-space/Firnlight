@@ -129,11 +129,16 @@ Releases are cut by pushing a `vX.Y.Z` tag matching `MARKETING_VERSION`; CI
 builds and publishes, taking the release body from the matching `CHANGELOG.md`
 section.
 
-**Both build workflows are dormant** (manual dispatch only), because GitHub's
-runner images carry Xcode 26 at the newest and cannot compile a 27 target. No
-binary is produced and tagging publishes nothing; v0.15.0 stays the current
-download. Each workflow's header says what to restore. The personal-data check
-keeps running on every push — FR-10.4 admits no gap.
+**Both build workflows are restored**: `build.yml` runs on push/pull_request
+against `main`, `release.yml` on pushing a matching `vX.Y.Z` tag, both on
+GitHub's `xcode-27` runner image now that one exists. That image is a public
+preview (arm64 only, announced 2026-09-10) and, as of this writing, ships a
+single Xcode 27.0 beta rather than Apple's GA build; each workflow's
+Xcode-selection step resolves the newest `Xcode_27*.app` on the runner
+(deduping the symlinks the image ships alongside the real bundle) and emits a
+`::warning` when the selected build looks like a beta, so a release cut on a
+beta toolchain is visible in the run log rather than silent. The personal-data
+check keeps running on every push — FR-10.4 admits no gap.
 
 File formats: `LICENSE` follows
 [choosealicense.com/licenses/mit](https://choosealicense.com/licenses/mit/);
