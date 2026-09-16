@@ -43,7 +43,7 @@ struct FirnlightApp: App {
     ///
     /// The one genuinely recoverable failure, the legacy judgment migration,
     /// is handled inside `JudgmentStore` and never reaches here.
-    private let store: Result<ModelContainer, Error> = Result { try JudgmentStore.makeContainer() }
+    private let store: Result<ModelContainer, any Error> = Result { try JudgmentStore.makeContainer() }
 
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -165,7 +165,7 @@ struct FirnlightApp: App {
 /// run a version that can read the store — and the only ones the app could
 /// offer (delete it, rewrite it) are the very things the requirement forbids.
 struct StoreUnavailableView: View {
-    let error: Error
+    let error: any Error
 
     var body: some View {
         VStack(spacing: 16) {

@@ -260,23 +260,49 @@ struct SettingsView: View {
 
 /// The archive as a document, which is all `fileExporter` will carry.
 ///
-/// `nonisolated` because `FileDocument`'s requirements are: it is read and
-/// written on whatever queue the system picks, and the payload is a `Data` it
-/// was handed.
-nonisolated struct JudgmentArchiveDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [JudgmentArchive.contentType] }
+/// SDK 27 deprecates `FileDocument` in favor of the `Document` protocol
+/// family, which splits reading and writing into separate types. This
+/// document conforms only to `WritableDocument`, not the combined `Document`
+/// (`ReadableDocument & WritableDocument`): reading was never its job here —
+/// the "Restore" side of FR-7.4 goes through `.fileImporter` and
+/// `restoreJudgments(from:)` above, which get the chosen file's `URL`
+/// directly and have no use for a document wrapped around it. A plain
+/// `final class` rather than `@Observable`: `data` is set once at `init` and
+/// never mutated — `exportJudgments()` below builds a fresh instance right
+/// before presenting the exporter — so there is no changing state for
+/// `@Observable` to track. The type itself stays at the project's default
+/// `MainActor` isolation (`SWIFT_DEFAULT_ACTOR_ISOLATION`), which makes this
+/// an *isolated conformance*: `writableContentTypes` satisfies the protocol's
+/// unannotated (nonisolated) requirement as a main-actor member because
+/// SwiftUI only ever consults it from the main actor, and the compiler
+/// accepts that under approachable concurrency's `InferIsolatedConformances`
+/// (`SWIFT_APPROACHABLE_CONCURRENCY`). Only `writer(configuration:)` opts
+/// out — see its own comment for why.
+final class JudgmentArchiveDocument: WritableDocument {
+    static var writableContentTypes: [UTType] { [JudgmentArchive.contentType] }
 
-    var data: Data
+    let data: Data
 
     init(data: Data) {
         self.data = data
     }
 
-    init(configuration: ReadConfiguration) throws {
-        data = configuration.file.regularFileContents ?? Data()
+    // `nonisolated`, not the project's default `MainActor`: the closure below
+    // captures nothing of `self` and needs none of it, but a closure literal
+    // written inside a `MainActor`-isolated function implicitly inherits that
+    // isolation (SE-0420) even when it doesn't touch actor state — which then
+    // fails to satisfy the `sending FileWrapperDocumentWriter<Data>` return
+    // type, since a `MainActor`-isolated closure isn't safe to send off that
+    // actor. Opting this one function out keeps the closure isolation-free,
+    // which is what "sending" actually requires here.
+    nonisolated func writer(configuration: sending WriteConfiguration) -> sending FileWrapperDocumentWriter<Data> {
+        FileWrapperDocumentWriter(configuration) { snapshot, _ in
+            FileWrapper(regularFileWithContents: snapshot)
+        }
     }
 
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
+    @MainActor
+    func snapshot(contentType: UTType) async throws -> sending Data {
+        data
     }
 }

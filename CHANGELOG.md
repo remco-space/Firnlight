@@ -12,6 +12,31 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Fixed
+
+- On macOS 27, the View menu's checkmark against the current Library view was
+  no longer drawn: the system now hides symbol images in menu items unless an
+  item asks for its icon, and this one now does (FR-4.9).
+
+### Changed
+
+- The app icon is designed for the glass rendering macOS 27 and iOS 27
+  actually draw, rather than for the previous generation with the new one
+  tolerated: the prism and its shoulder are sharp, bright glass with the
+  sun's beam visibly bending inside them, the shadows are deeper and the
+  gradient stronger. How an earlier rendering would show it is no longer a
+  design target (FR-8.6).
+- The app is built with the released Xcode 27 and Swift 6.4 rather than the
+  betas, and opts into the Swift 7 language rules that already hold for its
+  code. The exact-count field on the Export tab uses the system's current
+  bordered field style. Copying your judgments to a file goes through the
+  system's current document interface; nothing changes in what is written or
+  read (FR-7.4).
+- Releases are built and published again: GitHub now offers an Xcode 27
+  runner, so pushing a version tag once more produces a download. The runner
+  is a public preview that, at the time of writing, still ships an Xcode 27
+  beta; the build log says so when that is the case (FR-10.2).
+
 ## [0.24.0] - 2026-08-23
 
 ### Added

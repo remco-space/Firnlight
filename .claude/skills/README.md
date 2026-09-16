@@ -22,11 +22,12 @@ cover the obtained ones:
   release ever regresses, `git -C .claude/skills-src/<name> log --oneline`
   shows what changed and `git checkout <tag>` in that submodule pins it back.
 - **Exported fresh from the local Xcode toolchain** (`swiftui-specialist`,
-  `swiftui-whats-new-27`): Apple's own content, published only via
-  `xcrun agent skills export`, not a repository — there's nothing to point a
-  submodule at. `.claude/hooks/apple-skills-export.sh` runs that command on
-  `SessionStart` whenever the two directories are missing (a fresh clone, or
-  after switching Xcode versions) and copies its output into place. Both
+  `swiftui-whats-new-27`, `building-document-based-swiftui-applications`):
+  Apple's own content, published only via `xcrun agent skills export`, not a
+  repository — there's nothing to point a submodule at.
+  `.claude/hooks/apple-skills-export.sh` runs that command on `SessionStart`
+  whenever any of the three directories are missing (a fresh clone, or after
+  switching Xcode versions) and copies its output into place. All three
   directories are gitignored, so what's on disk always came from *this*
   machine's own licensed Xcode install, never from git.
 
@@ -38,6 +39,7 @@ cover the obtained ones:
 | `sdk-capability-scan` | First-party, written for this project | MIT (repo license) | Scans the installed SDK for a framework's capabilities gated to the deployment floor, to catch drift between pinned skill content and what the SDK actually ships. Tracked in git. |
 | `swiftui-specialist` | Apple, exported from Xcode 27 (`xcrun agent skills export`) | Apple toolchain | Authoritative SwiftUI patterns/perf. Obtained at session start, gitignored. |
 | `swiftui-whats-new-27` | Apple, exported from Xcode 27 | Apple toolchain | SDK 27 SwiftUI changes (e.g. `@State` → macro). Obtained at session start, gitignored. |
+| `building-document-based-swiftui-applications` | Apple, exported from Xcode 27 | Apple toolchain | `Document`/`DocumentReader`/`DocumentWriter`, `DocumentGroup`, migrating off `FileDocument`/`ReferenceFileDocument`. Obtained at session start, gitignored. |
 | `ui-review-tahoe` | [rshankras/claude-code-apple-skills](https://github.com/rshankras/claude-code-apple-skills), `skills/macos/ui-review-tahoe` | MIT | macOS UI/UX + HIG-compliance review. Submodule symlink, auto-updates. |
 | `liquid-glass` | [rshankras/claude-code-apple-skills](https://github.com/rshankras/claude-code-apple-skills), `skills/design/liquid-glass` | MIT | `.glassEffect()` design language, macOS 27. Submodule symlink, auto-updates. |
 | `photokit` | [dpearson2699/swift-ios-skills](https://github.com/dpearson2699/swift-ios-skills) | see upstream repo | PhotosPicker/PHPhotoLibrary/media permissions — core to the scan/pick pipeline. Auto-updates. |

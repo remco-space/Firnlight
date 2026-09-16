@@ -4,37 +4,68 @@ name: Build
 # run it on. Signing is disabled here on purpose — this verifies the app
 # compiles, not that it can be distributed (that is release.yml, FR-10.2).
 #
-# DORMANT — manual dispatch only. The app targets macOS/iOS 27 and GitHub's
-# runner images carry Xcode 26 at the newest, so this cannot compile the
-# project at all; a deployment target may not exceed the SDK building it.
-# To restore once a 27 image exists: put back the push/pull_request triggers
-# below, and move runs-on and the Xcode-selection step from 26 to 27.
+# Runs on GitHub's xcode-27 runner image (arm64 only), which is a public
+# preview as of 2026-09 — see
+# https://github.blog/changelog/2026-09-10-xcode-27-runner-image-now-runs-on-macos-27/.
+# The Xcode-selection step below prints the toolchain it actually used and
+# warns when that build looks like a beta, since the preview image may still
+# be shipping one — see that step's comment for the exact check.
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Select Xcode 26
+      - name: Select Xcode 27
         run: |
-          # macos-26 runners carry several Xcode 26.x patch releases side by
-          # side; pick the newest rather than pinning a patch version that
-          # will eventually be pruned from the image.
-          XCODE_PATH="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)"
+          # xcode-27 / xcode-27-xlarge runner images (public preview, arm64
+          # only) can carry more than one Xcode 27 bundle, plus convenience
+          # symlinks pointing at the same bundle rather than at a distinct
+          # install (as of image 20260907: Xcode_27_beta_6.app is the real
+          # bundle, with Xcode_27.0.0.app, Xcode_27.0.app and Xcode.app
+          # symlinked to it). Resolve every Xcode_27*.app to its real path
+          # and dedupe before picking the newest, so a symlink is never
+          # mistaken for a second, newer install.
+          XCODE_PATH="$(
+            find /Applications -maxdepth 1 -name 'Xcode_27*.app' -print0 \
+              | xargs -0 -I{} readlink -f "{}" \
+              | sort -u \
+              | sort -V \
+              | tail -1
+          )"
           if [ -z "$XCODE_PATH" ]; then
-            echo "::error::No Xcode 26.x found on this runner image (checked /Applications/Xcode_26*.app)"
+            echo "::error::No Xcode 27.x found on this runner image (checked /Applications/Xcode_27*.app)"
             find /Applications -maxdepth 1 -iname "*xcode*"
             exit 1
           fi
           echo "Selecting $XCODE_PATH"
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           xcodebuild -version
+
+          # xcode-27 is a public preview; as of image 20260907 its only
+          # Xcode is 27.0 beta (build 27A5252f), not Apple's GA build
+          # (27A266a). Surface that loudly instead of letting a beta
+          # toolchain build pass unremarked: an Xcode build string is
+          # <major><letter><digits><optional letter> (e.g. 27A5252f), and to
+          # date Apple's beta builds carry 4+ digits in that run while GA
+          # builds carry 3 (compare 5252 above to GA's 266) — so treat 4+
+          # digits as a beta signal. This is a heuristic on the pattern
+          # observed so far, not a parse of Apple's build-numbering spec;
+          # revisit if a future GA build doesn't fit it.
+          BUILD="$(xcodebuild -version | awk '/^Build version/ { print $3 }')"
+          if [[ "$BUILD" =~ ^[0-9]+[A-Z][0-9]{4,}[A-Za-z]?$ ]]; then
+            echo "::warning::Building on Xcode build $BUILD, which looks like a beta by digit count (see this step's comment). GitHub's xcode-27 image is a public preview."
+          fi
 
       - name: Build (macOS)
         run: |

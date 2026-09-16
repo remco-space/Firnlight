@@ -445,6 +445,11 @@ The app has three tabs matching the three stages of the journey:
   and blurring as it passes through the glass, and a shadow beneath. It reads
   clearly in all six appearances the system draws — default, dark, clear light
   and dark, tinted light and dark — and at the smallest size it is ever shown.
+  It is designed for the glass rendering the platforms it runs on actually
+  draw; how an earlier generation of that rendering would show it is not a
+  design target. *(Why: the app runs only where the newest rendering exists,
+  and an icon tuned to look acceptable under both looks its best under
+  neither.)*
 - **FR-8.7** The interface holds still: a control only ever moves or resizes
   as the direct result of the user's own act. Whatever the app shows of its
   own accord while it works — however it takes shape: a wait, a status, a
