@@ -4,12 +4,11 @@ name: Release
 # GitHub Releases (FR-10.1), never gated behind a build step the user has to
 # run themselves.
 #
-# DORMANT — manual dispatch only, so no binary is produced and pushing a tag
-# publishes nothing. The app targets macOS/iOS 27 and GitHub's runner images
-# carry Xcode 26 at the newest; a deployment target may not exceed the SDK
-# building it. v0.15.0 remains the current download until this is restored:
-# put back the tag trigger below, and move runs-on and the Xcode-selection
-# step from 26 to 27, once a 27 image exists.
+# Runs on GitHub's xcode-27 runner image (arm64 only), a public preview as of
+# 2026-09 (see build.yml's header for the changelog link). The
+# Xcode-selection step warns when the image's Xcode looks like a beta build,
+# so a release cut on a beta toolchain is visible in the run log rather than
+# silently shipped.
 #
 # Publishing is gated on the packaged app actually launching (FR-10.2), not
 # on the build succeeding — see the verification step below.
@@ -27,11 +26,13 @@ name: Release
 # build setting says (FR-10.3).
 
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
 
 jobs:
   release:
-    runs-on: macos-26
+    runs-on: xcode-27
     permissions:
       contents: write
     steps:
@@ -39,17 +40,33 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Select Xcode 26
+      - name: Select Xcode 27
         run: |
-          XCODE_PATH="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)"
+          # See build.yml's "Select Xcode 27" step for why this resolves
+          # symlinks and dedupes before picking the newest candidate.
+          XCODE_PATH="$(
+            find /Applications -maxdepth 1 -name 'Xcode_27*.app' -print0 \
+              | xargs -0 -I{} readlink -f "{}" \
+              | sort -u \
+              | sort -V \
+              | tail -1
+          )"
           if [ -z "$XCODE_PATH" ]; then
-            echo "::error::No Xcode 26.x found on this runner image (checked /Applications/Xcode_26*.app)"
+            echo "::error::No Xcode 27.x found on this runner image (checked /Applications/Xcode_27*.app)"
             find /Applications -maxdepth 1 -iname "*xcode*"
             exit 1
           fi
           echo "Selecting $XCODE_PATH"
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           xcodebuild -version
+
+          # See build.yml's "Select Xcode 27" step for the beta-build
+          # heuristic; a release is exactly the case where this warning
+          # matters most.
+          BUILD="$(xcodebuild -version | awk '/^Build version/ { print $3 }')"
+          if [[ "$BUILD" =~ ^[0-9]+[A-Z][0-9]{4,}[A-Za-z]?$ ]]; then
+            echo "::warning::Releasing from Xcode build $BUILD, which looks like a beta by digit count (see build.yml's Select Xcode 27 step for the check). GitHub's xcode-27 image is a public preview."
+          fi
 
       - name: Verify tag matches MARKETING_VERSION
         env:
