@@ -12,6 +12,8 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-18
+
 ### Fixed
 
 - On macOS 27, the View menu's checkmark against the current Library view was
