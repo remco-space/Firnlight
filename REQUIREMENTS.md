@@ -402,18 +402,15 @@ The app has three tabs matching the three stages of the journey:
 ## 8. Native feel
 
 - **FR-8.1** Firnlight follows Apple's Human Interface Guidelines for the
-  platform it is running on. This single rule stands in for the whole
-  native-feel checklist Apple already maintains: respecting the system
-  light/dark appearance and accent, adapting cleanly to any window or screen
-  size, using the platform's own controls, menus, gestures, and keyboard
-  shortcuts, staying legible over system materials, remaining fully usable with
-  VoiceOver, the keyboard, larger text sizes, and the reduce-motion /
-  reduce-transparency / increase-contrast settings, and returning the user to
-  where they left off (active tab, scroll position, and in-progress duel) on the
-  next launch. *(Why: the HIG is the living definition of "native" on each OS;
-  deferring to it keeps the app feeling like it belongs without this brief
-  restating — and having to maintain — rules Apple already publishes and updates
-  every release.)*
+  platform it is running on, and returns the user to where they left off —
+  active tab, scroll position, in-progress duel — on the next launch. Where
+  the HIG requires, the app complies; where it only recommends, the
+  recommendation binds everything the brief already calls for but never adds
+  a capability on its own — that enters through a requirement of its own, or
+  not at all (FR-8.10). *(Why: the HIG is the living definition of "native"
+  on each OS; deferring to it keeps the app feeling like it belongs without
+  this brief restating — and having to maintain — rules Apple already
+  publishes and updates every release.)*
 - **FR-8.2** The app always stays responsive: no action ever freezes the
   interface. Work that takes time runs out of the way behind live progress, and
   the rest of the app stays usable while it runs. *(Why: a frozen window with a
@@ -430,15 +427,12 @@ The app has three tabs matching the three stages of the journey:
   right-click or an unlabeled icon.)*
 - **FR-8.4** *(iPhone and iPad)* Every command is reachable by touch, and
   nothing lives only behind a gesture the user has to guess.
-- **FR-8.5** Glass belongs to the app's own bars and controls, never to the
-  photos: the photographs themselves — thumbnails, duel cards and previews —
-  stay plain. A control is the app's own wherever it stands, floating over a
-  photo included: there it wears what the platform gives controls layered
-  over content, never a hand-built imitation of it, and glass looks the
-  same everywhere it appears. Text on glass stays legible over the user's
-  brightest and darkest photos, in light and dark. Nothing the user needs to see
-  is half-hidden under a bar, and at most one action per screen is highlighted
-  as prominent.
+- **FR-8.5** Photos are never glass; controls always are. Thumbnails, duel
+  cards and previews stay plain, and every control wears the platform's
+  glass as FR-8.1 dictates — a control floating over a photo included. Text
+  on glass stays legible over the user's brightest and darkest photos, in
+  light and dark, and nothing the user needs to see is half-hidden under a
+  bar.
 - **FR-8.6** The app icon shows off everything the system's glass icons can do:
   depth between layers, a colour gradient, layers that blend and show through
   one another, a highlight placed as if lit from one direction, light bending
@@ -481,17 +475,16 @@ The app has three tabs matching the three stages of the journey:
   a template leftover or a placeholder. *(Why: About is where a user checks
   what they are running before reporting a problem or updating; an empty box
   or a stock "1.0" says nobody finished the app.)*
-- **FR-8.9** Firnlight is versioned as major.minor.patch, semantic-versioning
-  style read for an app: the major number marks a release that changes what
-  the app is or asks the user to relearn something, minor adds features, and
-  patch only fixes. Every user-visible change bumps the version, the version
-  shown to the user is always the one actually running, and no two different
-  builds ever present the same version and build number. Until the app is
-  fit for its first real release it stays at 0.minor.patch, so the version
-  never claims a maturity the app does not have. *(Why: a version is the one
-  handle user and author share when something must be identified — "which
-  Firnlight does this happen in?" — and it only works if it is truthful and
-  moves with the app.)*
+- **FR-8.9** Firnlight's version follows Semantic Versioning (semver.org),
+  read for an app whose public API is what its user knows how to do: the
+  major number marks a release that changes what the app is or asks the user
+  to relearn something, minor adds, patch only fixes, and it stays at
+  0.minor.patch until the user declares it fit for a first real release.
+  Every user-visible change bumps it, the version shown is the one running,
+  and no two different builds ever present the same version and build
+  number. *(Why: a version is the one handle user and author share when
+  something must be identified — "which Firnlight does this happen in?" —
+  and it only works if it is truthful and moves with the app.)*
 
 - **FR-8.10** The interface holds only what this brief calls for: every
   control, view, and adornment traces back to a requirement, and no two
@@ -546,10 +539,9 @@ The app has three tabs matching the three stages of the journey:
   launches is verified before publishing, never inferred from a successful
   build. *(Why: friction the user can't avoid is fine; friction they aren't
   warned about isn't.)*
-- **FR-10.3** Every release carries a changelog entry the user can read
-  before deciding whether to update, and the version named in the release
-  matches the version the running app reports (FR-8.9) — never released
-  ahead of or behind what FR-8.9 already governs.
+- **FR-10.3** Every release carries its changelog section (FR-10.9), and the
+  version it names is the one the running app reports (FR-8.9) — never
+  released ahead of or behind it.
 - **FR-10.4** Nothing personal to the developer's own machine or accounts —
   file paths, credentials, tokens, or other data that identifies them or
   their setup rather than the project — is ever tracked in the public
@@ -572,15 +564,11 @@ The app has three tabs matching the three stages of the journey:
   the right to publish someone's work belongs to its author, and a
   repository that only works where it was born is not meaningfully
   public.)*
-- **FR-10.6** Change reaches the public repository the way the wider
-  open-source world expects: one stable default branch that always holds
-  the current working state, with each body of work developed on a branch
-  of its own and merged whole once verified. Someone familiar with common
-  open-source practice can tell at a glance where the current state lives
-  and how change arrives — nothing about the branch structure needs
-  explaining. *(Why: for a public project, the development process is part
-  of the interface; a bespoke process taxes every contributor after the
-  first.)*
+- **FR-10.6** Change reaches the public repository by GitHub flow, as GitHub
+  documents it, so that someone familiar with common open-source practice
+  can tell at a glance where the current state lives and how change arrives.
+  *(Why: for a public project, the development process is part of the
+  interface; a bespoke process taxes every contributor after the first.)*
 - **FR-10.7** Everything tracked in the repository is written for any
   contributor on their own machine: no tracked file states, or depends on,
   facts true only of the developer's particular computer, devices, or
@@ -595,13 +583,14 @@ The app has three tabs matching the three stages of the journey:
 - **FR-10.9** Every public-facing document in the repository — the front
   page, the changelog, the license, and any later addition of their kind —
   follows a recognized, published standard for that kind of document, named
-  where the document is maintained, and follows it fully but no further: the
-  parts the standard recommends for a project of this shape are present,
-  each fact is said once — in the one document whose job it is, referenced
-  from the others — and nothing pads beyond what a reader deciding whether
-  to use the app needs. *(Why: a bespoke format taxes every reader the way a
-  bespoke process taxes every contributor (FR-10.6), and bulk taxes them
-  just as surely — a front page nobody finishes reading informs nobody.)*
+  where the document is maintained. Every part the standard offers is
+  present, optional or not, unless another requirement excludes it; within
+  each part, each fact is said once — in the one document whose job it is,
+  referenced from the others — and nothing pads beyond what a reader
+  deciding whether to use the app needs. *(Why: a bespoke format taxes every
+  reader the way a bespoke process taxes every contributor (FR-10.6), and
+  bulk taxes them just as surely — a front page nobody finishes reading
+  informs nobody.)*
 - **FR-10.10** Distributed outside a store, the repository's front page is
   the app's store page, and it is judged as one: a stranger reading it top
   to bottom — on whatever screen they arrive on — meets one story that
