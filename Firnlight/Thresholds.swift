@@ -385,38 +385,60 @@ nonisolated enum Thresholds {
     /// library-independent scales (`PreferenceRanker.seasonFraction`,
     /// latitude ÷ 90) that never move under a growing library — see
     /// `PreferenceRanker`'s type doc comment.
-    /// v11 is required too: it adds the three place-scale weight buckets
-    /// below (FR-5.14) — a v10 weights file has no opinion about any of
-    /// them, so only a full rebuild (re-seed + full choice/verdict replay)
-    /// folds them in, the same reasoning every earlier trait addition here
-    /// gives.
-    static let rankerAlgorithmVersion = 11 // v11: three-scale place hierarchy (FR-5.14)
+    /// v11 is required too: it adds the three place-scale weight dictionary
+    /// (FR-5.14) — a v10 weights file has no opinion about it, so only a
+    /// full rebuild (re-seed + full choice/verdict replay) folds it in, the
+    /// same reasoning every earlier trait addition here gives.
+    /// v12 is required too: v11 keyed each scale's weights into a small
+    /// fixed-size hashed bucket table, which let two unrelated places share
+    /// a bucket by hash collision — exactly the leak FR-5.14's "never
+    /// reaches another except through the larger places both belong to"
+    /// forbids. v12 replaces the bucket table with an exact
+    /// `[String: Float]` dictionary, one entry per place actually seen, so
+    /// there is nothing left for two places to collide into; a v11 file's
+    /// bucket weights mean something different from a v12 file's per-place
+    /// ones, so this forces the same full rebuild.
+    static let rankerAlgorithmVersion = 12 // v12: exact per-place weights, no bucket collisions (FR-5.14)
 
     // MARK: Place hierarchy (FR-5.13, FR-5.14)
 
-    /// How many learned weight buckets each scale of `PlaceHierarchy` gets in
-    /// `PreferenceRanker.Weights.place` — one photo activates exactly one
-    /// bucket per scale (a hash of its grid cell, or of the resolved place
-    /// name once `PlaceNameLookup` has one), and SGD learns each bucket's
-    /// weight from duels exactly like every other trait (FR-5.2).
-    ///
-    /// Fewer buckets at coarser scales, matching what each scale is *for*:
-    /// a library plausibly touches dozens of towns but far fewer countries,
-    /// and a smaller table means more photos share a bucket, which is what
-    /// lets a heavily-judged scale's weight dominate a barely-judged finer
-    /// one as it decays toward zero between reinforcements (FR-5.11's "leans
-    /// on the larger places around it" falls out of `rankerWeightDecay`
-    /// already applying to every weight on every SGD step, not out of any
-    /// bespoke smoothing here). Unverified against a real library's spread
-    /// of distinct places; tune by watching how many distinct fine keys a
-    /// real library resolves to, the same way every other geometric or
-    /// count-based threshold here is tuned.
-    static let placeFineBucketCount = 48
-    static let placeMediumBucketCount = 24
-    static let placeCoarseBucketCount = 12
+    /// Beyond this distance (degrees, equirectangular — see
+    /// `PlaceGazetteer.squaredDistance`) from the nearest entry in
+    /// `PlaceData/places.json`, a coordinate gets no fine-scale name at all
+    /// (FR-3.8's gap, not a penalty) rather than one from a town that isn't
+    /// plausibly "this photo's town or park". Roughly 110 km at the equator.
+    /// Tighter than `regionGazetteerMaxDistanceDegrees` on purpose: FR-5.11's
+    /// "leans on the larger places around it" already covers a fine scale
+    /// that comes up empty, so there is no cost to being strict here and a
+    /// real one (a nearest-town match hundreds of kilometres off) to being
+    /// loose. Unverified against a real library's spread of locations; tune
+    /// by watching how often real photos land inside vs. outside this
+    /// radius, the same way every other geometric threshold here is tuned.
+    static let placeGazetteerMaxDistanceDegrees = 1.0
+
+    /// The same cutoff for the medium scale, against `PlaceData/regions.json`.
+    /// Wider than the fine cutoff because a region's label point can
+    /// legitimately sit hundreds of kilometres from a photo taken at the far
+    /// edge of a large region (Siberia, the Canadian territories) — the
+    /// nearest-label-point approximation `PlaceGazetteer` uses is already
+    /// coarse for those, and a tight cutoff would only turn that coarseness
+    /// into a missing region instead of an approximate one. Roughly 880 km
+    /// at the equator. Unverified; tune the same way as the fine cutoff.
+    static let regionGazetteerMaxDistanceDegrees = 8.0
+
+    /// The grid `PlaceNameLookup` rounds a coordinate to when deciding
+    /// whether it has already asked Apple's maps service about "this spot"
+    /// (`PlaceHierarchy.networkCacheKey`) — purely a cache-deduplication
+    /// granularity, never a place identity: the actual ranking hierarchy
+    /// always comes from `PlaceGazetteer`'s real place names, refined by
+    /// whatever this cache holds. ~1.1 km at the equator: fine enough that
+    /// two genuinely different small towns rarely round to the same key, and
+    /// coarse enough that a cluster of photos taken walking around one spot
+    /// shares a single lookup rather than one each.
+    static let placeNameLookupCacheGridDegrees = 0.01
 
     /// How long `PlaceNameLookup` waits after successfully resolving one
-    /// cell before asking about the next — FR-5.13's "at the pace the
+    /// spot before asking about the next — FR-5.13's "at the pace the
     /// source permits". Apple documents no rate limit for
     /// `MKReverseGeocodingRequest`, so this is simply a courteous, arbitrary
     /// pace for a background enrichment nobody is waiting on, not a measured
@@ -636,18 +658,25 @@ nonisolated enum Thresholds {
     /// of a real ranking actually contain.
     static let albumMixScoreTolerance: Float = 0.2
 
-    /// Feature-print distance below which two already-deduplicated
-    /// candidates still count as "similar scene or mood" for FR-6.1's mix —
-    /// looser than `nearDuplicateDistance`, which has already removed actual
-    /// re-takes of the same vista before this stage ever sees the pool.
-    /// This one is about two *different* photos that nonetheless read alike
-    /// (the same kind of sunset, the same style of forest path), which is
-    /// exactly the "mood" FR-6.1 names alongside place and season.
-    /// Unverified against real library data — a wider band than
-    /// `nearDuplicateDistance`'s 0.5 by construction, since it has to catch
-    /// more than exact re-takes; tune the same way that constant was, by
-    /// watching what a real ranked pool clusters into.
-    static let albumMixVisualSimilarityDistance: Float = 0.8
+    /// Combined per-dimension mean-squared distance, over the feature print
+    /// *and* every `ScalarTrait` together (each block normalized by its own
+    /// dimension count first, so the feature print's much larger dimension
+    /// count can't drown out the scalar traits — see
+    /// `FeatureStore.repetitionCount`), below which two already-deduplicated
+    /// candidates still count as "similar" for FR-6.1's mix. FR-6.1 names
+    /// "scene, mood... or anything else the app weighs (FR-5.2)" alongside
+    /// place and season — the feature print alone speaks to scene and mood;
+    /// folding in every scalar trait is what makes this the rest of "anything
+    /// else", rather than a hand-picked subset of it.
+    ///
+    /// Looser than `nearDuplicateDistance` (which has already removed actual
+    /// re-takes of the same vista before this stage ever sees the pool) by
+    /// construction, and on a different scale entirely (a per-dimension mean
+    /// rather than a raw summed distance) — the two are not directly
+    /// comparable. Unverified against real library data; tune by watching
+    /// what a real ranked pool's per-dimension distances actually spread
+    /// across, the same way every other geometric threshold here is tuned.
+    static let albumMixQualitativeSimilarityDistance: Float = 0.1
 
     // MARK: The album-size scale (FR-6.3)
 

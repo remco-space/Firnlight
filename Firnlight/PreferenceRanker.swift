@@ -11,15 +11,16 @@ import os
 /// discards and in which direction, how prominent a person, an animal and the
 /// salient subject are, where that subject sits, how much foreground and
 /// text cover the frame, and how bright and how vivid it reads — plus one
-/// learned weight pₛ per `PlaceBuckets` scale (FR-5.14): which town-, region-
-/// and country-sized bucket the photo's location hashes into. Every b and p
-/// weight is learned from duels, never hard-coded: a low-resolution, tilted,
-/// dim, seasonally atypical, or unfamiliar-place photo is penalized — or
-/// favored — only as much as the user's choices imply (FR-5.2). The scalar
-/// set is open by design and expected to grow; `ScalarTrait` is where it
-/// lives and `traits(of:)` is where each is measured. The place terms are
-/// deliberately not folded into that same set — see `PlaceBuckets`'s doc
-/// comment for why a one-active-bucket-per-scale shape doesn't fit it.
+/// learned weight pₛ per named place at each of FR-5.14's three scales: the
+/// exact town, region and country `PlaceHierarchy` names the photo's
+/// location. Every b and p weight is learned from duels, never hard-coded: a
+/// low-resolution, tilted, dim, seasonally atypical, or unfamiliar-place
+/// photo is penalized — or favored — only as much as the user's choices
+/// imply (FR-5.2). The scalar set is open by design and expected to grow;
+/// `ScalarTrait` is where it lives and `traits(of:)` is where each is
+/// measured. The place terms are deliberately not folded into that same set
+/// — see `Weights.place`'s doc comment for why an open-ended set of exact
+/// names doesn't fit a fixed-size parallel array the way scalar traits do.
 ///
 /// Every trait is computed from the record alone — **never** from where it
 /// falls in the current candidate set. That gives them all the same
@@ -403,22 +404,16 @@ actor PreferenceRanker {
         }
     }
 
-    /// The one bucket per scale (FR-5.14) this photo's location hashes into
-    /// at each of `PlaceHierarchy`'s three scales — nil together when the
-    /// photo has no location, in which case it contributes nothing to the
-    /// score and trains nothing, the same FR-3.8 gap-not-penalty treatment
-    /// `ScalarTrait` gives every other trait a photo lacks. Kept separate
-    /// from `TraitValues` rather than folded into it: only one bucket per
-    /// scale is ever "on" for a given photo, so a dense `values`/`known`
-    /// array sized to every bucket (see `Thresholds.placeFineBucketCount`
-    /// and its neighbours) would carry dozens of always-zero, always-known
-    /// entries per photo for nothing — three plain indices say the same
-    /// thing and cost three `Int`s.
-    private struct PlaceBuckets: Sendable, Equatable {
-        let fine: Int
-        let medium: Int
-        let coarse: Int
-    }
+    // FR-5.14's three-scale place hierarchy is `PlaceHierarchy.ScaleKeys` —
+    // a real, published name per scale (a town, a region, a country), or nil
+    // at a scale with no answer — shared with `FeatureStore` rather than
+    // declared again here, so both files resolve a photo's place the exact
+    // same way (see `PlaceHierarchy.resolvedNames(for:networkNameCache:)`).
+    // `Weights.place` keys into this by exact name, never a hashed bucket —
+    // see that field's doc comment for why: two unrelated places must never
+    // collide into sharing a weight neither one's judgments produced
+    // (FR-5.14's "never reaches another except through the larger places
+    // both belong to").
 
     private struct Entry {
         /// PhotoKit's device-local identifier — what the UI and PhotoKit use.
@@ -432,9 +427,9 @@ actor PreferenceRanker {
         let isFavorite: Bool
         /// Every scalar trait this photo is weighed on — see `ScalarTrait`.
         let traits: TraitValues
-        /// FR-5.14's three-scale place hierarchy, or nil if this photo
-        /// records no location. See `PlaceBuckets`.
-        let place: PlaceBuckets?
+        /// FR-5.14's three-scale place hierarchy — each scale independently
+        /// nil where there's no answer for it. See `PlaceHierarchy.ScaleKeys`.
+        let place: PlaceHierarchy.ScaleKeys
         var score: Float = 0 // raw, pre-sigmoid
         /// FR-4.6's "Not Wallpaper Material" toggle's current state, for the
         /// duel cards' overlay — whether this photo's *latest* verdict
@@ -457,14 +452,14 @@ actor PreferenceRanker {
         /// different count and is rebuilt — the same way an
         /// `algorithmVersion` mismatch is.
         var scalars: [Float]
-        /// FR-5.14: one learned weight per bucket, per scale, laid out fine
-        /// then medium then coarse (see `PreferenceRanker.placeFineOffset`
-        /// and its neighbours) — sized to
-        /// `Thresholds.placeFineBucketCount` + `placeMediumBucketCount` +
-        /// `placeCoarseBucketCount`. A file written against different bucket
-        /// counts decodes to a different count and is rebuilt, the same way
-        /// a `scalars` count mismatch already is.
-        var place: [Float]
+        /// FR-5.14: one learned weight per place actually seen, keyed
+        /// `"<scale>:<name>"` (see `PreferenceRanker.placeWeightKey`) — never
+        /// a fixed-size table, so there is no bucket for two unrelated
+        /// places to collide into (see `PlaceNames`'s doc comment). Missing
+        /// keys read as 0 (an untrained place carries no preference, FR-5.2),
+        /// so this only ever grows as new places are encountered; nothing
+        /// here ever needs a count-mismatch check the way `scalars` does.
+        var place: [String: Float]
         var seededWithFavorites: Bool
         /// How many judgments these weights already contain — see
         /// `applicableJudgmentCount`. Optional so weights written before this
@@ -484,6 +479,19 @@ actor PreferenceRanker {
         /// them get re-seeded exactly the same way a version bump's full
         /// replay always does — deterministic, so this costs nothing new).
         var favoriteFingerprint: String?
+        /// Fingerprint of every `PlaceNameRecord` these weights were last
+        /// built against — see `placeNameFingerprint(of:)`. FR-5.13's
+        /// network lookup resolves place names *after* the photos it names
+        /// are already being ranked, which changes what `placeWeightKey`
+        /// computes for those photos' fine/coarse scales (the offline
+        /// gazetteer name is superseded by the resolved one) — exactly the
+        /// kind of understanding-change FR-5.2 says the app "re-examines...
+        /// without costing the user a single judgment": without this check, a
+        /// preference already learned under the old key would sit stranded
+        /// there forever once a resolution changes which key a photo's
+        /// scores are read from and trained through. Optional for the same
+        /// decode-safe reason `favoriteFingerprint` is.
+        var placeNameFingerprint: String?
     }
 
     private static let log = Logger(subsystem: "space.remco.Firnlight", category: "PreferenceRanker")
@@ -496,23 +504,9 @@ actor PreferenceRanker {
     private var weights = Weights(
         feature: [],
         scalars: PreferenceRanker.initialScalarWeights,
-        place: PreferenceRanker.initialPlaceWeights,
+        place: [:],
         seededWithFavorites: false
     )
-
-    /// One learned weight bucket per scale, per `PlaceHierarchy` scale —
-    /// every one at 0, so a library with no judgments at all carries no
-    /// place preference either, matching `initialScalarWeights`'s reasoning.
-    private static let initialPlaceWeights: [Float] =
-        Array(repeating: 0, count: placeBucketTotal)
-
-    /// Where each scale's buckets start within `Weights.place` — fine, then
-    /// medium, then coarse, back to back.
-    private static let placeFineOffset = 0
-    private static let placeMediumOffset = Thresholds.placeFineBucketCount
-    private static let placeCoarseOffset = Thresholds.placeFineBucketCount + Thresholds.placeMediumBucketCount
-    private static let placeBucketTotal = Thresholds.placeFineBucketCount
-        + Thresholds.placeMediumBucketCount + Thresholds.placeCoarseBucketCount
 
     /// Untrained coefficients: every trait at 0 except `aesthetics` at 1, so
     /// a library with no judgments at all is ordered by the app's own reading
@@ -522,6 +516,8 @@ actor PreferenceRanker {
         ScalarTrait.allCases.map { $0 == .aesthetics ? 1 : 0 }
     private var judgedPairs: Set<String> = []
     private var isPrepared = false
+    /// Set by `loadEntries()` on every call — see `Weights.placeNameFingerprint`.
+    private var currentPlaceNameFingerprint = ""
 
     /// Debounced preference-cache flush state (see `scheduleCacheFlush`).
     private var flushTask: Task<Void, Never>?
@@ -555,19 +551,20 @@ actor PreferenceRanker {
            stored.algorithmVersion == Thresholds.rankerAlgorithmVersion,
            stored.feature.count == dimension,
            stored.scalars.count == ScalarTrait.allCases.count,
-           stored.place.count == Self.placeBucketTotal,
            stored.judgmentCount == applicable,
-           stored.favoriteFingerprint == currentFavorites {
+           stored.favoriteFingerprint == currentFavorites,
+           stored.placeNameFingerprint == currentPlaceNameFingerprint {
             weights = stored
         } else {
             weights = Weights(
                 algorithmVersion: Thresholds.rankerAlgorithmVersion,
                 feature: Array(repeating: 0, count: dimension),
                 scalars: Self.initialScalarWeights,
-                place: Self.initialPlaceWeights,
+                place: [:],
                 seededWithFavorites: false,
                 judgmentCount: applicable,
-                favoriteFingerprint: currentFavorites
+                favoriteFingerprint: currentFavorites,
+                placeNameFingerprint: currentPlaceNameFingerprint
             )
             seedFromFavorites()
             // Choices and bad verdicts both train the ranker (FR-5.7), so a
@@ -633,8 +630,14 @@ actor PreferenceRanker {
         // weights were last built — or one a rescan un-favorites — needs the
         // same rebuild trigger `judgmentCount` already gives explicit choices,
         // or it would never be folded in (or un-folded) at all.
+        // Third trigger, same reasoning as the two above: `PlaceNameLookup`
+        // resolving a place's name changes what `placeWeightKey` computes
+        // for the photos there (see `Weights.placeNameFingerprint`'s doc
+        // comment), so a preference already learned under the superseded
+        // key must be replayed onto the current one rather than left behind.
         if weights.judgmentCount != applicableJudgmentCount(choices: choices, badVerdicts: badVerdicts)
-            || weights.favoriteFingerprint != Self.favoriteFingerprint(of: entries) {
+            || weights.favoriteFingerprint != Self.favoriteFingerprint(of: entries)
+            || weights.placeNameFingerprint != currentPlaceNameFingerprint {
             isPrepared = false
             try prepare()
             return
@@ -746,11 +749,15 @@ actor PreferenceRanker {
             return Set(latest.compactMap { key, isGood in isGood ? nil : key })
         }()
         // Fetched once per `loadEntries()`, not per record — same
-        // once-per-query discipline as `badVerdictKeys` above. Keyed by fine
-        // cell, which is all `placeBuckets(of:nameCache:)` ever looks up.
-        let nameCache: [String: (city: String?, region: String?)] = Dictionary(
-            uniqueKeysWithValues: ((try? modelContext.fetch(FetchDescriptor<PlaceNameRecord>())) ?? [])
-                .map { ($0.fineCellKey, (city: $0.cityName, region: $0.regionName)) }
+        // once-per-query discipline as `badVerdictKeys` above.
+        // `currentPlaceNameFingerprint` is what `prepare()`/`reload()` diff
+        // against `Weights.placeNameFingerprint` to notice a resolution
+        // that happened since the weights were last built (see that field's
+        // doc comment).
+        let placeNameRecords = (try? modelContext.fetch(FetchDescriptor<PlaceNameRecord>())) ?? []
+        currentPlaceNameFingerprint = Self.placeNameFingerprint(of: placeNameRecords)
+        let networkNameCache: [String: (city: String?, region: String?)] = Dictionary(
+            uniqueKeysWithValues: placeNameRecords.map { ($0.cacheKey, (city: $0.cityName, region: $0.regionName)) }
         )
 
         entries = records.compactMap { record in
@@ -761,7 +768,7 @@ actor PreferenceRanker {
                 vector: data.floatVector,
                 isFavorite: record.isFavorite,
                 traits: Self.traits(of: record, minWidth: minWidth, resolutionRange: resolutionRange),
-                place: Self.placeBuckets(of: record, nameCache: nameCache),
+                place: PlaceHierarchy.resolvedNames(for: record, networkNameCache: networkNameCache),
                 isNotWallpaperMaterial: badVerdictKeys.contains(record.judgmentKey)
             )
         }
@@ -1162,6 +1169,19 @@ actor PreferenceRanker {
 
     // MARK: Model
 
+    /// Convenience for a caller with no reason to know `minWidth`/
+    /// `resolutionRange` are themselves derived from fixed `Thresholds`
+    /// constants — `FeatureStore`'s FR-6.1 mix reuses the ranker's own
+    /// trait vector as one of the axes its diversity signature is judged
+    /// on ("anything else the app weighs", not only place/season/visual —
+    /// see `FeatureStore.MixSignature`), and has no independent opinion
+    /// about resolution scaling to supply.
+    static func traits(of record: PhotoRecord) -> TraitValues {
+        let minWidth = Float(Thresholds.minimumCandidatePixelWidth)
+        let resolutionRange = log2(Thresholds.resolutionFullScoreWidth / minWidth)
+        return traits(of: record, minWidth: minWidth, resolutionRange: resolutionRange)
+    }
+
     /// Every `ScalarTrait` read off one record. The single place a trait is
     /// derived, so adding one to `ScalarTrait` means adding one line here.
     ///
@@ -1171,7 +1191,7 @@ actor PreferenceRanker {
     /// `TraitValues.set` marks it unknown rather than guessing, which is what
     /// keeps FR-3.8's "ranked on what is known" true through a trait's
     /// introduction.
-    private static func traits(
+    static func traits(
         of record: PhotoRecord,
         minWidth: Float,
         resolutionRange: Float
@@ -1277,55 +1297,39 @@ actor PreferenceRanker {
         return traits
     }
 
-    /// FR-5.14: the one bucket per scale this record's location hashes into,
-    /// or nil if it has none — the same optional-together shape `traits(of:)`
-    /// already gives every location-derived trait (FR-3.8).
-    ///
-    /// `nameCache` is `loadEntries()`'s one fetch of every `PlaceNameRecord`,
-    /// keyed by fine cell — passed in rather than fetched here, the same
-    /// once-per-query discipline every other per-record helper in this file
-    /// follows. A resolved city/region name *replaces* the offline grid key
-    /// it was standing in for at that scale (FR-5.13's "what cannot be
-    /// looked up yet waits… until it is complete the app ranks on what it
-    /// already knows" — the grid key is what it already knows); the medium
-    /// scale has no such upgrade, because nothing resolves it (see
-    /// `PlaceHierarchy`).
-    private static func placeBuckets(
-        of record: PhotoRecord,
-        nameCache: [String: (city: String?, region: String?)]
-    ) -> PlaceBuckets? {
-        guard let latitude = record.latitude, let longitude = record.longitude else { return nil }
-        let keys = PlaceHierarchy.scaleKeys(latitude: latitude, longitude: longitude)
-        let resolved = nameCache[keys.fine]
-        let fineKey = resolved?.city ?? keys.fine
-        let coarseKey = resolved?.region ?? keys.coarse
-        return PlaceBuckets(
-            fine: placeBucketIndex(fineKey, count: Thresholds.placeFineBucketCount),
-            medium: placeBucketIndex(keys.medium, count: Thresholds.placeMediumBucketCount),
-            coarse: placeBucketIndex(coarseKey, count: Thresholds.placeCoarseBucketCount)
-        )
+    /// The exact `Weights.place` dictionary key for one scale of one named
+    /// place — `"<scale>:<name>"`, so "fine:Georgia" (a town) and
+    /// "coarse:Georgia" (a country) never collide, and two different real
+    /// places never share a key either (contrast the hashed-bucket design
+    /// this replaced, whose whole failure mode was exactly that kind of
+    /// collision). Callers already guard out the case of no name for a
+    /// scale (FR-3.8) before ever needing a key for it.
+    private static func placeWeightKey(scale: String, name: String) -> String {
+        "\(scale):\(name)"
     }
 
-    /// Hashes a place key into one of `count` learned-weight buckets.
-    ///
-    /// Fixed FNV-1a, not `Hasher` — same reasoning `favoriteFingerprint`
-    /// documents: `Hasher`'s per-process random seed would put the same
-    /// place in a different bucket on every launch, and two devices
-    /// training the one shared weights file must agree on which bucket a
-    /// place is (FR-5.2's "same library and same judgments always produce
-    /// the same ranking"). Collisions between unrelated places are an
-    /// accepted, bounded cost of a small fixed bucket count (see
-    /// `Thresholds.placeFineBucketCount`), not a correctness bug — a
-    /// collision just means two places share one learned weight instead of
-    /// each having their own, which is no worse than never having measured
-    /// the distinction at all.
-    private static func placeBucketIndex(_ key: String, count: Int) -> Int {
+    /// Deterministic fingerprint of every `PlaceNameRecord` currently on
+    /// disk — see `Weights.placeNameFingerprint`'s doc comment for what this
+    /// triggers. Sorted by cache key, and fixed FNV-1a rather than `Hasher`,
+    /// for the exact reason `favoriteFingerprint` already documents: two
+    /// devices (or two launches) must agree on whether the resolved-name set
+    /// has changed, which a per-process-randomized hash cannot promise.
+    private static func placeNameFingerprint(of records: [PlaceNameRecord]) -> String {
         var hash: UInt64 = 0xcbf29ce484222325 // FNV-1a 64-bit offset basis
-        for byte in key.utf8 {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x100000001b3 // FNV prime
+        func mix(_ string: String) {
+            for byte in string.utf8 {
+                hash ^= UInt64(byte)
+                hash = hash &* 0x100000001b3 // FNV prime
+            }
+            hash ^= 0xA
+            hash = hash &* 0x100000001b3
         }
-        return Int(hash % UInt64(count))
+        for record in records.sorted(by: { $0.cacheKey < $1.cacheKey }) {
+            mix(record.cacheKey)
+            mix(record.cityName ?? "")
+            mix(record.regionName ?? "")
+        }
+        return String(hash, radix: 16)
     }
 
     /// Looks the pair up by judgment key, so a choice made on another device
@@ -1348,7 +1352,17 @@ actor PreferenceRanker {
         let decay = 1 - Thresholds.rankerLearningRate * Thresholds.rankerWeightDecay
         weights.feature = vDSP.multiply(decay, weights.feature)
         weights.scalars = vDSP.multiply(decay, weights.scalars)
-        weights.place = vDSP.multiply(decay, weights.place)
+        // No fixed-size vector to hand vDSP: `Weights.place` only ever holds
+        // entries for places actually seen, so every one of them (not a
+        // fixed table) gets the same decay applied on every SGD step —
+        // which is what lets a barely-reinforced place's own weight fade
+        // toward zero between reinforcements while a heavily-judged
+        // ancestor stays up (FR-5.11's "leans on the larger places around
+        // it"), the same mechanism the fixed-table design used, just over a
+        // table that only grows as large as the places actually judged.
+        for placeKey in weights.place.keys {
+            weights.place[placeKey]! *= decay
+        }
 
         let difference = vDSP.subtract(winner.vector, loser.vector)
         weights.feature = vDSP.add(weights.feature, vDSP.multiply(gradient, difference))
@@ -1364,21 +1378,26 @@ actor PreferenceRanker {
                 * (bothKnown ? winner.traits.values[index] - loser.traits.values[index] : 0)
         }
 
-        // FR-5.14: each scale's winning bucket gains exactly what its
-        // losing bucket loses. When winner and loser share a bucket at some
-        // scale (the ordinary case for two photos from the same place), the
-        // two cancel to a net-zero change for that scale — correctly: a
-        // duel between two photos from the same place is evidence about
-        // whatever else distinguishes them, never about the place itself.
-        // Skipped whole when either photo has no location, the same
-        // either-side-unmeasured guard the loop above applies per trait.
-        if let wp = winner.place, let lp = loser.place {
-            weights.place[Self.placeFineOffset + wp.fine] += gradient
-            weights.place[Self.placeFineOffset + lp.fine] -= gradient
-            weights.place[Self.placeMediumOffset + wp.medium] += gradient
-            weights.place[Self.placeMediumOffset + lp.medium] -= gradient
-            weights.place[Self.placeCoarseOffset + wp.coarse] += gradient
-            weights.place[Self.placeCoarseOffset + lp.coarse] -= gradient
+        // FR-5.14: each scale's winning place gains exactly what its losing
+        // place loses. When winner and loser are the same place at some
+        // scale (the ordinary case for two photos from the same place —
+        // now an exact string match, never a hash collision), the two
+        // cancel to a net-zero change for that scale — correctly: a duel
+        // between two photos from the same place is evidence about whatever
+        // else distinguishes them, never about the place itself. A scale
+        // where either photo has no name trains nothing at that scale only
+        // — the same either-side-unmeasured guard the trait loop above
+        // applies, per scale rather than for the whole photo, so a photo
+        // missing just its fine-scale name still trains normally at medium
+        // and coarse.
+        for (scale, winnerName, loserName) in [
+            ("fine", winner.place.fine, loser.place.fine),
+            ("medium", winner.place.medium, loser.place.medium),
+            ("coarse", winner.place.coarse, loser.place.coarse),
+        ] {
+            guard let winnerName, let loserName else { continue }
+            weights.place[Self.placeWeightKey(scale: scale, name: winnerName), default: 0] += gradient
+            weights.place[Self.placeWeightKey(scale: scale, name: loserName), default: 0] -= gradient
         }
     }
 
@@ -1453,13 +1472,18 @@ actor PreferenceRanker {
     private func rawScore(_ entry: Entry) -> Float {
         var score = vDSP.dot(weights.feature, entry.vector)
             + vDSP.dot(weights.scalars, entry.traits.values)
-        // FR-5.14: the one learned weight active per place scale, or nothing
-        // at all when this photo has no location (FR-3.8's gap, not a
-        // penalty — `weights.place` is never consulted for it).
-        if let place = entry.place {
-            score += weights.place[Self.placeFineOffset + place.fine]
-                + weights.place[Self.placeMediumOffset + place.medium]
-                + weights.place[Self.placeCoarseOffset + place.coarse]
+        // FR-5.14: whatever this photo's three place scales are actually
+        // named contribute their own learned weight (0 for a place never
+        // yet judged, FR-5.2); a scale with no name at all contributes
+        // nothing rather than a penalty (FR-3.8).
+        if let fine = entry.place.fine {
+            score += weights.place[Self.placeWeightKey(scale: "fine", name: fine), default: 0]
+        }
+        if let medium = entry.place.medium {
+            score += weights.place[Self.placeWeightKey(scale: "medium", name: medium), default: 0]
+        }
+        if let coarse = entry.place.coarse {
+            score += weights.place[Self.placeWeightKey(scale: "coarse", name: coarse), default: 0]
         }
         return score
     }

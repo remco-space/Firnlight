@@ -1,13 +1,19 @@
 # Third-party notices
 
-This repository does not vendor third-party skill content (FR-10.5): every
+This repository does not vendor third-party *skill* content (FR-10.5): every
 skill under `.claude/skills/` that isn't first-party is a symlink into a git
 submodule, or generated locally from the developer's own Xcode install —
 see [`.claude/skills/README.md`](.claude/skills/README.md) for the mechanism
 and provenance table. Nothing there is redistributed by this repository's
-own git history. This file exists because MIT still requires its copyright
-notice to travel with anyone who ends up with a copy of the code — including
-a submodule checkout most contributors won't open by hand.
+own git history. Most of this file exists because MIT still requires its
+copyright notice to travel with anyone who ends up with a copy of the code —
+including a submodule checkout most contributors won't open by hand.
+
+One section below is different in kind: FR-10.5 makes an explicit exception
+for "reference data about the world" the app itself needs to work, which it
+may carry inside itself, crediting it as its authors ask. `Firnlight/PlaceData/`
+is exactly that — committed to this repository and shipped inside the app,
+unlike every skill above.
 
 ## `ui-review-tahoe`, `liquid-glass`
 
@@ -58,6 +64,29 @@ PolyForm Perimeter License 1.0.0
 The full license text is in that submodule's own `LICENSE` file. It permits
 any use except building a competing product; Firnlight does not compete with
 a Claude Code skills collection, so this applies without restriction here.
+
+## `Firnlight/PlaceData/` (map data)
+
+Source: [Natural Earth](https://www.naturalearthdata.com), the `ne_10m_admin_0_countries`,
+`ne_10m_admin_1_states_provinces` and `ne_10m_populated_places` datasets,
+trimmed and simplified by `scripts/fetch-place-data.sh` /
+`scripts/trim-place-data.py` — see those scripts for exactly what was kept
+and why. Committed to this repository under FR-10.5's exception for world
+reference data ("the app may carry it inside itself... wherever its license
+allows"), not fetched at build time the way the skills above are: the
+[terms of use](https://www.naturalearthdata.com/about/terms-of-use/) place
+it in the public domain outright —
+
+> All versions of Natural Earth raster + vector map data found on this
+> website are in the public domain. You may use the maps in any manner...
+> No permission is needed to use Natural Earth. Crediting the authors is
+> unnecessary.
+
+— which the same terms page immediately follows with the one line they
+*do* ask for if a user credits them anyway ("Made with Natural Earth."),
+which is what `AppIdentity.mapDataCredit` shows in the app itself
+(About.swift), per FR-10.5's "credits it as its authors ask, alongside the
+facts FR-8.8 gives about the app."
 
 ## `swiftui-specialist`, `swiftui-whats-new-27`
 

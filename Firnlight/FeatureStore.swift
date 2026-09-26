@@ -179,15 +179,24 @@ actor FeatureStore {
         return Set(latest.compactMap { key, isGood in isGood ? nil : key })
     }
 
-    /// FR-6.1's diversity signature for one candidate: the two place scales
-    /// `selectDiverseMix` counts repetition over, and which quarter of the
-    /// calendar year it was taken in. Nil fields are FR-3.8 gaps (no
-    /// location, no date) and simply never repeat anything — a candidate
-    /// missing a signal can't be judged similar-by-that-signal to anything.
+    /// FR-6.1's diversity signature for one candidate: all three of
+    /// FR-5.14's place scales `selectDiverseMix` counts repetition over
+    /// (not only fine and medium — a country is one of the places FR-5.14
+    /// itself names, so leaving it uncounted let an album fill from one
+    /// country as long as the towns inside it differed), which quarter of
+    /// the calendar year it was taken in, and a combined
+    /// "everything else" vector — the feature print plus every
+    /// `ScalarTrait` — for `repetitionCount`'s qualitative-similarity check.
+    /// Nil fields are FR-3.8 gaps (no location, no date) and simply never
+    /// repeat anything — a candidate missing a signal can't be judged
+    /// similar-by-that-signal to anything.
     private struct MixSignature: Sendable {
         let placeFine: String?
         let placeMedium: String?
+        let placeCoarse: String?
         let seasonQuarter: Int?
+        let featureVector: [Float]
+        let scalarVector: [Float]
     }
 
     private func rankedCore(limit: Int) throws -> (kept: [Candidate], vectors: [[Float]], signatures: [MixSignature], accepted: Int, suppressed: Int) {
@@ -221,14 +230,14 @@ actor FeatureStore {
         }
         let records = fetched.sorted { rankKey($0) > rankKey($1) }
 
-        // FR-6.1's fine-scale signature prefers a resolved city name over
-        // the offline grid key it stands in for, exactly like
-        // `PreferenceRanker.placeBuckets(of:nameCache:)` — so "the same
-        // place" means the same thing to the mix selection below as it does
-        // to the ranking itself. Fetched once, not per record.
-        let nameCache: [String: String] = Dictionary(
+        // Resolved through the exact same shared function `PreferenceRanker`
+        // uses (`PlaceHierarchy.resolvedNames`), so "the same place" means
+        // the same thing to the mix selection below as it does to the
+        // ranking itself — the two computing this independently is exactly
+        // what once let them disagree. Fetched once, not per record.
+        let networkNameCache: [String: (city: String?, region: String?)] = Dictionary(
             uniqueKeysWithValues: try modelContext.fetch(FetchDescriptor<PlaceNameRecord>())
-                .compactMap { record in record.cityName.map { (record.fineCellKey, $0) } }
+                .map { ($0.cacheKey, (city: $0.cityName, region: $0.regionName)) }
         )
 
         let thresholdSquared = Thresholds.nearDuplicateDistance * Thresholds.nearDuplicateDistance
@@ -268,7 +277,7 @@ actor FeatureStore {
             } else {
                 kept.append(candidate(for: record, badVerdictKeys: badVerdictKeys))
                 keptVectors.append(vector)
-                keptSignatures.append(Self.mixSignature(of: record, nameCache: nameCache))
+                keptSignatures.append(Self.mixSignature(of: record, vector: vector, networkNameCache: networkNameCache))
             }
         }
 
@@ -276,14 +285,12 @@ actor FeatureStore {
     }
 
     /// FR-6.1's diversity signature for one record — see `MixSignature`.
-    private static func mixSignature(of record: PhotoRecord, nameCache: [String: String]) -> MixSignature {
-        var placeFine: String?
-        var placeMedium: String?
-        if let latitude = record.latitude, let longitude = record.longitude {
-            let keys = PlaceHierarchy.scaleKeys(latitude: latitude, longitude: longitude)
-            placeFine = nameCache[keys.fine] ?? keys.fine
-            placeMedium = keys.medium
-        }
+    private static func mixSignature(
+        of record: PhotoRecord,
+        vector: [Float],
+        networkNameCache: [String: (city: String?, region: String?)]
+    ) -> MixSignature {
+        let names = PlaceHierarchy.resolvedNames(for: record, networkNameCache: networkNameCache)
         // Same quarter-of-the-year granularity as the ranker's own
         // `PreferenceRanker.seasonFraction`, coarsened from a continuous
         // fraction to four buckets — FR-6.1 asks whether the album repeats a
@@ -291,7 +298,14 @@ actor FeatureStore {
         let seasonQuarter = record.creationDate.map {
             min(3, Int(PreferenceRanker.seasonFraction(of: $0) * 4))
         }
-        return MixSignature(placeFine: placeFine, placeMedium: placeMedium, seasonQuarter: seasonQuarter)
+        return MixSignature(
+            placeFine: names.fine,
+            placeMedium: names.medium,
+            placeCoarse: names.coarse,
+            seasonQuarter: seasonQuarter,
+            featureVector: vector,
+            scalarVector: PreferenceRanker.traits(of: record).values
+        )
     }
 
     /// FR-6.1: picks exactly `limit` candidates from `candidates` (already
@@ -331,7 +345,7 @@ actor FeatureStore {
 
         var remaining = Array(candidates.indices)
         var selected: [Int] = []
-        var selectedSignaturesVectors: [(signature: MixSignature, vector: [Float])] = []
+        var selectedSignatures: [MixSignature] = []
         selected.reserveCapacity(limit)
 
         while selected.count < limit, !remaining.isEmpty {
@@ -347,13 +361,13 @@ actor FeatureStore {
                     bandEnd += 1
                 }
                 winnerPosition = (0..<bandEnd).min {
-                    Self.repetitionCount(of: signatures[remaining[$0]], vector: vectors[remaining[$0]], against: selectedSignaturesVectors)
-                        < Self.repetitionCount(of: signatures[remaining[$1]], vector: vectors[remaining[$1]], against: selectedSignaturesVectors)
+                    Self.repetitionCount(of: signatures[remaining[$0]], against: selectedSignatures)
+                        < Self.repetitionCount(of: signatures[remaining[$1]], against: selectedSignatures)
                 }!
             }
             let index = remaining.remove(at: winnerPosition)
             selected.append(index)
-            selectedSignaturesVectors.append((signatures[index], vectors[index]))
+            selectedSignatures.append(signatures[index])
         }
 
         return (selected.map { candidates[$0] }, selected.map { vectors[$0] })
@@ -375,26 +389,44 @@ actor FeatureStore {
     }
 
     /// How many of `selected`'s signatures repeat one of `signature`'s axes
-    /// — the same place at either scale it names, the same season quarter,
-    /// or a visually similar-enough already-chosen photo (FR-6.1's "place,
-    /// scene, mood, season"). Lower is more distinct.
+    /// — the same place at any of FR-5.14's three scales, the same season
+    /// quarter, or a qualitatively similar-enough already-chosen photo
+    /// (FR-6.1's "place, scene, mood, season, or anything else the app
+    /// weighs"). Lower is more distinct.
     private static func repetitionCount(
         of signature: MixSignature,
-        vector: [Float],
-        against selected: [(signature: MixSignature, vector: [Float])]
+        against selected: [MixSignature]
     ) -> Int {
-        let thresholdSquared = Thresholds.albumMixVisualSimilarityDistance * Thresholds.albumMixVisualSimilarityDistance
         var count = 0
         for other in selected {
-            if let fine = signature.placeFine, fine == other.signature.placeFine { count += 1 }
-            if let medium = signature.placeMedium, medium == other.signature.placeMedium { count += 1 }
-            if let quarter = signature.seasonQuarter, quarter == other.signature.seasonQuarter { count += 1 }
-            if vector.count == other.vector.count,
-               vDSP.distanceSquared(vector, other.vector) < thresholdSquared {
+            if let fine = signature.placeFine, fine == other.placeFine { count += 1 }
+            if let medium = signature.placeMedium, medium == other.placeMedium { count += 1 }
+            if let coarse = signature.placeCoarse, coarse == other.placeCoarse { count += 1 }
+            if let quarter = signature.seasonQuarter, quarter == other.seasonQuarter { count += 1 }
+            if qualitativeDistance(signature, other) < Thresholds.albumMixQualitativeSimilarityDistance {
                 count += 1
             }
         }
         return count
+    }
+
+    /// Combined per-dimension mean-squared distance over the feature print
+    /// and every `ScalarTrait`, each block normalized by its own dimension
+    /// count first so the feature print's much larger dimensionality can't
+    /// drown out the comparatively few scalar traits in a plain concatenated
+    /// distance — see `Thresholds.albumMixQualitativeSimilarityDistance`.
+    /// This is what makes the mix's "anything else the app weighs" (FR-6.1)
+    /// mean the ranker's whole quantified representation of a photo, not a
+    /// hand-picked subset of it.
+    private static func qualitativeDistance(_ a: MixSignature, _ b: MixSignature) -> Float {
+        var distance: Float = 0
+        if a.featureVector.count == b.featureVector.count, !a.featureVector.isEmpty {
+            distance += vDSP.distanceSquared(a.featureVector, b.featureVector) / Float(a.featureVector.count)
+        }
+        if a.scalarVector.count == b.scalarVector.count, !a.scalarVector.isEmpty {
+            distance += vDSP.distanceSquared(a.scalarVector, b.scalarVector) / Float(a.scalarVector.count)
+        }
+        return distance
     }
 
     /// Greedy max-min ordering: start from the top-ranked photo, then always

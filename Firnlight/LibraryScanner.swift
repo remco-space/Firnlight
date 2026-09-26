@@ -120,15 +120,26 @@ final class LibraryScanner {
                         // Photos lets a location be assigned or corrected after
                         // import, so this is re-synced the same way favorite is
                         // rather than captured once at insert (FR-5.2).
+                        //
+                        // `!record.gazetteerResolved` is also a trigger, not
+                        // just a location change: a record whose location
+                        // never changes still needs its FR-5.14 place names
+                        // backfilling once, on whichever scan first ships this
+                        // field — the location-changed branch alone would
+                        // leave every already-scanned photo's gazetteer fields
+                        // unset forever, since nothing about its location ever
+                        // differs from what's already stored.
                         let heading = (asset.location?.course).flatMap { $0 >= 0 ? $0 : nil }
                         if record.latitude != asset.location?.coordinate.latitude
                             || record.longitude != asset.location?.coordinate.longitude
                             || record.altitude != asset.location?.altitude
-                            || record.cameraHeading != heading {
+                            || record.cameraHeading != heading
+                            || !record.gazetteerResolved {
                             record.latitude = asset.location?.coordinate.latitude
                             record.longitude = asset.location?.coordinate.longitude
                             record.altitude = asset.location?.altitude
                             record.cameraHeading = heading
+                            Self.updateGazetteer(for: record)
                             unsavedChanges += 1
                             contentChanged = true // location feeds ranking (PreferenceRanker)
                         }
@@ -167,7 +178,7 @@ final class LibraryScanner {
                             contentChanged = true
                         }
                     } else {
-                        context.insert(PhotoRecord(
+                        let newRecord = PhotoRecord(
                             localIdentifier: asset.localIdentifier,
                             pixelWidth: asset.pixelWidth,
                             pixelHeight: asset.pixelHeight,
@@ -175,7 +186,9 @@ final class LibraryScanner {
                             location: asset.location,
                             isFavorite: asset.isFavorite,
                             mediaSubtypes: Int(bitPattern: asset.mediaSubtypes.rawValue)
-                        ))
+                        )
+                        Self.updateGazetteer(for: newRecord)
+                        context.insert(newRecord)
                         newlyAdded += 1
                         unsavedChanges += 1
                         contentChanged = true
@@ -415,6 +428,27 @@ final class LibraryScanner {
         try context.save()
         log.info("Applied \(changed) ignore judgments from the shared store")
         return changed
+    }
+
+    /// FR-5.14's offline floor, cached on the record so nothing downstream
+    /// ever recomputes a gazetteer lookup on the ranker's hot path (see
+    /// `PhotoRecord.gazetteerTown`'s doc comment). Called only from the one
+    /// branch above that already decided the record's location needs
+    /// (re)syncing, so this runs once per changed or newly-scanned location,
+    /// never per ranker reload.
+    private static func updateGazetteer(for record: PhotoRecord) {
+        guard let latitude = record.latitude, let longitude = record.longitude else {
+            record.gazetteerTown = nil
+            record.gazetteerRegion = nil
+            record.gazetteerCountry = nil
+            record.gazetteerResolved = true
+            return
+        }
+        let keys = PlaceHierarchy.offlineKeys(latitude: latitude, longitude: longitude)
+        record.gazetteerTown = keys.fine
+        record.gazetteerRegion = keys.medium
+        record.gazetteerCountry = keys.coarse
+        record.gazetteerResolved = true
     }
 
     /// Metadata-only wallpaper pre-filter; never touches pixel data.
