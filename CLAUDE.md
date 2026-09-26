@@ -8,7 +8,8 @@ Firnlight is a native macOS app (with an iPhone/iPad companion) that curates
 desktop wallpapers from the user's own Photos library: it finds high-resolution
 nature photos without people, learns preference from pairwise duels, and
 maintains a Photos album ("Firnlight") that System Settings can rotate as
-wallpaper. Everything runs on-device. Target: **macOS/iOS 27+**.
+wallpaper. Everything runs on-device, apart from looking up place names with
+Apple (FR-1.5). Target: **macOS/iOS 27+**.
 
 ## How this project is documented
 
