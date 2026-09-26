@@ -10,10 +10,12 @@ copyright notice to travel with anyone who ends up with a copy of the code —
 including a submodule checkout most contributors won't open by hand.
 
 One section below is different in kind: FR-10.5 makes an explicit exception
-for "reference data about the world" the app itself needs to work, which it
-may carry inside itself, crediting it as its authors ask. `Firnlight/PlaceData/`
-is exactly that — committed to this repository and shipped inside the app,
-unlike every skill above.
+for "reference data about the world" the app itself needs to work, letting
+the *app* carry it while "the repository still only carries the means to
+obtain it" — exactly the shape the skills above already take.
+`Firnlight/PlaceData/` follows that same shape: gitignored, obtained by
+`scripts/fetch-place-data.sh`, and credited below and in the app itself
+(About.swift) per "credits it as its authors ask."
 
 ## `ui-review-tahoe`, `liquid-glass`
 
@@ -67,15 +69,16 @@ a Claude Code skills collection, so this applies without restriction here.
 
 ## `Firnlight/PlaceData/` (map data)
 
-Source: [Natural Earth](https://www.naturalearthdata.com), the `ne_10m_admin_0_countries`,
+Source: [Natural Earth](https://www.naturalearthdata.com), the
+`ne_10m_admin_0_countries`, `ne_10m_geography_regions_polys`,
 `ne_10m_admin_1_states_provinces` and `ne_10m_populated_places` datasets,
-trimmed and simplified by `scripts/fetch-place-data.sh` /
+fetched, trimmed and simplified by `scripts/fetch-place-data.sh` /
 `scripts/trim-place-data.py` — see those scripts for exactly what was kept
-and why. Committed to this repository under FR-10.5's exception for world
-reference data ("the app may carry it inside itself... wherever its license
-allows"), not fetched at build time the way the skills above are: the
+and why. Obtained under FR-10.5's exception for world reference data, the
+same "means to obtain it" shape the skills above already use — never
+committed to this repository (`Firnlight/PlaceData/` is gitignored); the
 [terms of use](https://www.naturalearthdata.com/about/terms-of-use/) place
-it in the public domain outright —
+it in the public domain outright regardless —
 
 > All versions of Natural Earth raster + vector map data found on this
 > website are in the public domain. You may use the maps in any manner...

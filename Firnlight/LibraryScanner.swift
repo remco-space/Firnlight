@@ -142,6 +142,21 @@ final class LibraryScanner {
                             Self.updateGazetteer(for: record)
                             unsavedChanges += 1
                             contentChanged = true // location feeds ranking (PreferenceRanker)
+                            // A point-in-polygon/nearest-point search over
+                            // the whole gazetteer just ran on this actor
+                            // (the main actor — this scanner is
+                            // `@MainActor`). Ordinarily negligible, but a
+                            // one-time backfill touches every already-scanned
+                            // geotagged photo in one pass, and unlike the
+                            // progress-stride yield below (every
+                            // `scanProgressStride` assets), that pass must
+                            // not run hundreds of these back-to-back with no
+                            // chance for the main actor to service anything
+                            // else (FR-8.2) — not profiled against a real
+                            // library, so this yields defensively after
+                            // every one rather than assuming the cost is
+                            // small enough not to matter.
+                            await Task.yield()
                         }
                         // Same re-sync for the subtype bits, and the path that
                         // backfills them onto records that predate the field.
@@ -192,6 +207,9 @@ final class LibraryScanner {
                         newlyAdded += 1
                         unsavedChanges += 1
                         contentChanged = true
+                        // Same defensive yield as the re-sync branch above,
+                        // for the same reason (FR-8.2).
+                        await Task.yield()
                     }
                 } else if let record {
                     // Edited out of candidacy (e.g. cropped to portrait or below

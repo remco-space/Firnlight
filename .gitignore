@@ -59,6 +59,12 @@ __pycache__/
 .claude/skills/swiftui-whats-new-27/
 .claude/skills/building-document-based-swiftui-applications/
 
+# ---- World reference data (FR-10.5's exception; obtained, not vendored) ----
+# scripts/fetch-place-data.sh builds these from Natural Earth's public-domain
+# map data; the repository carries only the means to obtain them, never the
+# data itself. See that script's header and PlaceGazetteer.swift.
+Firnlight/PlaceData/
+
 # ---- Editor / misc ----
 *.swp
 *~

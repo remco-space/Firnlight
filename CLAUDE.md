@@ -51,7 +51,7 @@ whatever their license. Two mechanisms obtain them fresh:
   ([dpearson2699/swift-ios-skills](https://github.com/dpearson2699/swift-ios-skills)):
   `photokit`, `vision-framework`, `swiftdata`, `swiftui-patterns`,
   `swiftui-uikit-interop`, `background-processing`, `ios-accessibility`,
-  `ios-localization`, `swift-concurrency`, `app-store-review`; and into
+  `ios-localization`, `swift-concurrency`, `app-store-review`, `mapkit`; and into
   `.claude/skills-src/claude-code-apple-skills`
   ([rshankras/claude-code-apple-skills](https://github.com/rshankras/claude-code-apple-skills)):
   `liquid-glass`, `ui-review-tahoe`. A `SessionStart` hook
@@ -207,6 +207,15 @@ Xcode project (no SwiftPM manifest, no test target):
 xcodebuild -project Firnlight.xcodeproj -scheme Firnlight -configuration Debug build
 open Firnlight.xcodeproj   # or just this
 ```
+
+**First build after cloning**: run `scripts/fetch-place-data.sh` once. It
+builds `Firnlight/PlaceData/*.json` — the offline place gazetteer FR-5.14
+needs (FR-1.5, FR-5.13) — from Natural Earth's public-domain map data;
+`Firnlight/PlaceData/` is gitignored, so the repository carries only that
+script (FR-10.5's "the repository still only carries the means to obtain
+it"), never the data. Skipping this doesn't break the build — `PlaceGazetteer`
+degrades to "no gazetteer answer at any scale" (see its doc comment) — but a
+fresh clone isn't built and developed "the same way" (FR-10.5) without it.
 
 Requires the full **Xcode 27+** toolchain, not the Command Line Tools. If
 `xcodebuild` errors with *"requires Xcode, but active developer directory … is

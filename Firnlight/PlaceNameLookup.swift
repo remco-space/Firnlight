@@ -29,7 +29,20 @@ import os
 ///
 /// Plain actor with its own `ModelContext`, matching every other store-owning
 /// actor in this app (`FeatureStore`, `PreferenceRanker`, `AnalysisQueue`) —
-/// same `DefaultSerialModelExecutor` reasoning as their doc comments give.
+/// same `DefaultSerialModelExecutor` reasoning as their doc comments give,
+/// for the SwiftData work in `nextPendingSpot`/`save`. The network call in
+/// between is a partial exception: `MKReverseGeocodingRequest`'s
+/// `getMapItemsWithCompletionHandler:` is `NS_SWIFT_UI_ACTOR`-annotated in
+/// the macOS/iOS 27 SDK (`#define NS_SWIFT_UI_ACTOR NS_SWIFT_MAIN_ACTOR`),
+/// so the `mapItems` async property Swift synthesizes from it is
+/// main-actor-isolated — `try await request.mapItems` in `resolveNext()`
+/// hops to the main actor to await the network response and back to this
+/// actor afterward. That hop is asynchronous, never blocking (FR-8.2's
+/// concern is a frozen main thread, not a main-actor task that's merely
+/// awaiting something), so it doesn't change anything this type promises;
+/// it only means "this actor's own SwiftData work runs off the main actor"
+/// is true of every method here except the one line that awaits the
+/// network response.
 actor PlaceNameLookup {
     private let modelContainer: ModelContainer
     private lazy var modelContext = ModelContext(modelContainer)

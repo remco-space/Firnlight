@@ -37,21 +37,33 @@ nonisolated enum PlaceHierarchy {
     static func offlineKeys(latitude: Double, longitude: Double) -> ScaleKeys {
         ScaleKeys(
             fine: PlaceGazetteer.nearestPlace(latitude: latitude, longitude: longitude),
-            medium: PlaceGazetteer.nearestRegion(latitude: latitude, longitude: longitude),
+            medium: PlaceGazetteer.resolvedRegion(latitude: latitude, longitude: longitude),
             coarse: PlaceGazetteer.country(latitude: latitude, longitude: longitude)
         )
     }
 
     /// The keys `PreferenceRanker` and `FeatureStore` actually rank and mix
     /// by, for one record: the cached offline floor
-    /// (`PhotoRecord.gazetteerTown`/`gazetteerRegion`/`gazetteerCountry`),
-    /// with the fine and coarse scales replaced by a network-resolved name
-    /// once `PlaceNameLookup` has one for this location (FR-5.13's "what
-    /// cannot be looked up yet waits… until it is complete the app ranks on
-    /// what it already knows" — the gazetteer name is what it already
-    /// knows). The medium scale never has a network-resolved replacement —
-    /// see `PlaceGazetteer`'s doc comment on why nothing names that scale
-    /// more precisely than the gazetteer already does.
+    /// (`PhotoRecord.gazetteerTown`/`gazetteerRegion`/`gazetteerCountry`,
+    /// each already qualified by its own country where `PlaceGazetteer`
+    /// needed to for uniqueness — see its doc comment), with the fine and
+    /// coarse scales replaced by a network-resolved name once
+    /// `PlaceNameLookup` has one for this location (FR-5.13's "what cannot
+    /// be looked up yet waits… until it is complete the app ranks on what it
+    /// already knows" — the gazetteer name is what it already knows). The
+    /// medium scale never has a network-resolved replacement — see
+    /// `PlaceGazetteer`'s doc comment on why nothing names that scale more
+    /// precisely than the gazetteer already does.
+    ///
+    /// A network-resolved city name is qualified the same way the offline
+    /// gazetteer's own town names are — `"<city>, <country>"` — using
+    /// `MKAddressRepresentations.regionName` (the network's own opinion of
+    /// the country, resolved in the same lookup) when there is one, or the
+    /// offline gazetteer's country for this coordinate otherwise. Without
+    /// this, two different real towns that happen to share a name would
+    /// still collide once resolved over the network, even though the
+    /// offline floor they started from told them apart — exactly the leak
+    /// FR-5.14 forbids, just moved to a different step.
     ///
     /// `networkNameCache` is the caller's one fetch of every
     /// `PlaceNameRecord`, keyed by `networkCacheKey` — passed in rather than
@@ -65,11 +77,15 @@ nonisolated enum PlaceHierarchy {
             return ScaleKeys(fine: nil, medium: nil, coarse: nil)
         }
         let resolved = networkNameCache[networkCacheKey(latitude: latitude, longitude: longitude)]
-        return ScaleKeys(
-            fine: resolved?.city ?? record.gazetteerTown,
-            medium: record.gazetteerRegion,
-            coarse: resolved?.region ?? record.gazetteerCountry
-        )
+        let coarse = resolved?.region ?? record.gazetteerCountry
+        let fine: String?
+        if let city = resolved?.city {
+            let qualifier = resolved?.region ?? record.gazetteerCountry
+            fine = qualifier.map { "\(city), \($0)" } ?? city
+        } else {
+            fine = record.gazetteerTown
+        }
+        return ScaleKeys(fine: fine, medium: record.gazetteerRegion, coarse: coarse)
     }
 
     /// The grid `PlaceNameLookup` rounds a coordinate to when deciding
