@@ -4,10 +4,17 @@ import MapKit
 import SwiftData
 import os
 
-/// Resolves place names for spots `PlaceGazetteer`'s offline floor already
-/// named less precisely (FR-5.13, FR-1.5's exception) — never required for
-/// ranking to work (see `PlaceHierarchy`, `PlaceGazetteer`), only ever a
-/// refinement of it.
+/// Asks Apple's maps service what a spot is called, purely as FR-5.13's own
+/// end in itself ("to learn what that place is called") — **not** a
+/// fallback or refinement feeding FR-5.14's ranking (see `PlaceHierarchy`'s
+/// doc comment for why: Apple's place-name vocabulary doesn't line up with
+/// the offline gazetteer's dataset-native ids closely enough to be a safe
+/// stand-in, and this is the one lookup in the whole pipeline whose answer
+/// can change mid-run, which the "never" in FR-5.14's leakage clause cannot
+/// tolerate even briefly). `PlaceGazetteer` alone answers every one of
+/// FR-5.14's four scales, always, offline; this type's result is cached
+/// (`PlaceNameRecord`) and logged, never read back into ranking or mix
+/// identity.
 ///
 /// One coordinate per not-yet-answered spot (rounded to
 /// `PlaceHierarchy.networkCacheKey`, purely for cache deduplication — see
@@ -15,12 +22,10 @@ import os
 /// never a photo, never anything about the photo, exactly the "where a
 /// photo was taken — never anything else about it" FR-1.5 allows.
 /// `MKMapItem.placemark` is deprecated as of macOS/iOS 26 in favour of
-/// `.addressRepresentations`, which is what this reads: `cityName` for
-/// FR-5.14's fine scale and `regionName` for its coarse scale (see
-/// `PlaceNameRecord`'s doc comment for why `regionName` is the country
-/// despite its name). Neither replaces the medium scale, which
-/// `MKAddressRepresentations` has no field for at all — see
-/// `PlaceGazetteer`'s doc comment.
+/// `.addressRepresentations`, which is what this reads: `cityName` and
+/// `regionName` (see `PlaceNameRecord`'s doc comment for why `regionName`
+/// is the country despite its name) — both kept only as an informational
+/// record of what was asked and answered.
 ///
 /// Never triggers a download of anything: it reads `PhotoRecord.latitude`/
 /// `longitude`, already on disk from the metadata scan, so resolving a place

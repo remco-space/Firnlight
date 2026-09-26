@@ -79,9 +79,34 @@ final class LibraryScanner {
     private func runScan(into context: ModelContext) async {
         phase = .scanning(examined: 0, total: 0)
 
+        // Forces `PlaceGazetteer`'s lazy static tables (JSON decode plus
+        // every polygon's bounding box) to build now, off the main actor,
+        // rather than synchronously on this actor the moment the first
+        // candidate below needs a lookup — see `PlaceGazetteer.preload`'s
+        // doc comment for the measured cost this avoids (FR-8.2).
+        await PlaceGazetteer.preload()
+
         do {
             let existingRecords = try context.fetch(FetchDescriptor<PhotoRecord>())
             let recordsByIdentifier = Dictionary(uniqueKeysWithValues: existingRecords.map { ($0.localIdentifier, $0) })
+
+            // The gazetteer's own bundled data (not just this scan's
+            // per-record inputs) may have changed since the last scan —
+            // `PlaceData/*.json` rebuilt, or the lookup logic itself
+            // changed in a build the device just updated to. Detected by
+            // `dataFingerprint` rather than any timestamp SwiftData can see;
+            // see `gazetteerDataChanged`'s doc comment. When it has, every
+            // already-resolved record is marked unresolved up front so the
+            // ordinary `!record.gazetteerResolved` branch below (already
+            // there to backfill records that predate the fields at all)
+            // picks every one of them up in this same pass, rather than
+            // leaving them cached against stale data indefinitely.
+            if Self.gazetteerDataChanged {
+                for record in existingRecords {
+                    record.gazetteerResolved = false
+                }
+                log.info("Place gazetteer data changed; re-resolving \(existingRecords.count) records' cached place names")
+            }
 
             let options = PHFetchOptions()
             options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
@@ -450,13 +475,16 @@ final class LibraryScanner {
 
     /// FR-5.14's offline floor, cached on the record so nothing downstream
     /// ever recomputes a gazetteer lookup on the ranker's hot path (see
-    /// `PhotoRecord.gazetteerTown`'s doc comment). Called only from the one
-    /// branch above that already decided the record's location needs
-    /// (re)syncing, so this runs once per changed or newly-scanned location,
-    /// never per ranker reload.
+    /// `PhotoRecord.gazetteerTown`'s doc comment). Called only from the
+    /// branches above that already decided the record's location needs
+    /// (re)syncing, or that the gazetteer data itself changed underneath an
+    /// unchanged location, so this runs once per changed or newly-scanned
+    /// location (or once per record on the one scan after the data
+    /// changes), never per ranker reload.
     private static func updateGazetteer(for record: PhotoRecord) {
         guard let latitude = record.latitude, let longitude = record.longitude else {
             record.gazetteerTown = nil
+            record.gazetteerLandscape = nil
             record.gazetteerRegion = nil
             record.gazetteerCountry = nil
             record.gazetteerResolved = true
@@ -464,10 +492,45 @@ final class LibraryScanner {
         }
         let keys = PlaceHierarchy.offlineKeys(latitude: latitude, longitude: longitude)
         record.gazetteerTown = keys.fine
-        record.gazetteerRegion = keys.medium
+        record.gazetteerLandscape = keys.landscape
+        record.gazetteerRegion = keys.region
         record.gazetteerCountry = keys.coarse
         record.gazetteerResolved = true
     }
+
+    /// Whether `PlaceGazetteer`'s bundled data has changed since the last
+    /// scan that resolved any `PhotoRecord` against it — detected via
+    /// `PlaceGazetteer.dataFingerprint` (an FNV-1a hash over the raw bytes
+    /// of every bundled `PlaceData/*.json` file) rather than a file
+    /// modification time SwiftData has no visibility into. This catches
+    /// both a rebuilt `PlaceData/*.json` (`scripts/fetch-place-data.sh` run
+    /// again against updated upstream sources) and a bundled build whose
+    /// gazetteer *logic* changed in a way that changes what the same
+    /// bytes resolve to — either way, a `PhotoRecord`'s cached
+    /// `gazetteerTown`/`gazetteerLandscape`/`gazetteerRegion`/
+    /// `gazetteerCountry` from before the change is simply wrong now, not
+    /// merely out of date the way an untouched photo's location is not.
+    ///
+    /// Checked once per process and persisted in `UserDefaults`, mirroring
+    /// `VisionRevisionFingerprint.generation`'s baseline pattern: the very
+    /// first read on a device with no stored baseline adopts the current
+    /// fingerprint without forcing a reset — there is nothing to compare
+    /// against yet, and a record with no cached gazetteer fields at all is
+    /// already picked up by the ordinary `!record.gazetteerResolved` check,
+    /// so treating "nothing on record" as "a change happened" would only
+    /// force a redundant second pass over the exact same records.
+    private static let gazetteerDataChanged: Bool = {
+        let defaults = UserDefaults.standard
+        let key = "space.remco.Firnlight.placeGazetteerFingerprint.baseline"
+        let observed = PlaceGazetteer.dataFingerprint
+        guard let baseline = defaults.string(forKey: key) else {
+            defaults.set(observed, forKey: key)
+            return false
+        }
+        guard baseline != observed else { return false }
+        defaults.set(observed, forKey: key)
+        return true
+    }()
 
     /// Metadata-only wallpaper pre-filter; never touches pixel data.
     private func isCandidate(_ asset: PHAsset) -> Bool {

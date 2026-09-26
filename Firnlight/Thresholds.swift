@@ -398,25 +398,31 @@ nonisolated enum Thresholds {
     /// there is nothing left for two places to collide into; a v11 file's
     /// bucket weights mean something different from a v12 file's per-place
     /// ones, so this forces the same full rebuild.
-    static let rankerAlgorithmVersion = 12 // v12: exact per-place weights, no bucket collisions (FR-5.14)
+    /// v13 is required too: FR-5.14's landscape and region scales are now
+    /// independently known (an earlier revision let a landscape match
+    /// suppress the region fallback, which is the opposite of "the natural
+    /// and the political alike"), so there are four place scales instead of
+    /// three and `sgdStep`'s scale list changed shape.
+    static let rankerAlgorithmVersion = 13 // v13: landscape and region always both known (FR-5.14)
 
     // MARK: Place hierarchy (FR-5.13, FR-5.14)
 
     /// Beyond this distance (degrees, equirectangular — see
     /// `PlaceGazetteer.squaredDistance`) from the nearest entry in
-    /// `PlaceData/places.json`, a coordinate gets no fine-scale name at all
-    /// (FR-3.8's gap, not a penalty) rather than one from a town that isn't
-    /// plausibly "this photo's town or park". Roughly 110 km at the equator.
-    /// Tighter than `regionGazetteerMaxDistanceDegrees` on purpose: FR-5.11's
-    /// "leans on the larger places around it" already covers a fine scale
-    /// that comes up empty, so there is no cost to being strict here and a
-    /// real one (a nearest-town match hundreds of kilometres off) to being
-    /// loose. Unverified against a real library's spread of locations; tune
-    /// by watching how often real photos land inside vs. outside this
-    /// radius, the same way every other geometric threshold here is tuned.
+    /// `PlaceData/places.json`/`parks.json`, a coordinate gets no fine-scale
+    /// name at all (FR-3.8's gap, not a penalty) rather than one from a town
+    /// or park that isn't plausibly "this photo's town or park". Roughly
+    /// 110 km at the equator. Tighter than `regionGazetteerMaxDistanceDegrees`
+    /// on purpose: FR-5.11's "leans on the larger places around it" already
+    /// covers a fine scale that comes up empty, so there is no cost to being
+    /// strict here and a real one (a nearest-town match hundreds of
+    /// kilometres off) to being loose. Unverified against a real library's
+    /// spread of locations; tune by watching how often real photos land
+    /// inside vs. outside this radius, the same way every other geometric
+    /// threshold here is tuned.
     static let placeGazetteerMaxDistanceDegrees = 1.0
 
-    /// The same cutoff for the medium scale, against `PlaceData/regions.json`.
+    /// The same cutoff for the region scale, against `PlaceData/regions.json`.
     /// Wider than the fine cutoff because a region's label point can
     /// legitimately sit hundreds of kilometres from a photo taken at the far
     /// edge of a large region (Siberia, the Canadian territories) — the
@@ -426,15 +432,28 @@ nonisolated enum Thresholds {
     /// at the equator. Unverified; tune the same way as the fine cutoff.
     static let regionGazetteerMaxDistanceDegrees = 8.0
 
+    /// The cutoff for the landscape scale's local-granularity tier, against
+    /// `PlaceData/landscapes.json` (GeoNames hills, ranges, forests,
+    /// valleys) — only consulted once `PlaceGazetteer.landscape` has already
+    /// tried the world-significant Natural Earth polygons and found no
+    /// containing feature. Between the fine and region cutoffs: a named
+    /// local landscape is usually a broader, less precisely-bounded thing
+    /// than a town but still more local than "which state/province" —
+    /// roughly 330 km at the equator. Unverified; tune the same way as the
+    /// other two.
+    static let landscapeGazetteerMaxDistanceDegrees = 3.0
+
     /// The grid `PlaceNameLookup` rounds a coordinate to when deciding
     /// whether it has already asked Apple's maps service about "this spot"
     /// (`PlaceHierarchy.networkCacheKey`) — purely a cache-deduplication
-    /// granularity, never a place identity: the actual ranking hierarchy
-    /// always comes from `PlaceGazetteer`'s real place names, refined by
-    /// whatever this cache holds. ~1.1 km at the equator: fine enough that
-    /// two genuinely different small towns rarely round to the same key, and
-    /// coarse enough that a cluster of photos taken walking around one spot
-    /// shares a single lookup rather than one each.
+    /// granularity, never a place identity: the resolved name is cached and
+    /// logged (fulfilling FR-1.5/FR-5.13's "to learn what that place is
+    /// called") but does not feed `PlaceGazetteer`'s ranking-relevant scale
+    /// keys — see `PlaceHierarchy`'s doc comment for why that boundary is
+    /// deliberate. ~1.1 km at the equator: fine enough that two genuinely
+    /// different small towns rarely round to the same key, and coarse
+    /// enough that a cluster of photos taken walking around one spot shares
+    /// a single lookup rather than one each.
     static let placeNameLookupCacheGridDegrees = 0.01
 
     /// How long `PlaceNameLookup` waits after successfully resolving one
@@ -452,19 +471,6 @@ nonisolated enum Thresholds {
     /// re-testing a condition that rarely changes moment to moment should
     /// cost the idle loop almost nothing.
     static let placeNameLookupIdleInterval: Duration = .seconds(60)
-
-    /// How many resolved cells `LibraryCatchUp`'s lookup loop coalesces
-    /// before it reloads the ranker and bumps `RankingClock` — the same
-    /// batch-or-idle debounce shape `preferenceCacheFlushBatchSize` already
-    /// uses for duel choices, applied here for the same reason (FR-8.2): a
-    /// library with hundreds of unresolved places would otherwise cost a
-    /// full-pool reload (`FeatureStore.albumCandidates`, `suggestedAlbumSize`)
-    /// every `placeNameLookupPace`, for a background enrichment nobody
-    /// pressed a button for. A trailing partial batch is still flushed as
-    /// soon as the loop goes idle (nothing pending, or waiting on the
-    /// network) rather than held forever, the same "idle bound" half of that
-    /// existing debounce.
-    static let placeNameLookupBatchSize = 10
 
     /// Distinct foreground objects at which the ranker's `subjectCount` trait
     /// saturates at 1.

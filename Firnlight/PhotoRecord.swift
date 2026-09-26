@@ -55,26 +55,37 @@ final class PhotoRecord {
     var latitude: Double?
     var longitude: Double?
 
-    /// FR-5.14's three-scale place hierarchy, resolved offline from
+    /// FR-5.14's four-scale place hierarchy, resolved offline from
     /// `latitude`/`longitude` via `PlaceHierarchy.offlineKeys` and cached
     /// here rather than recomputed on every ranker reload — a
     /// point-in-polygon/nearest-point search over the whole gazetteer for
     /// every candidate on every duel would cost real time (FR-8.2) for a
     /// coordinate that essentially never changes. `LibraryScanner` computes
     /// these whenever it (re)assigns `latitude`/`longitude`, the same
-    /// re-sync-on-change treatment `cameraHeading` and the rest already get.
-    /// Independently nil where the gazetteer has no answer at that scale —
-    /// see `PlaceGazetteer`'s doc comment — which `gazetteerResolved` tells
-    /// apart from "not computed yet" (a record that predates this field, or
-    /// one with no location at all).
+    /// re-sync-on-change treatment `cameraHeading` and the rest already get,
+    /// and also whenever `PlaceGazetteer.dataFingerprint` no longer matches
+    /// the fingerprint the last scan resolved against (the gazetteer's own
+    /// data changed underneath an unchanged coordinate).
+    /// `gazetteerLandscape` is FR-5.14's natural scale ("a landscape or
+    /// mountain range... known down to the landscapes people name
+    /// locally") and `gazetteerRegion` is its political counterpart — both
+    /// always independently resolved, never one standing in for the other
+    /// ("the natural and the political alike"). Independently nil where the
+    /// gazetteer has no answer at that scale — see `PlaceGazetteer`'s doc
+    /// comment — which `gazetteerResolved` tells apart from "not computed
+    /// yet" (a record that predates this field, or one with no location at
+    /// all).
     var gazetteerTown: String?
+    var gazetteerLandscape: String?
     var gazetteerRegion: String?
     var gazetteerCountry: String?
-    /// True once the three fields above have been computed for this
-    /// record's current `latitude`/`longitude` (even if all three came back
+    /// True once the four fields above have been computed for this
+    /// record's current `latitude`/`longitude` against the gazetteer data's
+    /// current `PlaceGazetteer.dataFingerprint` (even if all four came back
     /// nil) — distinguishes "the gazetteer genuinely has nothing here" from
-    /// "this record predates the field and hasn't been looked at yet",
-    /// which a plain nil check on the three fields above cannot.
+    /// "this record predates the field, or the gazetteer data has since
+    /// changed, and hasn't been looked at yet", which a plain nil check on
+    /// the four fields above cannot.
     var gazetteerResolved: Bool = false
 
     /// Metres above sea level, from the same `CLLocation` latitude and

@@ -1,11 +1,11 @@
 import Foundation
 
 /// What `PlaceGazetteer.nearest` needs from a table row — implemented
-/// directly by `PlaceGazetteer.RegionJSON` and `PlaceGazetteer.PlaceJSON` at
-/// their declarations (rather than via a later extension elsewhere in this
-/// file) because both are `private` to `PlaceGazetteer`: a same-file
-/// extension of a *nested* private type, written outside the enclosing
-/// type's own braces, is not in that type's private scope.
+/// directly by `PlaceGazetteer.NamedPointJSON` at its declaration (rather
+/// than via a later extension elsewhere in this file) because it's
+/// `private` to `PlaceGazetteer`: a same-file extension of a *nested*
+/// private type, written outside the enclosing type's own braces, is not in
+/// that type's private scope.
 private nonisolated protocol PlaceCoordinate {
     var lat: Double { get }
     var lon: Double { get }
@@ -16,100 +16,120 @@ private nonisolated protocol PlaceCoordinate {
 /// than fetched over a network (FR-9.3), under the exception FR-10.5 makes
 /// for "reference data about the world."
 ///
-/// `Firnlight/PlaceData/{countries,natural,regions,places}.json` is
-/// gitignored and never committed — FR-10.5's "the repository still only
+/// `Firnlight/PlaceData/{countries,natural,regions,places,landscapes,parks}.json`
+/// is gitignored and never committed — FR-10.5's "the repository still only
 /// carries the means to obtain it" — built by `scripts/fetch-place-data.sh`
-/// (which a fresh clone runs once; see CLAUDE.md's Build & run) from Natural
-/// Earth's public-domain map data. Missing data degrades every query below
-/// to "no gazetteer answer at any scale" (an empty table, not a crash — see
-/// `load`) rather than failing the build or the app.
+/// (which a fresh clone runs once; see CLAUDE.md's Build & run) from two
+/// public sources: Natural Earth (countries, world-significant landscapes,
+/// admin-1 regions) and GeoNames (local-granularity landscapes and parks —
+/// see `landscape`/`town`'s doc comments for why two sources). Missing data
+/// degrades every query below to "no gazetteer answer at any scale" (an
+/// empty table, not a crash — see `load`) rather than failing the build or
+/// the app.
 ///
-/// Four different lookup strategies over three scales, because the source
-/// data itself only supports different things at each, and FR-5.14 wants
-/// "the natural and the political alike" at the medium scale specifically:
+/// **Every returned name embeds the source dataset's own stable id**
+/// (`"<name> (#<id>)"`, or `"<name>, <country> (#<id>)"` where a country
+/// reads naturally) rather than relying on the name — or name plus country —
+/// being unique on its own. An earlier revision qualified by country alone
+/// and still collided for real: 63 town keys and 27 region keys in the
+/// bundled data each name more than one distinct place even *within* the
+/// same country (e.g. "Springfield, United States of America" is five
+/// different towns; "Las Vegas, United States of America" is two, in Nevada
+/// and New Mexico) — exactly the leak FR-5.14 forbids ("What the user's
+/// choices reveal about one place never reaches another except through the
+/// larger places both belong to" says *never*, not *rarely*). A dataset's
+/// own id is different in kind: it is that dataset's actual primary key, so
+/// two different features cannot share one short of a data error, and
+/// `scripts/trim-place-data.py`'s `dedupe_ids` closes even that (six
+/// `natural.json` features share a Natural Earth id with an unrelated
+/// feature; every other table's id was already unique on its own,
+/// verified). Country, where kept, is purely a courtesy for a reader of a
+/// log line — the id is what actually guarantees uniqueness.
 ///
-/// - **Country** (coarse): real polygon boundaries, point-in-polygon tested.
-///   Countries vary too much in size and shape for a nearest-point
-///   approximation to reliably separate neighbours the way FR-5.14's own
-///   example demands ("France, not the USA"). Names are unique within this
-///   dataset, so no further disambiguation is needed.
-/// - **Landscape** (medium, natural): named physical features — mountain
-///   ranges, plateaus, deserts and the like — also point-in-polygon tested,
-///   and tried *before* the political fallback below. Covers only the ~600
-///   world-significant landforms Natural Earth publishes at any scale
-///   (nothing at the resolution of, say, Germany's Odenwald), and a
-///   five-name handful of those genuinely repeat across unrelated places
-///   with no field in the source data to tell them apart by (e.g. two
-///   different, unrelated mountain ranges are both named "Cordillera
-///   Oriental") — a small, disclosed residual of exactly the kind of
-///   collision FR-5.14's leakage clause is otherwise built to avoid, kept
-///   because there's nothing in the published data to key it apart by.
-/// - **Region** (medium, political): each region's own label point (Natural
+/// Four different lookup strategies over four scales — fine, landscape,
+/// region, coarse — because the source data itself only supports different
+/// things at each, and FR-5.14 wants "the natural and the political alike"
+/// *both* always known, never one standing in for the other when both have
+/// an answer (see `landscape` and `region`'s own doc comments — an earlier
+/// revision let a landscape match suppress the region a coordinate is also
+/// in, which is exactly the "alike" FR-5.14 asks for, not "whichever one
+/// wins"):
+///
+/// - **Country** (coarse): real Natural Earth polygon boundaries,
+///   point-in-polygon tested. Countries vary too much in size and shape for
+///   a nearest-point approximation to reliably separate neighbours the way
+///   FR-5.14's own example demands ("France, not the USA").
+/// - **Landscape** (natural — a range of hills, a mountain range, a forest,
+///   a valley): `naturalRegion` (Natural Earth's ~600 world-significant
+///   physical features, point-in-polygon tested) tried first, then
+///   `nearestLandscapePoint` (GeoNames' local-granularity hills, ranges,
+///   forests, valleys — hundreds of thousands of them, nearest-point
+///   matched) — see `landscape`.
+/// - **Region** (political): each admin-1 region's own label point (Natural
 ///   Earth's own representative point for map text), matched by nearest
-///   neighbour and qualified by its own country — effectively a Voronoi
-///   approximation of the true administrative boundary. Good enough for
-///   "which broad area is this in", which is what ranking generalization
-///   needs, without carrying that dataset's full polygon geometry (tens of
-///   megabytes at a resolution fine enough to cover every country).
-/// - **Town/park** (fine): populated places, matched by nearest neighbour
-///   and qualified by its own country — there is no published boundary for
-///   "a town or park" to test containment against in the first place, so
-///   nearest-point is the only strategy that was ever on the table here.
+///   neighbour — effectively a Voronoi approximation of the true
+///   administrative boundary. Good enough for "which broad area is this
+///   in", which is what ranking generalization needs, without carrying that
+///   dataset's full polygon geometry (tens of megabytes at a resolution
+///   fine enough to cover every country). Always computed, independent of
+///   whether `landscape` also found an answer.
+/// - **Town/park** (fine): populated places and parks/reserves (GeoNames),
+///   matched by nearest neighbour together — there is no published
+///   boundary for either to test containment against in the first place,
+///   and FR-5.14 treats "a town or park" as one scale, not two.
 ///
-/// Region and town names are qualified by their own country
-/// (`"<name>, <country>"`) because plenty of real, unrelated places share a
-/// name: 188 town names and 95 region names in the bundled data each belong
-/// to more than one distinct place (e.g. "La Paz" is four towns in four
-/// different countries; "Alexandria" is four, two of them in the same
-/// country). Without the qualifier, two unrelated places would collide into
-/// one learned weight in `PreferenceRanker` — exactly what FR-5.14's "never
-/// reaches another except through the larger places both belong to" rules
-/// out. The qualifying country comes from each place's own record in the
-/// source data (`ADM0NAME` for towns, `admin` for regions), not from a
-/// separate lookup of the query coordinate's own country: the two can
-/// legitimately disagree right at a border, and a place's own recorded
-/// country is the more correct identity for *that place*, independent of
-/// which specific photo is asking about it.
-///
-/// A coordinate too far from anything in the region/place lists (open
-/// ocean, polar and other unpopulated regions) returns nil at that scale —
-/// FR-3.8's gap, not a penalty, same as a photo with no location at all.
-/// Country and landscape lookups have no such cutoff: every point on land
-/// is inside some country's polygon, or isn't on land, in which case nil is
-/// the honest answer anyway.
+/// A coordinate too far from anything in a nearest-point table (open ocean,
+/// polar and other unpopulated regions) returns nil at that scale — FR-3.8's
+/// gap, not a penalty, same as a photo with no location at all. Country and
+/// natural-landscape-polygon lookups have no such cutoff: every point on
+/// land is inside some country's polygon, or isn't on land, in which case
+/// nil is the honest answer anyway.
 ///
 /// `nonisolated`: the loaded tables are immutable once read, and lookups are
 /// pure functions of a coordinate — called from whichever actor is building
 /// trait or diversity vectors (`PreferenceRanker`, `FeatureStore`), and once
-/// from `LibraryScanner` on the main actor when a photo's location changes.
+/// from `LibraryScanner` on the main actor when a photo's location changes
+/// (after `preload()` has warmed the tables off it — see that function).
 nonisolated enum PlaceGazetteer {
     // MARK: Bundled data shapes
 
-    /// One JSON array element per file — see `scripts/trim-place-data.py`
-    /// for exactly how these are produced from the raw Natural Earth
-    /// GeoJSON. Short keys because this is generated, never hand-written.
+    // `nonisolated` on every nested type explicitly: the project's default
+    // actor isolation is `MainActor` (see the target's
+    // `SWIFT_DEFAULT_ACTOR_ISOLATION` build setting), which does not cascade
+    // from an outer `nonisolated enum` down into types nested inside it —
+    // each nested declaration gets its own default isolation unless told
+    // otherwise, and these are plain data loaded and queried off the main
+    // actor (`PreferenceRanker`, `FeatureStore`) as well as on it
+    // (`LibraryScanner`).
+
+    /// One JSON array element per polygon file — see
+    /// `scripts/trim-place-data.py` for exactly how these are produced.
+    /// Short keys because this is generated, never hand-written.
     private nonisolated struct PolygonJSON: Codable {
         let n: String
+        /// Present only in `natural.json` — `countries.json`'s names are
+        /// already unique on their own (verified), so it has nothing to
+        /// disambiguate and the trim script never writes this key there.
+        let id: String?
         /// Normalized to MultiPolygon shape by the trim script regardless of
         /// the source's Polygon/MultiPolygon distinction: polygons →
-        /// rings → points ([lon, lat]). Any individual ring that crosses the
-        /// ±180° antimeridian is also pre-unwrapped there (see
-        /// `PolygonPiece`'s doc comment) — this file never has to know which
-        /// ones were, if any: in the bundled data only Antarctica's one ring
-        /// actually does, since Natural Earth otherwise splits a
-        /// dateline-crossing country into separate polygons per side rather
-        /// than one ring that jumps.
+        /// rings → points ([lon, lat]). Any individual polygon that crosses
+        /// the ±180° antimeridian is also pre-unwrapped there (see
+        /// `PolygonPiece`'s doc comment) — this file never has to know
+        /// which ones were, if any: in the bundled data only Antarctica's
+        /// one polygon actually does, since Natural Earth otherwise splits
+        /// a dateline-crossing country into separate polygons per side
+        /// rather than one ring that jumps.
         let g: [[[[Double]]]]
     }
-    private nonisolated struct RegionJSON: Codable, PlaceCoordinate {
-        let n: String
-        let c: String
-        let lat: Double
-        let lon: Double
-    }
-    private nonisolated struct PlaceJSON: Codable, PlaceCoordinate {
+
+    /// One JSON array element per nearest-point file (`regions.json`,
+    /// `places.json`, `landscapes.json`, `parks.json`) — all four share this
+    /// exact shape.
+    private nonisolated struct NamedPointJSON: Codable, PlaceCoordinate {
         let n: String
         let c: String?
+        let id: String
         let lat: Double
         let lon: Double
     }
@@ -136,6 +156,9 @@ nonisolated enum PlaceGazetteer {
 
     private nonisolated struct PolygonFeature {
         let name: String
+        /// `"<name> (#<id>)"` where an id exists (natural.json), else just
+        /// the name (countries.json, already unique on its own).
+        let key: String
         let pieces: [PolygonPiece]
     }
 
@@ -144,8 +167,61 @@ nonisolated enum PlaceGazetteer {
 
     private static let countries: [PolygonFeature] = loadPolygonFeatures("countries")
     private static let naturalRegions: [PolygonFeature] = loadPolygonFeatures("natural")
-    private static let regions: [RegionJSON] = load("regions")
-    private static let places: [PlaceJSON] = load("places")
+    private static let regions: [NamedPointJSON] = load("regions")
+    private static let places: [NamedPointJSON] = load("places")
+    private static let landscapePoints: [NamedPointJSON] = load("landscapes")
+    private static let parks: [NamedPointJSON] = load("parks")
+    /// `places` and `parks` searched together — FR-5.14 treats "a town or
+    /// park" as one scale, not two (see `town`).
+    private static let townsAndParks: [NamedPointJSON] = places + parks
+
+    /// A fingerprint of the raw bytes of every bundled file, computed once
+    /// at first access (same lazy-`static-let` machinery as the tables
+    /// themselves). `PreferenceRanker` and `LibraryScanner` both compare
+    /// this against a stored value to notice when the gazetteer data itself
+    /// changed underneath already-cached results — a re-run of
+    /// `scripts/fetch-place-data.sh`, or an app update that ships different
+    /// `PlaceData` — the same "app's understanding changed, re-examine
+    /// without costing the user a judgment" pattern FR-5.2 already asks for
+    /// when Vision's own models drift (see `VisionRevisionFingerprint`),
+    /// applied here to the gazetteer instead. Fixed FNV-1a over the raw
+    /// file contents, not `Hasher`, for the same determinism reason
+    /// `PreferenceRanker.favoriteFingerprint` documents: every device must
+    /// agree on whether the data changed.
+    static let dataFingerprint: String = {
+        var hash: UInt64 = 0xcbf29ce484222325 // FNV-1a 64-bit offset basis
+        for name in ["countries", "natural", "regions", "places", "landscapes", "parks"] {
+            guard let url = resourceURL(name), let data = try? Data(contentsOf: url) else { continue }
+            for byte in data {
+                hash ^= UInt64(byte)
+                hash = hash &* 0x100000001b3 // FNV prime
+            }
+        }
+        return String(hash, radix: 16)
+    }()
+
+    /// Forces every table above (and `dataFingerprint`) to load off the main
+    /// actor. Without this, the first real query is `LibraryScanner
+    /// .updateGazetteer`'s, on the main actor — decoding and bbox-building
+    /// six JSON files (tens of megabytes once GeoNames' local-landscape and
+    /// park tables are included) synchronously there would be exactly the
+    /// frozen-interface moment FR-8.2 forbids. `Task.detached` genuinely
+    /// breaks isolation from whatever actor calls this (never assume the
+    /// caller already runs in the background); `await`ing its `.value` from
+    /// the main actor suspends without blocking it, which is what makes this
+    /// safe to call from `LibraryCatchUp.begin()`. Idempotent and cheap on
+    /// every call after the first — the tables are `static let`, so a
+    /// second `preload()` just re-reads already-resolved values.
+    static func preload() async {
+        await Task.detached {
+            _ = countries.count
+            _ = naturalRegions.count
+            _ = regions.count
+            _ = townsAndParks.count
+            _ = landscapePoints.count
+            _ = dataFingerprint
+        }.value
+    }
 
     private static func resourceURL(_ name: String) -> URL? {
         // Tried both ways because a `PBXFileSystemSynchronizedRootGroup`
@@ -185,7 +261,16 @@ nonisolated enum PlaceGazetteer {
                 }
                 return PolygonPiece(rings: polygon, minLon: minLon, maxLon: maxLon, minLat: minLat, maxLat: maxLat)
             }
-            return PolygonFeature(name: entry.n, pieces: pieces)
+            let key = entry.id.map { "\(entry.n) (#\($0))" } ?? entry.n
+            return PolygonFeature(name: entry.n, key: key, pieces: pieces)
+        }
+    }
+
+    private static func key(for entry: NamedPointJSON) -> String {
+        if let country = entry.c {
+            "\(entry.n), \(country) (#\(entry.id))"
+        } else {
+            "\(entry.n) (#\(entry.id))"
         }
     }
 
@@ -196,34 +281,33 @@ nonisolated enum PlaceGazetteer {
         pointInFeatures(countries, latitude: latitude, longitude: longitude)
     }
 
-    /// FR-5.14's medium scale: the natural landscape a coordinate falls
-    /// inside, if any — tried by `resolvedRegion` before the political
-    /// fallback. Point-in-polygon, bbox-prefiltered, exactly like `country`.
-    static func naturalRegion(latitude: Double, longitude: Double) -> String? {
+    /// FR-5.14's landscape scale — "a landscape or mountain range", tried at
+    /// two grains before giving up: `naturalRegion` (Natural Earth's
+    /// world-significant physical features, a real published boundary) and,
+    /// failing that, `nearestLandscapePoint` (GeoNames' local-granularity
+    /// hills, ranges, forests and valleys — the tier the brief specifically
+    /// asks for: "known down to the landscapes people name locally... not
+    /// only those a world map names"). Independent of `region` — a
+    /// coordinate inside a landscape is *also* always in some political
+    /// region, and `region` answers that on its own, never suppressed by
+    /// this one having an answer (FR-5.14's "the natural and the political
+    /// alike", both, not either/or).
+    static func landscape(latitude: Double, longitude: Double) -> String? {
         pointInFeatures(naturalRegions, latitude: latitude, longitude: longitude)
+            ?? nearest(latitude: latitude, longitude: longitude, in: landscapePoints, maxDistanceDegrees: Thresholds.landscapeGazetteerMaxDistanceDegrees).map(key(for:))
     }
 
-    /// FR-5.14's medium scale, resolved: `naturalRegion` if the coordinate
-    /// falls inside one, else the nearest political region (qualified by
-    /// its own country) within `Thresholds.regionGazetteerMaxDistanceDegrees`.
-    static func resolvedRegion(latitude: Double, longitude: Double) -> String? {
-        if let natural = naturalRegion(latitude: latitude, longitude: longitude) {
-            return natural
-        }
-        guard let match = nearest(latitude: latitude, longitude: longitude, in: regions, maxDistanceDegrees: Thresholds.regionGazetteerMaxDistanceDegrees) else {
-            return nil
-        }
-        return "\(match.n), \(match.c)"
+    /// FR-5.14's region scale — the political counterpart `landscape` never
+    /// stands in for, and vice versa. Nearest admin-1 label point within
+    /// `Thresholds.regionGazetteerMaxDistanceDegrees`.
+    static func region(latitude: Double, longitude: Double) -> String? {
+        nearest(latitude: latitude, longitude: longitude, in: regions, maxDistanceDegrees: Thresholds.regionGazetteerMaxDistanceDegrees).map(key(for:))
     }
 
-    /// FR-5.14's fine scale. Nearest populated place within
-    /// `Thresholds.placeGazetteerMaxDistanceDegrees`, qualified by its own
-    /// country where the source data has one.
-    static func nearestPlace(latitude: Double, longitude: Double) -> String? {
-        guard let match = nearest(latitude: latitude, longitude: longitude, in: places, maxDistanceDegrees: Thresholds.placeGazetteerMaxDistanceDegrees) else {
-            return nil
-        }
-        return match.c.map { "\(match.n), \($0)" } ?? match.n
+    /// FR-5.14's fine scale — "a town or park", searched together as one
+    /// scale within `Thresholds.placeGazetteerMaxDistanceDegrees`.
+    static func town(latitude: Double, longitude: Double) -> String? {
+        nearest(latitude: latitude, longitude: longitude, in: townsAndParks, maxDistanceDegrees: Thresholds.placeGazetteerMaxDistanceDegrees).map(key(for:))
     }
 
     // MARK: Geometry
@@ -235,8 +319,8 @@ nonisolated enum PlaceGazetteer {
     /// opposite sides of the antimeridian (179.9°, −179.9°) would compute as
     /// nearly the whole width of the globe apart instead of the few
     /// kilometres they actually are. Not geodesically exact — unnecessary
-    /// for "which of a few thousand points is nearest", which tolerates far
-    /// more error than either approximation introduces.
+    /// for "which of a few hundred thousand points is nearest", which
+    /// tolerates far more error than either approximation introduces.
     private static func squaredDistance(latA: Double, lonA: Double, latB: Double, lonB: Double) -> Double {
         let dLat = latA - latB
         var dLon = lonA - lonB
@@ -300,7 +384,7 @@ nonisolated enum PlaceGazetteer {
     /// Point-in-polygon over a feature list, bbox-prefiltered per disjoint
     /// piece (not per whole feature — see `PolygonPiece`'s doc comment for
     /// why that distinction matters for Russia, the USA and similar) —
-    /// shared by `country` and `naturalRegion`.
+    /// shared by `country` and `landscape`'s Natural Earth tier.
     ///
     /// Tries the query longitude both as given and shifted by ±360° against
     /// each piece's own box. Every piece in the bundled data already sits
@@ -309,7 +393,7 @@ nonisolated enum PlaceGazetteer {
     /// crossing it within one ring — verified against the bundled data),
     /// so in practice this mainly guards against a future data update
     /// representing a crossing differently, and against Antarctica's one
-    /// ring, which genuinely spans every longitude and matches at any
+    /// piece, which genuinely spans every longitude and matches at any
     /// shift's box regardless (correctly — it really is there).
     private static func pointInFeatures(_ features: [PolygonFeature], latitude: Double, longitude: Double) -> String? {
         let candidates = [longitude, longitude + 360, longitude - 360]
@@ -319,7 +403,7 @@ nonisolated enum PlaceGazetteer {
                     guard lon >= piece.minLon, lon <= piece.maxLon,
                           latitude >= piece.minLat, latitude <= piece.maxLat else { continue }
                     if pointInPiece(longitude: lon, latitude: latitude, piece: piece) {
-                        return entry.name
+                        return entry.key
                     }
                 }
             }

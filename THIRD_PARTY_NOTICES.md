@@ -69,16 +69,18 @@ a Claude Code skills collection, so this applies without restriction here.
 
 ## `Firnlight/PlaceData/` (map data)
 
-Source: [Natural Earth](https://www.naturalearthdata.com), the
-`ne_10m_admin_0_countries`, `ne_10m_geography_regions_polys`,
-`ne_10m_admin_1_states_provinces` and `ne_10m_populated_places` datasets,
-fetched, trimmed and simplified by `scripts/fetch-place-data.sh` /
+Two sources, fetched, trimmed and simplified by `scripts/fetch-place-data.sh` /
 `scripts/trim-place-data.py` — see those scripts for exactly what was kept
-and why. Obtained under FR-10.5's exception for world reference data, the
-same "means to obtain it" shape the skills above already use — never
-committed to this repository (`Firnlight/PlaceData/` is gitignored); the
-[terms of use](https://www.naturalearthdata.com/about/terms-of-use/) place
-it in the public domain outright regardless —
+and why. Both obtained under FR-10.5's exception for world reference data,
+the same "means to obtain it" shape the skills above already use — never
+committed to this repository (`Firnlight/PlaceData/` is gitignored).
+
+**[Natural Earth](https://www.naturalearthdata.com)** — the
+`ne_10m_admin_0_countries`, `ne_10m_geography_regions_polys`,
+`ne_10m_admin_1_states_provinces` and `ne_10m_populated_places` datasets
+(`countries.json`, `natural.json`, `regions.json`, and half of `places.json`).
+The [terms of use](https://www.naturalearthdata.com/about/terms-of-use/)
+place it in the public domain outright —
 
 > All versions of Natural Earth raster + vector map data found on this
 > website are in the public domain. You may use the maps in any manner...
@@ -86,8 +88,20 @@ it in the public domain outright regardless —
 > unnecessary.
 
 — which the same terms page immediately follows with the one line they
-*do* ask for if a user credits them anyway ("Made with Natural Earth."),
-which is what `AppIdentity.mapDataCredit` shows in the app itself
+*do* ask for if a user credits them anyway ("Made with Natural Earth.").
+
+**[GeoNames](https://www.geonames.org)** — `allCountries.txt`, filtered down
+to the areal/extended landscape feature codes (hills, ranges, forests,
+valleys, plateaus: `landscapes.json`) and the park/reserve feature codes
+(`parks.json`), plus the other half of `places.json`'s parks. This is
+FR-5.14's local-granularity tier — "known down to the landscapes people name
+locally... not only those a world map names" — which Natural Earth's own
+~600 world-significant physical features don't reach. GeoNames' data is
+licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), which
+does require attribution ("Made with Natural Earth. Place names from
+GeoNames.org.").
+
+Both credits are what `AppIdentity.mapDataCredit` shows in the app itself
 (About.swift), per FR-10.5's "credits it as its authors ask, alongside the
 facts FR-8.8 gives about the app."
 

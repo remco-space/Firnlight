@@ -40,13 +40,15 @@ enum AppIdentity {
     /// FR-10.5's exception for world reference data — "the app may carry it
     /// inside itself or fetch it for itself, and credits it as its authors
     /// ask, alongside the facts FR-8.8 gives about the app" — for the place
-    /// gazetteer FR-5.14 needs (`PlaceGazetteer`, `Firnlight/PlaceData/`).
-    /// Natural Earth's own terms (naturalearthdata.com/about/terms-of-use)
-    /// say crediting them is unnecessary, but offer this exact short text
-    /// "if you wish to cite the map data" — which is what "credits it as its
-    /// authors ask" asks for here, not the fuller MIT-style notice
+    /// gazetteer FR-5.14 needs (`PlaceGazetteer`, `Firnlight/PlaceData/`),
+    /// sourced from two datasets (see `THIRD_PARTY_NOTICES.md`'s
+    /// `Firnlight/PlaceData/` section for what each supplies). Natural
+    /// Earth's own terms (naturalearthdata.com/about/terms-of-use) say
+    /// crediting them is unnecessary, but offer this exact short text "if
+    /// you wish to cite the map data"; GeoNames' CC BY 4.0 license does
+    /// require attribution. Together, not the fuller MIT-style notice
     /// `THIRD_PARTY_NOTICES.md` carries for vendored code.
-    static let mapDataCredit = "Made with Natural Earth."
+    static let mapDataCredit = "Made with Natural Earth. Place names from GeoNames.org."
 
     /// `CFBundleShortVersionString` — FR-8.9's major.minor.patch.
     static var version: String {
@@ -211,10 +213,11 @@ struct AboutFooter: View {
 
             // FR-10.5's "credits it as its authors ask, alongside the facts
             // FR-8.8 gives about the app" — `.tertiary` here, unlike the
-            // facts above: this is a courtesy credit Natural Earth's own
-            // terms say isn't even required, not a fact the user came here
-            // to check, so it steps down rather than competing for the same
-            // attention as the version and copyright.
+            // facts above: this reads as a courtesy credit even though one
+            // half of it (GeoNames' CC BY 4.0) is a real license
+            // requirement, not a fact the user came here to check, so it
+            // steps down rather than competing for the same attention as
+            // the version and copyright.
             Text(AppIdentity.mapDataCredit)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)

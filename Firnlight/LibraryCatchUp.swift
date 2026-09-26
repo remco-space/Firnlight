@@ -208,27 +208,16 @@ final class LibraryCatchUp {
     /// FR-5.13's background place-name lookup: one `PlaceNameLookup.resolveNext()`
     /// call at a time, forever, until `end()` cancels this task. Silent by
     /// design — see `PlaceNameLookup`'s own doc comment for why this has no
-    /// user-facing progress the way analysis does — but not invisible to the
-    /// rest of the app: a resolved name changes which learned weight bucket
-    /// some photos' place traits fall into (FR-5.14), so resolutions reload
-    /// the ranker and bump `RankingClock`, the same hand-off `AnalysisView`'s
-    /// own completion path already makes — but only every
-    /// `Thresholds.placeNameLookupBatchSize` resolutions, or once the loop
-    /// runs out of work for now, never after every single one: a reload
-    /// re-walks the whole candidate pool (`FeatureStore`), which FR-8.2
-    /// forbids paying on every couple of seconds of background lookups the
-    /// way it's fine to pay on a duel choice a human just made.
+    /// user-facing progress the way analysis does — and, unlike an earlier
+    /// revision of this loop, genuinely invisible to the rest of the app: a
+    /// resolved name is cached (`PlaceNameRecord`) purely as an
+    /// informational record of what was asked and answered, and — per
+    /// `PlaceHierarchy`'s doc comment — never feeds `PreferenceRanker` or
+    /// `FeatureStore`'s ranking-relevant keys, so there is nothing here that
+    /// a ranker reload or `RankingClock` bump would ever need to propagate.
     private func runPlaceNameLookupLoop() async {
         guard let container = context?.container else { return }
         let lookup = PlaceNameLookup(modelContainer: container)
-        var resolvedSinceReload = 0
-
-        func flushIfNeeded() async {
-            guard resolvedSinceReload > 0 else { return }
-            resolvedSinceReload = 0
-            try? await PreferenceRanker(modelContainer: container).reload()
-            RankingClock.shared.bump()
-        }
 
         while !Task.isCancelled {
             let outcome: PlaceNameLookup.Outcome
@@ -240,13 +229,8 @@ final class LibraryCatchUp {
             }
             switch outcome {
             case .resolved:
-                resolvedSinceReload += 1
-                if resolvedSinceReload >= Thresholds.placeNameLookupBatchSize {
-                    await flushIfNeeded()
-                }
                 try? await Task.sleep(for: Thresholds.placeNameLookupPace)
             case .nothingPending, .waitingForNetwork:
-                await flushIfNeeded()
                 try? await Task.sleep(for: Thresholds.placeNameLookupIdleInterval)
             }
         }

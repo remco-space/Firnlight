@@ -179,20 +179,21 @@ actor FeatureStore {
         return Set(latest.compactMap { key, isGood in isGood ? nil : key })
     }
 
-    /// FR-6.1's diversity signature for one candidate: all three of
+    /// FR-6.1's diversity signature for one candidate: all four of
     /// FR-5.14's place scales `selectDiverseMix` counts repetition over
-    /// (not only fine and medium — a country is one of the places FR-5.14
-    /// itself names, so leaving it uncounted let an album fill from one
-    /// country as long as the towns inside it differed), which quarter of
-    /// the calendar year it was taken in, and a combined
-    /// "everything else" vector — the feature print plus every
+    /// (not only fine and landscape — a region and a country are each one of
+    /// the places FR-5.14 itself names, so leaving either uncounted let an
+    /// album fill from one region or country as long as the towns inside it
+    /// differed), which quarter of the calendar year it was taken in, and a
+    /// combined "everything else" vector — the feature print plus every
     /// `ScalarTrait` — for `repetitionCount`'s qualitative-similarity check.
     /// Nil fields are FR-3.8 gaps (no location, no date) and simply never
     /// repeat anything — a candidate missing a signal can't be judged
     /// similar-by-that-signal to anything.
     private struct MixSignature: Sendable {
         let placeFine: String?
-        let placeMedium: String?
+        let placeLandscape: String?
+        let placeRegion: String?
         let placeCoarse: String?
         let seasonQuarter: Int?
         let featureVector: [Float]
@@ -229,16 +230,6 @@ actor FeatureStore {
             }
         }
         let records = fetched.sorted { rankKey($0) > rankKey($1) }
-
-        // Resolved through the exact same shared function `PreferenceRanker`
-        // uses (`PlaceHierarchy.resolvedNames`), so "the same place" means
-        // the same thing to the mix selection below as it does to the
-        // ranking itself — the two computing this independently is exactly
-        // what once let them disagree. Fetched once, not per record.
-        let networkNameCache: [String: (city: String?, region: String?)] = Dictionary(
-            uniqueKeysWithValues: try modelContext.fetch(FetchDescriptor<PlaceNameRecord>())
-                .map { ($0.cacheKey, (city: $0.cityName, region: $0.regionName)) }
-        )
 
         let thresholdSquared = Thresholds.nearDuplicateDistance * Thresholds.nearDuplicateDistance
         var kept: [Candidate] = []
@@ -277,7 +268,7 @@ actor FeatureStore {
             } else {
                 kept.append(candidate(for: record, badVerdictKeys: badVerdictKeys))
                 keptVectors.append(vector)
-                keptSignatures.append(Self.mixSignature(of: record, vector: vector, networkNameCache: networkNameCache))
+                keptSignatures.append(Self.mixSignature(of: record, vector: vector))
             }
         }
 
@@ -285,12 +276,13 @@ actor FeatureStore {
     }
 
     /// FR-6.1's diversity signature for one record — see `MixSignature`.
-    private static func mixSignature(
-        of record: PhotoRecord,
-        vector: [Float],
-        networkNameCache: [String: (city: String?, region: String?)]
-    ) -> MixSignature {
-        let names = PlaceHierarchy.resolvedNames(for: record, networkNameCache: networkNameCache)
+    /// Resolved through the exact same shared function `PreferenceRanker`
+    /// uses (`PlaceHierarchy.resolvedNames`), so "the same place" means the
+    /// same thing to the mix selection here as it does to the ranking
+    /// itself — the two computing this independently is exactly what once
+    /// let them disagree.
+    private static func mixSignature(of record: PhotoRecord, vector: [Float]) -> MixSignature {
+        let names = PlaceHierarchy.resolvedNames(for: record)
         // Same quarter-of-the-year granularity as the ranker's own
         // `PreferenceRanker.seasonFraction`, coarsened from a continuous
         // fraction to four buckets — FR-6.1 asks whether the album repeats a
@@ -300,7 +292,8 @@ actor FeatureStore {
         }
         return MixSignature(
             placeFine: names.fine,
-            placeMedium: names.medium,
+            placeLandscape: names.landscape,
+            placeRegion: names.region,
             placeCoarse: names.coarse,
             seasonQuarter: seasonQuarter,
             featureVector: vector,
@@ -389,7 +382,7 @@ actor FeatureStore {
     }
 
     /// How many of `selected`'s signatures repeat one of `signature`'s axes
-    /// — the same place at any of FR-5.14's three scales, the same season
+    /// — the same place at any of FR-5.14's four scales, the same season
     /// quarter, or a qualitatively similar-enough already-chosen photo
     /// (FR-6.1's "place, scene, mood, season, or anything else the app
     /// weighs"). Lower is more distinct.
@@ -400,7 +393,8 @@ actor FeatureStore {
         var count = 0
         for other in selected {
             if let fine = signature.placeFine, fine == other.placeFine { count += 1 }
-            if let medium = signature.placeMedium, medium == other.placeMedium { count += 1 }
+            if let landscape = signature.placeLandscape, landscape == other.placeLandscape { count += 1 }
+            if let region = signature.placeRegion, region == other.placeRegion { count += 1 }
             if let coarse = signature.placeCoarse, coarse == other.placeCoarse { count += 1 }
             if let quarter = signature.seasonQuarter, quarter == other.seasonQuarter { count += 1 }
             if qualitativeDistance(signature, other) < Thresholds.albumMixQualitativeSimilarityDistance {
