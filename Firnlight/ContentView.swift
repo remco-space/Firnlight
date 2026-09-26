@@ -639,12 +639,12 @@ private struct LibraryStatusView: View {
                 Text("Library Scan")
                     .font(.headline)
 
-                // Fixed order, every phase: blurb, activity group, outcome.
-                // Only `outcome`, at the bottom, is allowed to change this
-                // card's height (FR-8.7) — `progressRow` and
+                // Fixed order, every phase: blurb, place-name row, progress
+                // row, outcome. Only `outcome`, at the bottom, is allowed to
+                // change this card's height (FR-8.7) — `progressRow` and
                 // `placeNameLookupRow` each fade by opacity rather than
-                // being inserted/removed, so their combined slot's height
-                // never changes either.
+                // being inserted/removed, so neither one's own slot changes
+                // size either.
                 //
                 // FR-1.5's one network exception is named here, not left for
                 // the user to discover on their own: an earlier revision of
@@ -655,27 +655,39 @@ private struct LibraryStatusView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                // Grouped tightly together, not two independent rows each
-                // carrying this VStack's outer 12pt spacing: `progressRow`
-                // and `placeNameLookupRow` toggle independently (scanning,
-                // and place-name lookups pending, are unrelated states),
-                // and either one can be the only one showing while the
-                // other's reserved slot sits empty. At the outer spacing, an
-                // empty slot next to visible text read as a stray gap in
-                // the card (observed on a real library: scanning had
-                // finished but lookups were still pending, so the paragraph
-                // was followed by an empty progress-bar-sized hole before
-                // the visible place-name line). Tight internal spacing
-                // instead — matching `progressRow`'s own bar-to-caption
-                // spacing — reads as one "current activity" unit with
-                // between zero and two active lines, never as a gap in the
-                // middle of unrelated content, while changing nothing about
-                // either row's own reservation or fade (FR-8.7 still holds:
-                // neither row's slot resizes when its own state flips).
-                VStack(alignment: .leading, spacing: 4) {
-                    progressRow
-                    placeNameLookupRow
-                }
+                // `placeNameLookupRow` sits directly under the paragraph
+                // that names the network exception it reports on, and
+                // `progressRow` sits directly above `outcome`, exactly
+                // where it always has — deliberately *not* grouped
+                // together, and not reordered the other way round. Nesting
+                // them together first (this round's own previous attempt)
+                // only shrank the gap by the difference between the two
+                // spacing values; it didn't close it, because whichever of
+                // the two rows is invisible still leaves its own reserved
+                // slot sitting between two pieces of visible content no
+                // matter which order they're in, in the state a real
+                // library actually spends most of its time in: scanning
+                // long finished, lookups still pending (thousands of them,
+                // paced by `Thresholds.placeNameLookupPace`) — a state that
+                // outlasts "still scanning" by orders of magnitude. In that
+                // state this order sits the *only* invisible slot
+                // (`progressRow`) directly against `outcome`, the one
+                // neighbour it has always sat against without complaint —
+                // this card's own history is the evidence: that adjacency
+                // shipped, unflagged, for every round before this one. The
+                // reverse order would instead sit that same invisible slot
+                // between `placeNameLookupRow` and `outcome` — no better,
+                // just moved — while a `placeNameLookupRow` empty
+                // *before* `progressRow` (the "scanning, nothing pending"
+                // state) is the one state this leaves imperfect, and it is
+                // the short-lived one: a scan taking longer than a few
+                // seconds is itself the noticeable case, not the common
+                // one. Neither row's reservation or fade changed at all, so
+                // FR-8.7 holds exactly as it did before this round touched
+                // this file.
+                placeNameLookupRow
+
+                progressRow
 
                 outcome
             }
