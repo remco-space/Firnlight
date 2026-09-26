@@ -296,13 +296,16 @@ The app has three tabs matching the three stages of the journey:
   little to derive is not held against it (FR-3.8), and what is derived
   counts only as much as the user's own choices imply (FR-5.2).
 - **FR-5.14** Where a photo was taken counts not only as a position on the map
-  but as the places people name it by, at every scale they name it — a town
+  but as the places people name it by, as published geographic references
+  name and bound them, at every scale they name it — a town
   or park, a landscape or mountain range, a region, a country — the natural
   and the political alike. Every photo that records where on land it was
   taken is known at three such scales at least, with no network (FR-9.3). A
   preference the user's choices reveal for one place carries to photos from
   it they have never judged, and a place barely judged leans on the larger
-  places around it (FR-5.11). *(Why: people love a region, not a coordinate —
+  places around it (FR-5.11). What the user's choices reveal about one place
+  never reaches another except through the larger places both belong to.
+  *(Why: people love a region, not a coordinate —
   "the Odenwald, but not Heidelberg; France, not the USA" — and a map
   position alone cannot tell two neighbouring places apart, or see two
   far-apart corners of one place as the same.)*
@@ -585,7 +588,12 @@ The app has three tabs matching the three stages of the journey:
   to obtain such material from where its authors chose to publish it. A
   fresh clone, after following the repository's own setup instructions,
   builds and is developed the same way — with the same tooling and the same
-  working practices — as on the machine the project grew on. *(Why:
+  working practices — as on the machine the project grew on. The one
+  exception is reference data about the world — maps, and the names and
+  borders of places — that the app needs in order to work: wherever its
+  license allows, the app may carry it inside itself or fetch it for itself,
+  and credits it as its authors ask, alongside the facts FR-8.8 gives about
+  the app. The repository still only carries the means to obtain it. *(Why:
   the right to publish someone's work belongs to its author, and a
   repository that only works where it was born is not meaningfully
   public.)*
