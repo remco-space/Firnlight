@@ -299,7 +299,9 @@ The app has three tabs matching the three stages of the journey:
   but as the places people name it by, as published geographic references
   name and bound them, at every scale they name it — a town
   or park, a landscape or mountain range, a region, a country — the natural
-  and the political alike. Every photo that records where on land it was
+  and the political alike. Natural places are known down to the landscapes
+  people name locally — a range of hills, a forest, a valley — not only
+  those a world map names. Every photo that records where on land it was
   taken is known at three such scales at least, with no network (FR-9.3). A
   preference the user's choices reveal for one place carries to photos from
   it they have never judged, and a place barely judged leans on the larger
