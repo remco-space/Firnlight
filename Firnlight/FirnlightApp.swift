@@ -13,11 +13,14 @@ import AppKit
 /// on-device. The one exception is `PlaceNameLookup`'s `MKReverseGeocodingRequest`
 /// calls (FR-1.5, FR-5.13): a photo's coordinate, and nothing else about it
 /// or the photo, sent to Apple's maps service to learn what that place is
-/// called — never required for ranking to work (see `PlaceHierarchy`), only
-/// ever a refinement of it. (FR-1.5 also permits Apple's Private Cloud
-/// Compute for higher-level foundation-model work, retaining no data; the
-/// app uses none today.) Every stage that touches the store runs as a plain
-/// actor owning its
+/// called — a real, ranking-relevant "one more of the places the photo is
+/// known by" (FR-5.14), never a substitute for the offline gazetteer's own
+/// four scales, which stay fully available with no network (FR-9.3) either
+/// way (see `PlaceHierarchy`'s doc comment for how the two combine without
+/// the leak an earlier revision risked by conflating them). (FR-1.5 also
+/// permits Apple's Private Cloud Compute for higher-level foundation-model
+/// work, retaining no data; the app uses none today.) Every stage that
+/// touches the store runs as a plain actor owning its
 /// own ModelContext, off the main thread (see FeatureStore for why @ModelActor
 /// can't deliver that); values crossing actor boundaries are nonisolated
 /// Sendable structs.

@@ -11,10 +11,12 @@ import os
 /// discards and in which direction, how prominent a person, an animal and the
 /// salient subject are, where that subject sits, how much foreground and
 /// text cover the frame, and how bright and how vivid it reads — plus one
-/// learned weight pₛ per named place at each of FR-5.14's four scales: the
+/// learned weight pₛ per named place at each of FR-5.14's five scales: the
 /// exact town, landscape, region and country `PlaceHierarchy` names the
-/// photo's location. Every b and p weight is learned from duels, never
-/// hard-coded: a
+/// photo's location offline, plus — where the network allows — what Apple's
+/// maps call the place, one more scale never folded into the other four
+/// (see `PlaceHierarchy`'s doc comment for why). Every b and p weight is
+/// learned from duels, never hard-coded: a
 /// low-resolution, tilted, dim, seasonally atypical, or unfamiliar-place
 /// photo is penalized — or favored — only as much as the user's choices
 /// imply (FR-5.2). The scalar set is open by design and expected to grow;
@@ -405,9 +407,10 @@ actor PreferenceRanker {
         }
     }
 
-    // FR-5.14's four-scale place hierarchy is `PlaceHierarchy.ScaleKeys` —
+    // FR-5.14's five-scale place hierarchy is `PlaceHierarchy.ScaleKeys` —
     // a real, published name per scale (a town, a landscape, a region, a
-    // country), or nil at a scale with no answer — shared with `FeatureStore`
+    // country, and — where the network allows — what Apple's maps call the
+    // place), or nil at a scale with no answer — shared with `FeatureStore`
     // rather than declared again here, so both files resolve a photo's place
     // the exact same way (see `PlaceHierarchy.resolvedNames(for:)`).
     // `Weights.place` keys into this by exact name, never a hashed bucket —
@@ -428,7 +431,7 @@ actor PreferenceRanker {
         let isFavorite: Bool
         /// Every scalar trait this photo is weighed on — see `ScalarTrait`.
         let traits: TraitValues
-        /// FR-5.14's four-scale place hierarchy — each scale independently
+        /// FR-5.14's five-scale place hierarchy — each scale independently
         /// nil where there's no answer for it. See `PlaceHierarchy.ScaleKeys`.
         let place: PlaceHierarchy.ScaleKeys
         var score: Float = 0 // raw, pre-sigmoid
@@ -494,6 +497,18 @@ actor PreferenceRanker {
         /// scores are read from and trained through. Optional for the same
         /// decode-safe reason `favoriteFingerprint` is.
         var gazetteerFingerprint: String?
+        /// Fingerprint of every `PhotoRecord.networkPlaceName`/
+        /// `networkPlaceResolved` pair these weights were last built
+        /// against — see `networkFingerprint(of:)`. FR-5.14's fifth scale
+        /// resolves *after* the photos it names are already being ranked
+        /// (`PlaceNameLookup` runs in the background, at its own pace), so a
+        /// resolution completing changes what `placeWeightKey(scale:
+        /// "network", ...)` computes for the photos there — the same
+        /// understanding-change reasoning `gazetteerFingerprint` documents,
+        /// applied to a value that changes over the app's own lifetime
+        /// rather than only across builds. Optional for the same
+        /// decode-safe reason the others are.
+        var networkFingerprint: String?
     }
 
     private static let log = Logger(subsystem: "space.remco.Firnlight", category: "PreferenceRanker")
@@ -520,6 +535,8 @@ actor PreferenceRanker {
     private var isPrepared = false
     /// Set by `loadEntries()` on every call — see `Weights.gazetteerFingerprint`.
     private var currentGazetteerFingerprint = ""
+    /// Set by `loadEntries()` on every call — see `Weights.networkFingerprint`.
+    private var currentNetworkFingerprint = ""
 
     /// Debounced preference-cache flush state (see `scheduleCacheFlush`).
     private var flushTask: Task<Void, Never>?
@@ -555,7 +572,8 @@ actor PreferenceRanker {
            stored.scalars.count == ScalarTrait.allCases.count,
            stored.judgmentCount == applicable,
            stored.favoriteFingerprint == currentFavorites,
-           stored.gazetteerFingerprint == currentGazetteerFingerprint {
+           stored.gazetteerFingerprint == currentGazetteerFingerprint,
+           stored.networkFingerprint == currentNetworkFingerprint {
             weights = stored
         } else {
             weights = Weights(
@@ -566,7 +584,8 @@ actor PreferenceRanker {
                 seededWithFavorites: false,
                 judgmentCount: applicable,
                 favoriteFingerprint: currentFavorites,
-                gazetteerFingerprint: currentGazetteerFingerprint
+                gazetteerFingerprint: currentGazetteerFingerprint,
+                networkFingerprint: currentNetworkFingerprint
             )
             seedFromFavorites()
             // Choices and bad verdicts both train the ranker (FR-5.7), so a
@@ -637,9 +656,14 @@ actor PreferenceRanker {
         // for the photos there (see `Weights.gazetteerFingerprint`'s doc
         // comment), so a preference already learned under the superseded
         // key must be replayed onto the current one rather than left behind.
+        // Fourth, same reasoning again: `PlaceNameLookup` resolving a place's
+        // name changes what `placeWeightKey(scale: "network", ...)`
+        // computes for the photos there (see `Weights.networkFingerprint`'s
+        // doc comment).
         if weights.judgmentCount != applicableJudgmentCount(choices: choices, badVerdicts: badVerdicts)
             || weights.favoriteFingerprint != Self.favoriteFingerprint(of: entries)
-            || weights.gazetteerFingerprint != currentGazetteerFingerprint {
+            || weights.gazetteerFingerprint != currentGazetteerFingerprint
+            || weights.networkFingerprint != currentNetworkFingerprint {
             isPrepared = false
             try prepare()
             return
@@ -756,6 +780,13 @@ actor PreferenceRanker {
         // that field's doc comment). Cheap: `PlaceGazetteer.dataFingerprint`
         // is computed once and cached (`static let`), not recomputed here.
         currentGazetteerFingerprint = PlaceGazetteer.dataFingerprint
+        // `currentNetworkFingerprint` is the same idea for FR-5.14's fifth
+        // scale — built from `records` (already fetched above, sorted by
+        // `localIdentifier` for the same determinism `favoriteFingerprint`
+        // needs), not a separate `PlaceNameRecord` fetch: the network name
+        // ranking actually reads is cached directly on `PhotoRecord`
+        // (`networkPlaceName`), so that is what has to be fingerprinted.
+        currentNetworkFingerprint = Self.networkFingerprint(of: records)
 
         entries = records.compactMap { record in
             guard let data = record.featurePrint else { return nil }
@@ -1362,15 +1393,18 @@ actor PreferenceRanker {
         // — the same either-side-unmeasured guard the trait loop above
         // applies, per scale rather than for the whole photo, so a photo
         // missing just its fine-scale name still trains normally at
-        // landscape, region and coarse. Four scales, not three: landscape
+        // landscape, region, coarse and network. Five scales: landscape
         // (natural) and region (political) are independently trained,
         // neither standing in for the other — "the natural and the
-        // political alike".
+        // political alike" — and `network` (Apple's own answer, where the
+        // network allows) trains in its own namespace, never conflated
+        // with any offline scale (see `PlaceHierarchy`'s doc comment).
         for (scale, winnerName, loserName) in [
             ("fine", winner.place.fine, loser.place.fine),
             ("landscape", winner.place.landscape, loser.place.landscape),
             ("region", winner.place.region, loser.place.region),
             ("coarse", winner.place.coarse, loser.place.coarse),
+            ("network", winner.place.network, loser.place.network),
         ] {
             guard let winnerName, let loserName else { continue }
             weights.place[Self.placeWeightKey(scale: scale, name: winnerName), default: 0] += gradient
@@ -1449,10 +1483,11 @@ actor PreferenceRanker {
     private func rawScore(_ entry: Entry) -> Float {
         var score = vDSP.dot(weights.feature, entry.vector)
             + vDSP.dot(weights.scalars, entry.traits.values)
-        // FR-5.14: whatever this photo's four place scales are actually
+        // FR-5.14: whatever this photo's five place scales are actually
         // named contribute their own learned weight (0 for a place never
         // yet judged, FR-5.2); a scale with no name at all contributes
-        // nothing rather than a penalty (FR-3.8).
+        // nothing rather than a penalty (FR-3.8) — including `network`
+        // before it's resolved, or when the network never allows it.
         if let fine = entry.place.fine {
             score += weights.place[Self.placeWeightKey(scale: "fine", name: fine), default: 0]
         }
@@ -1464,6 +1499,9 @@ actor PreferenceRanker {
         }
         if let coarse = entry.place.coarse {
             score += weights.place[Self.placeWeightKey(scale: "coarse", name: coarse), default: 0]
+        }
+        if let network = entry.place.network {
+            score += weights.place[Self.placeWeightKey(scale: "network", name: network), default: 0]
         }
         return score
     }
@@ -1624,6 +1662,34 @@ actor PreferenceRanker {
             }
             hash ^= 0xA // separator, so ["ab","c"] and ["a","bc"] don't collide
             hash = hash &* 0x100000001b3
+        }
+        return String(hash, radix: 16)
+    }
+
+    /// Deterministic fingerprint of every record's FR-5.14 fifth-scale
+    /// answer — see `Weights.networkFingerprint`'s doc comment for what
+    /// this triggers. `records` is already sorted by `localIdentifier`
+    /// (`loadEntries`'s own fetch), the same determinism reasoning
+    /// `favoriteFingerprint` documents, so no separate sort is needed here;
+    /// fixed FNV-1a rather than `Hasher` for the same cross-device-agreement
+    /// reason. Only resolved records are mixed in — an unresolved one
+    /// contributes nothing, so a library with no network lookups yet
+    /// (or none at all) fingerprints identically to one with no photos
+    /// with locations, rather than churning as more spots are merely
+    /// *attempted*.
+    private static func networkFingerprint(of records: [PhotoRecord]) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325 // FNV-1a 64-bit offset basis
+        func mix(_ string: String) {
+            for byte in string.utf8 {
+                hash ^= UInt64(byte)
+                hash = hash &* 0x100000001b3 // FNV prime
+            }
+            hash ^= 0xA
+            hash = hash &* 0x100000001b3
+        }
+        for record in records where record.networkPlaceResolved {
+            mix(record.localIdentifier)
+            mix(record.networkPlaceName ?? "")
         }
         return String(hash, radix: 16)
     }

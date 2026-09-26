@@ -210,12 +210,22 @@ open Firnlight.xcodeproj   # or just this
 
 **First build after cloning**: run `scripts/fetch-place-data.sh` once. It
 builds `Firnlight/PlaceData/*.json` — the offline place gazetteer FR-5.14
-needs (FR-1.5, FR-5.13) — from Natural Earth's public-domain map data;
-`Firnlight/PlaceData/` is gitignored, so the repository carries only that
-script (FR-10.5's "the repository still only carries the means to obtain
-it"), never the data. Skipping this doesn't break the build — `PlaceGazetteer`
-degrades to "no gazetteer answer at any scale" (see its doc comment) — but a
-fresh clone isn't built and developed "the same way" (FR-10.5) without it.
+needs — from Natural Earth's public-domain map data and GeoNames' CC BY 4.0
+data (both credited — see `THIRD_PARTY_NOTICES.md`); `Firnlight/PlaceData/`
+is gitignored, so the repository carries only that script (FR-10.5's "the
+repository still only carries the means to obtain it"), never the data.
+Skipping this doesn't break the build — `PlaceGazetteer` degrades to "no
+gazetteer answer at any scale" (see its doc comment) — but a fresh clone
+isn't built and developed "the same way" (FR-10.5) without it, and FR-5.14
+is simply false for that build. **CI runs this same script before every
+build** (see `.github/workflows/build.yml`/`release.yml`) — it is not only a
+local developer setup step, since a CI-built artifact with no gazetteer data
+would silently ship the same false-FR-5.14 state to every user. Both
+upstream sources are pinned to a fixed point (a Natural Earth commit sha, a
+GeoNames dated snapshot) rather than each source's continuously-moving
+latest, so two builds made months apart — or a developer's machine and
+CI — resolve every coordinate to the same keys (FR-5.2, FR-9.1); repinning is
+a deliberate, visible edit to the script, not automatic drift.
 
 Requires the full **Xcode 27+** toolchain, not the Command Line Tools. If
 `xcodebuild` errors with *"requires Xcode, but active developer directory … is

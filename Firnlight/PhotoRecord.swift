@@ -88,6 +88,24 @@ final class PhotoRecord {
     /// the four fields above cannot.
     var gazetteerResolved: Bool = false
 
+    /// FR-5.14's fifth scale — "where the network allows, the app also
+    /// learns what Apple's maps call the place... and that name counts as
+    /// one more of the places the photo is known by." Composed by
+    /// `PlaceHierarchy.networkPlaceKey` from `MKAddressRepresentations
+    /// .cityName`/`.regionName` (see `PlaceNameLookup`) and cached here the
+    /// same way the four offline fields above are, so ranking never re-reads
+    /// `PlaceNameRecord`'s per-grid-cell cache on every reload — `PlaceNameLookup
+    /// .resolveNext()` writes this onto every `PhotoRecord` sharing the
+    /// resolved spot's grid cell once it resolves. Nil until resolved, or if
+    /// Apple genuinely had no name for this spot; `networkPlaceResolved`
+    /// tells the two apart the same way `gazetteerResolved` does for the
+    /// offline fields. Deliberately never merged with any `gazetteer*`
+    /// field above — see `PlaceHierarchy`'s doc comment for why conflating
+    /// an offline scale with a network answer is exactly the leak FR-5.14's
+    /// "never reaches another" forbids.
+    var networkPlaceName: String?
+    var networkPlaceResolved: Bool = false
+
     /// Metres above sea level, from the same `CLLocation` latitude and
     /// longitude come from.
     ///

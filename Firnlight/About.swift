@@ -42,13 +42,15 @@ enum AppIdentity {
     /// ask, alongside the facts FR-8.8 gives about the app" — for the place
     /// gazetteer FR-5.14 needs (`PlaceGazetteer`, `Firnlight/PlaceData/`),
     /// sourced from two datasets (see `THIRD_PARTY_NOTICES.md`'s
-    /// `Firnlight/PlaceData/` section for what each supplies). Natural
-    /// Earth's own terms (naturalearthdata.com/about/terms-of-use) say
-    /// crediting them is unnecessary, but offer this exact short text "if
-    /// you wish to cite the map data"; GeoNames' CC BY 4.0 license does
-    /// require attribution. Together, not the fuller MIT-style notice
-    /// `THIRD_PARTY_NOTICES.md` carries for vendored code.
-    static let mapDataCredit = "Made with Natural Earth. Place names from GeoNames.org."
+    /// `Firnlight/PlaceData/` section for what each supplies, including the
+    /// license link neither this short in-app line nor a plain `Text` in
+    /// this file's undecorated style carries). Natural Earth's own terms
+    /// (naturalearthdata.com/about/terms-of-use) say crediting them is
+    /// unnecessary, but offer this exact short text "if you wish to cite
+    /// the map data"; GeoNames' CC BY 4.0 license does require attribution
+    /// that names the license, not merely the source — hence "CC BY 4.0"
+    /// appears here verbatim rather than only in `THIRD_PARTY_NOTICES.md`.
+    static let mapDataCredit = "Made with Natural Earth. Place names from GeoNames.org, CC BY 4.0."
 
     /// `CFBundleShortVersionString` — FR-8.9's major.minor.patch.
     static var version: String {

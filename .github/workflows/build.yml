@@ -26,6 +26,16 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Fetch place data
+        run: scripts/fetch-place-data.sh
+        # FR-5.14 needs Firnlight/PlaceData/*.json to exist for every scale to
+        # resolve to anything but nil; the synchronized file group builds
+        # fine with it absent (see PlaceGazetteer's doc comment), which is
+        # exactly what let a CI-built artifact silently ship with no
+        # gazetteer at all before this step existed. Not gated behind Xcode
+        # selection below — this needs curl/unzip/python3, not the
+        # toolchain.
+
       - name: Select Xcode 27
         run: |
           # xcode-27 / xcode-27-xlarge runner images (public preview, arm64

@@ -7,13 +7,17 @@ import SwiftData
 ///
 /// Keyed by `PlaceHierarchy.networkCacheKey`, not by photo: many photos
 /// taken near one another round to the same key, and the point of caching
-/// here rather than on `PhotoRecord` is that they share one lookup too — the
-/// second photo taken nearby never costs a second round trip. The key is
-/// purely a cache-deduplication grid — it is not, and `cityName`/`regionName`
-/// below are not, the place identity ranking or the FR-6.1 mix ever reads;
-/// that is always `PlaceGazetteer`'s real, published, offline names (see
-/// `PlaceHierarchy`'s doc comment for why this row's answer is kept purely
-/// informational rather than feeding those keys).
+/// here rather than only on `PhotoRecord` is that they share one lookup —
+/// the second photo taken nearby never costs a second round trip
+/// (`PlaceNameLookup.nextPendingSpot` skips any cell already recorded
+/// here). The cache key itself is purely a deduplication grid, never a
+/// place identity in its own right; `cityName`/`regionName` are what
+/// `PlaceHierarchy.networkPlaceKey` composes into FR-5.14's fifth scale,
+/// written onto every matching `PhotoRecord` by `PlaceNameLookup.save` —
+/// this row is the lookup-side cache, `PhotoRecord.networkPlaceName` is
+/// what ranking and the FR-6.1 mix actually read (see `PlaceHierarchy`'s
+/// doc comment for why that scale is always kept separate from
+/// `PlaceGazetteer`'s four offline ones).
 ///
 /// `cityName`/`regionName` come from `MKAddressRepresentations` (see
 /// `PlaceNameLookup`), and either or both may be nil — a genuine answer, not
@@ -34,21 +38,18 @@ import SwiftData
 final class PlaceNameRecord {
     @Attribute(.unique) var cacheKey: String
 
-    /// What Apple's maps service calls this spot's town or settlement — the
-    /// same kind of answer as FR-5.14's fine scale, but informational only
-    /// (see this type's own doc comment); never read as that scale's
-    /// ranking key. Nil when the service answered but had no city name for
-    /// this location (open water, a wilderness with no indexed settlement
-    /// nearby).
+    /// What Apple's maps service calls this spot's town or settlement — half
+    /// of FR-5.14's fifth scale (see `PlaceHierarchy.networkPlaceKey`). Nil
+    /// when the service answered but had no city name for this location
+    /// (open water, a wilderness with no indexed settlement nearby).
     var cityName: String?
 
     /// What Apple's maps service calls this spot's country
     /// (`MKAddressRepresentations.regionName`, which Apple's own header
     /// example gives as "United States": despite the property's name this
     /// is the country-level answer, not a state or province — see
-    /// `PlaceNameLookup`) — the same kind of answer as FR-5.14's coarse
-    /// scale, informational only, never read as that scale's ranking key.
-    /// Nil under the same circumstances as `cityName`.
+    /// `PlaceNameLookup`) — the other half of FR-5.14's fifth scale. Nil
+    /// under the same circumstances as `cityName`.
     var regionName: String?
 
     var lookedUpAt: Date

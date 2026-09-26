@@ -126,6 +126,16 @@ final class LibraryScanner {
             /// added, removed, re-queued for analysis, or just re-flagged
             /// favorite. Drives the `RankingClock` bump below (FR-4.5).
             var contentChanged = false
+            /// Every record whose location changed, is new, or predates
+            /// `gazetteerResolved` — collected during the loop below rather
+            /// than resolved inline, so the actual point-in-polygon/
+            /// nearest-point work can run in one batch, off the main actor
+            /// (see `computeGazetteerKeys`, applied once after the loop).
+            var pendingGazetteerUpdates: [PendingGazetteerUpdate] = []
+            /// `recordsByIdentifier` plus every record newly inserted this
+            /// pass — what the batch-apply step after the loop looks a
+            /// record up in, since a new record isn't in the fetch above.
+            var allRecordsByIdentifier = recordsByIdentifier
 
             for index in 0..<total {
                 let asset = assets.object(at: index)
@@ -164,24 +174,11 @@ final class LibraryScanner {
                             record.longitude = asset.location?.coordinate.longitude
                             record.altitude = asset.location?.altitude
                             record.cameraHeading = heading
-                            Self.updateGazetteer(for: record)
+                            pendingGazetteerUpdates.append(
+                                PendingGazetteerUpdate(identifier: asset.localIdentifier, latitude: record.latitude, longitude: record.longitude)
+                            )
                             unsavedChanges += 1
                             contentChanged = true // location feeds ranking (PreferenceRanker)
-                            // A point-in-polygon/nearest-point search over
-                            // the whole gazetteer just ran on this actor
-                            // (the main actor — this scanner is
-                            // `@MainActor`). Ordinarily negligible, but a
-                            // one-time backfill touches every already-scanned
-                            // geotagged photo in one pass, and unlike the
-                            // progress-stride yield below (every
-                            // `scanProgressStride` assets), that pass must
-                            // not run hundreds of these back-to-back with no
-                            // chance for the main actor to service anything
-                            // else (FR-8.2) — not profiled against a real
-                            // library, so this yields defensively after
-                            // every one rather than assuming the cost is
-                            // small enough not to matter.
-                            await Task.yield()
                         }
                         // Same re-sync for the subtype bits, and the path that
                         // backfills them onto records that predate the field.
@@ -227,14 +224,14 @@ final class LibraryScanner {
                             isFavorite: asset.isFavorite,
                             mediaSubtypes: Int(bitPattern: asset.mediaSubtypes.rawValue)
                         )
-                        Self.updateGazetteer(for: newRecord)
+                        pendingGazetteerUpdates.append(
+                            PendingGazetteerUpdate(identifier: asset.localIdentifier, latitude: newRecord.latitude, longitude: newRecord.longitude)
+                        )
+                        allRecordsByIdentifier[asset.localIdentifier] = newRecord
                         context.insert(newRecord)
                         newlyAdded += 1
                         unsavedChanges += 1
                         contentChanged = true
-                        // Same defensive yield as the re-sync branch above,
-                        // for the same reason (FR-8.2).
-                        await Task.yield()
                     }
                 } else if let record {
                     // Edited out of candidacy (e.g. cropped to portrait or below
@@ -254,6 +251,25 @@ final class LibraryScanner {
                 if index % Thresholds.scanProgressStride == 0 {
                     phase = .scanning(examined: index + 1, total: total)
                     await Task.yield()
+                }
+            }
+
+            // FR-5.14's offline place hierarchy, resolved for every record
+            // this pass touched — in one batch, entirely off the main actor
+            // (`computeGazetteerKeys`'s doc comment has the measured cost
+            // this avoids: FR-8.2). Applying the result back is just a
+            // dictionary lookup and four field assignments per record, cheap
+            // enough to do right here on the main actor.
+            if !pendingGazetteerUpdates.isEmpty {
+                let keysByIdentifier = await Self.computeGazetteerKeys(for: pendingGazetteerUpdates)
+                for update in pendingGazetteerUpdates {
+                    guard let record = allRecordsByIdentifier[update.identifier] else { continue }
+                    let keys = keysByIdentifier[update.identifier] ?? PlaceHierarchy.ScaleKeys(fine: nil, landscape: nil, region: nil, coarse: nil, network: nil)
+                    record.gazetteerTown = keys.fine
+                    record.gazetteerLandscape = keys.landscape
+                    record.gazetteerRegion = keys.region
+                    record.gazetteerCountry = keys.coarse
+                    record.gazetteerResolved = true
                 }
             }
 
@@ -473,29 +489,52 @@ final class LibraryScanner {
         return changed
     }
 
-    /// FR-5.14's offline floor, cached on the record so nothing downstream
-    /// ever recomputes a gazetteer lookup on the ranker's hot path (see
-    /// `PhotoRecord.gazetteerTown`'s doc comment). Called only from the
-    /// branches above that already decided the record's location needs
-    /// (re)syncing, or that the gazetteer data itself changed underneath an
-    /// unchanged location, so this runs once per changed or newly-scanned
-    /// location (or once per record on the one scan after the data
-    /// changes), never per ranker reload.
-    private static func updateGazetteer(for record: PhotoRecord) {
-        guard let latitude = record.latitude, let longitude = record.longitude else {
-            record.gazetteerTown = nil
-            record.gazetteerLandscape = nil
-            record.gazetteerRegion = nil
-            record.gazetteerCountry = nil
-            record.gazetteerResolved = true
-            return
+    /// One record's identifier and coordinate, captured during the main scan
+    /// loop for `computeGazetteerKeys` to resolve later, off the main actor —
+    /// a plain `Sendable` value rather than the `PhotoRecord` itself, which
+    /// is bound to this actor's `ModelContext` and can't safely cross to the
+    /// background executor `@concurrent` runs on.
+    private struct PendingGazetteerUpdate: Sendable {
+        let identifier: String
+        let latitude: Double?
+        let longitude: Double?
+    }
+
+    /// FR-5.14's offline floor for a whole batch of records at once, cached
+    /// on each record so nothing downstream ever recomputes a gazetteer
+    /// lookup on the ranker's hot path (see `PhotoRecord.gazetteerTown`'s
+    /// doc comment).
+    ///
+    /// `@concurrent`, like `cloudIdentifiers(for:)` below, moves the actual
+    /// point-in-polygon/nearest-point work onto the background executor
+    /// even though this scanner is `@MainActor` — measured (a `swiftc -O`
+    /// harness against the bundled files) at roughly 3.4 ms per record
+    /// across the ~483k-entry nearest-point tables, which a real library's
+    /// one-time backfill pass could easily spend a minute or more of on the
+    /// main actor even chopped into per-record slices with a yield between
+    /// each — exactly the "rest of the app stays usable while it runs"
+    /// FR-8.2 asks for, not merely "never freezes for a whole minute
+    /// straight". Batched — one call for every record this scan touched,
+    /// not one `@concurrent` call per record — because the actor hop itself
+    /// has a cost, and nothing about this work benefits from interleaving
+    /// with anything else on the main actor the way a progress update does;
+    /// the caller (`runScan`) awaits the single result and only then touches
+    /// any `PhotoRecord`, which is cheap main-actor work (a dictionary
+    /// lookup and four field assignments per record).
+    @concurrent
+    private static func computeGazetteerKeys(
+        for updates: [PendingGazetteerUpdate]
+    ) async -> [String: PlaceHierarchy.ScaleKeys] {
+        var result: [String: PlaceHierarchy.ScaleKeys] = [:]
+        result.reserveCapacity(updates.count)
+        for update in updates {
+            guard let latitude = update.latitude, let longitude = update.longitude else {
+                result[update.identifier] = PlaceHierarchy.ScaleKeys(fine: nil, landscape: nil, region: nil, coarse: nil, network: nil)
+                continue
+            }
+            result[update.identifier] = PlaceHierarchy.offlineKeys(latitude: latitude, longitude: longitude)
         }
-        let keys = PlaceHierarchy.offlineKeys(latitude: latitude, longitude: longitude)
-        record.gazetteerTown = keys.fine
-        record.gazetteerLandscape = keys.landscape
-        record.gazetteerRegion = keys.region
-        record.gazetteerCountry = keys.coarse
-        record.gazetteerResolved = true
+        return result
     }
 
     /// Whether `PlaceGazetteer`'s bundled data has changed since the last

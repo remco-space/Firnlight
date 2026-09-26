@@ -179,15 +179,18 @@ actor FeatureStore {
         return Set(latest.compactMap { key, isGood in isGood ? nil : key })
     }
 
-    /// FR-6.1's diversity signature for one candidate: all four of
+    /// FR-6.1's diversity signature for one candidate: all five of
     /// FR-5.14's place scales `selectDiverseMix` counts repetition over
     /// (not only fine and landscape — a region and a country are each one of
     /// the places FR-5.14 itself names, so leaving either uncounted let an
     /// album fill from one region or country as long as the towns inside it
-    /// differed), which quarter of the calendar year it was taken in, and a
-    /// combined "everything else" vector — the feature print plus every
-    /// `ScalarTrait` — for `repetitionCount`'s qualitative-similarity check.
-    /// Nil fields are FR-3.8 gaps (no location, no date) and simply never
+    /// differed; likewise the network scale, where the network allows —
+    /// "one more of the places the photo is known by" counts for variety
+    /// exactly as the offline ones do), which quarter of the calendar year
+    /// it was taken in, and a combined "everything else" vector — the
+    /// feature print plus every `ScalarTrait` — for `repetitionCount`'s
+    /// qualitative-similarity check. Nil fields are FR-3.8 gaps (no
+    /// location, no date, no network resolution yet) and simply never
     /// repeat anything — a candidate missing a signal can't be judged
     /// similar-by-that-signal to anything.
     private struct MixSignature: Sendable {
@@ -195,6 +198,7 @@ actor FeatureStore {
         let placeLandscape: String?
         let placeRegion: String?
         let placeCoarse: String?
+        let placeNetwork: String?
         let seasonQuarter: Int?
         let featureVector: [Float]
         let scalarVector: [Float]
@@ -295,6 +299,7 @@ actor FeatureStore {
             placeLandscape: names.landscape,
             placeRegion: names.region,
             placeCoarse: names.coarse,
+            placeNetwork: names.network,
             seasonQuarter: seasonQuarter,
             featureVector: vector,
             scalarVector: PreferenceRanker.traits(of: record).values
@@ -382,7 +387,7 @@ actor FeatureStore {
     }
 
     /// How many of `selected`'s signatures repeat one of `signature`'s axes
-    /// — the same place at any of FR-5.14's four scales, the same season
+    /// — the same place at any of FR-5.14's five scales, the same season
     /// quarter, or a qualitatively similar-enough already-chosen photo
     /// (FR-6.1's "place, scene, mood, season, or anything else the app
     /// weighs"). Lower is more distinct.
@@ -396,6 +401,7 @@ actor FeatureStore {
             if let landscape = signature.placeLandscape, landscape == other.placeLandscape { count += 1 }
             if let region = signature.placeRegion, region == other.placeRegion { count += 1 }
             if let coarse = signature.placeCoarse, coarse == other.placeCoarse { count += 1 }
+            if let network = signature.placeNetwork, network == other.placeNetwork { count += 1 }
             if let quarter = signature.seasonQuarter, quarter == other.seasonQuarter { count += 1 }
             if qualitativeDistance(signature, other) < Thresholds.albumMixQualitativeSimilarityDistance {
                 count += 1

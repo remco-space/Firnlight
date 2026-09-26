@@ -4,17 +4,18 @@ import MapKit
 import SwiftData
 import os
 
-/// Asks Apple's maps service what a spot is called, purely as FR-5.13's own
-/// end in itself ("to learn what that place is called") — **not** a
-/// fallback or refinement feeding FR-5.14's ranking (see `PlaceHierarchy`'s
-/// doc comment for why: Apple's place-name vocabulary doesn't line up with
-/// the offline gazetteer's dataset-native ids closely enough to be a safe
-/// stand-in, and this is the one lookup in the whole pipeline whose answer
-/// can change mid-run, which the "never" in FR-5.14's leakage clause cannot
-/// tolerate even briefly). `PlaceGazetteer` alone answers every one of
-/// FR-5.14's four scales, always, offline; this type's result is cached
-/// (`PlaceNameRecord`) and logged, never read back into ranking or mix
-/// identity.
+/// Asks Apple's maps service what a spot is called — FR-5.13's own end in
+/// itself ("to learn what that place is called"), and, per FR-5.14, the
+/// source of a genuine fifth ranking scale: "where the network allows, the
+/// app also learns what Apple's maps call the place... and that name
+/// counts as one more of the places the photo is known by." **Never** a
+/// fallback or refinement of `PlaceGazetteer`'s four offline scales, which
+/// stay fully available with no network either way (FR-9.3) — see
+/// `PlaceHierarchy`'s doc comment for the concrete leak an earlier revision
+/// risked by trying to fold a resolved name into an offline scale key
+/// instead of keeping it separate (Apple's place-name vocabulary doesn't
+/// line up with the offline gazetteer's dataset-native ids, and this is the
+/// one lookup in the whole pipeline whose answer can change mid-run).
 ///
 /// One coordinate per not-yet-answered spot (rounded to
 /// `PlaceHierarchy.networkCacheKey`, purely for cache deduplication — see
@@ -24,8 +25,11 @@ import os
 /// `MKMapItem.placemark` is deprecated as of macOS/iOS 26 in favour of
 /// `.addressRepresentations`, which is what this reads: `cityName` and
 /// `regionName` (see `PlaceNameRecord`'s doc comment for why `regionName`
-/// is the country despite its name) — both kept only as an informational
-/// record of what was asked and answered.
+/// is the country despite its name), composed into one key by
+/// `PlaceHierarchy.networkPlaceKey` and written onto every `PhotoRecord`
+/// sharing the resolved cell (see `save`) — not just cached in
+/// `PlaceNameRecord`, which exists purely so the *next* photo taken near
+/// the same spot never costs a second round trip.
 ///
 /// Never triggers a download of anything: it reads `PhotoRecord.latitude`/
 /// `longitude`, already on disk from the metadata scan, so resolving a place
@@ -142,8 +146,32 @@ actor PlaceNameLookup {
         return nil
     }
 
+    /// Records the answer once (`PlaceNameRecord`, keyed by grid cell, so
+    /// the next photo near this spot skips the round trip) and writes it
+    /// onto every `PhotoRecord` sharing that cell right away — not only the
+    /// one that happened to trigger this lookup (`nextPendingSpot` returns
+    /// the first pending spot it finds; several photos can round to the
+    /// same cell) — so FR-5.14's fifth scale is available to every one of
+    /// them the moment their cell resolves, never only lazily on some later
+    /// call. Every record with a location is walked, not only current
+    /// candidates: a photo excluded today and un-ignored tomorrow already
+    /// carries the answer rather than waiting for its cell to be re-asked
+    /// about (it never will be — `nextPendingSpot` only asks once per
+    /// cell).
     private func save(cacheKey: String, cityName: String?, regionName: String?) throws {
         modelContext.insert(PlaceNameRecord(cacheKey: cacheKey, cityName: cityName, regionName: regionName))
+
+        let key = PlaceHierarchy.networkPlaceKey(cityName: cityName, regionName: regionName)
+        let descriptor = FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate { $0.latitude != nil && $0.longitude != nil }
+        )
+        for record in try modelContext.fetch(descriptor) {
+            guard let latitude = record.latitude, let longitude = record.longitude else { continue }
+            guard PlaceHierarchy.networkCacheKey(latitude: latitude, longitude: longitude) == cacheKey else { continue }
+            record.networkPlaceName = key
+            record.networkPlaceResolved = true
+        }
+
         try modelContext.save()
     }
 }

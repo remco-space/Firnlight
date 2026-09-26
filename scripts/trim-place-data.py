@@ -270,15 +270,23 @@ def trim_natural():
 def trim_regions():
     """FR-5.14's region scale (the political counterpart FR-5.14 keeps
     alongside the landscape scale, never in its place — see
-    PlaceGazetteer.region): `ne_10m_admin_1_states_provinces`, kept as each
-    region's own label point (the dataset's own `latitude`/`longitude`
-    properties — a representative point Natural Earth already computed for
-    map labelling) rather than its polygon. `PlaceGazetteer` matches a
-    coordinate to the *nearest* region point rather than testing containment
-    — an approximation (a Voronoi diagram over label points is not the same
-    as the true administrative boundary), chosen deliberately: it gives a
-    real, correctly-scoped region name without needing this file's full
-    polygon geometry, which at 10m resolution is tens of megabytes raw.
+    PlaceGazetteer.region): `ne_10m_admin_1_states_provinces`, kept as its
+    real boundary polygon (simplified exactly like `trim_countries`/
+    `trim_natural`) *and* its label point (the dataset's own
+    `latitude`/`longitude` properties — a representative point Natural Earth
+    already computed for map labelling), both in the same entry.
+    `PlaceGazetteer.region` tests polygon containment first — "as published
+    geographic references name and bound them" means the actual boundary,
+    where one is published, not an approximation of it — and falls back to
+    the nearest label point only where no polygon claims a coordinate (a
+    country with no published admin-1 subdivisions, or a gap in the source
+    data): FR-3.8's gap, not a wrong answer. An earlier revision kept the
+    label point alone and matched by nearest-point only, on the grounds that
+    the full 10m-resolution polygon geometry was tens of megabytes raw; that
+    argument stopped holding once `landscapes.json`/`parks.json` alone added
+    on the order of 40 MB for local-granularity GeoNames data, at which point
+    leaving the *one* scale FR-5.14 already has real boundaries for
+    unbounded was the outlier, not the size.
 
     `id` is `adm1_code`, already unique in the source data on its own
     (verified — every entry has one, none repeat). `c` (the region's own
@@ -286,7 +294,11 @@ def trim_regions():
     `PlaceGazetteer` no longer relies on name+country for uniqueness the way
     an earlier version of this pipeline did (63 town keys and 27 region keys
     in this same data collide on name+country alone, e.g. "Jelgava, Latvia"
-    names more than one distinct region)."""
+    names more than one distinct region). The polygon-hit key and the
+    label-point-fallback key are built from the exact same `n`/`c`/`id`
+    fields (see PlaceGazetteer.loadRegionFeatures), so which path resolved a
+    coordinate never changes what key it trains — the same vocabulary
+    stability every other scale already has."""
     with open(f"{RAW_DIR}/regions.geojson") as f:
         data = json.load(f)
     out = []
@@ -304,6 +316,7 @@ def trim_regions():
             "id": adm1,
             "lat": round(lat, COORDINATE_DECIMAL_PLACES),
             "lon": round(lon, COORDINATE_DECIMAL_PLACES),
+            "g": simplified_polygons(feature["geometry"]),
         })
     dedupe_ids(out)
     with open(f"{OUT_DIR}/regions.json", "w") as f:
