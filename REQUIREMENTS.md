@@ -297,11 +297,14 @@ The app has three tabs matching the three stages of the journey:
   counts only as much as the user's own choices imply (FR-5.2).
 - **FR-5.14** Where a photo was taken counts not only as a position on the map
   but as the places people name it by, as published geographic references
-  name and bound them, at every scale they name it — a town
+  name and bound them — or, where a reference gives a place only as a point,
+  as the nearest such place — at every scale they name it — a town
   or park, a landscape or mountain range, a region, a country — the natural
   and the political alike. Natural places are known down to the landscapes
   people name locally — a range of hills, a forest, a valley — not only
-  those a world map names. Every photo that records where on land it was
+  those a world map names. Where the network allows, the app also learns
+  what Apple's maps call the place (FR-1.5, FR-5.13), and that name counts
+  as one more of the places the photo is known by. Every photo that records where on land it was
   taken is known at three such scales at least, with no network (FR-9.3). A
   preference the user's choices reveal for one place carries to photos from
   it they have never judged, and a place barely judged leans on the larger
