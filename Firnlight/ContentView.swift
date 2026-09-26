@@ -408,7 +408,7 @@ private struct LibraryTab: View {
                         if case .available(let version, let url) = updates.availability {
                             updateNotice(version: version, url: url)
                         }
-                        LibraryStatusView(scanner: catchUp.scanner)
+                        LibraryStatusView(catchUp: catchUp)
                         AnalysisView(model: catchUp.analysis, scanToken: scanCompletionToken)
                     }
                     .frame(maxWidth: 560)
@@ -620,7 +620,9 @@ private struct LibraryTab: View {
 /// catches up at launch and follows the library's own change notifications
 /// from then on. So this card reports, and reporting is all it does.
 private struct LibraryStatusView: View {
-    let scanner: LibraryScanner
+    let catchUp: LibraryCatchUp
+
+    private var scanner: LibraryScanner { catchUp.scanner }
 
     var body: some View {
         GroupBox {
@@ -637,14 +639,25 @@ private struct LibraryStatusView: View {
                 Text("Library Scan")
                     .font(.headline)
 
-                // Fixed order, every phase: blurb, progress, outcome. The only
-                // thing that ever changes height is `outcome`, at the bottom,
-                // where FR-8.7 allows a result to take room.
-                Text("Firnlight keeps up with your library on its own, watching for photos added, edited or deleted. It looks for high-resolution landscape photos worth considering as wallpapers — metadata only, and nothing leaves your device.")
+                // Fixed order, every phase: blurb, progress, place-name row,
+                // outcome. Only `outcome`, at the bottom, is allowed to change
+                // this card's height (FR-8.7) — `placeNameLookupRow` between
+                // it and `progressRow` fades by opacity rather than being
+                // inserted/removed, the same reservation `progressRow` itself
+                // already uses, so it never disturbs that contract.
+                //
+                // FR-1.5's one network exception is named here, not left for
+                // the user to discover on their own: an earlier revision of
+                // this sentence claimed "nothing leaves your device" outright,
+                // which stopped being true the moment place names started
+                // being looked up over the network.
+                Text("Firnlight keeps up with your library on its own, watching for photos added, edited or deleted. It looks for high-resolution landscape photos worth considering as wallpapers — metadata only. The one exception: where a photo has a location and your network allows it, Firnlight asks Apple's maps service what that place is called, telling it nothing else.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 progressRow
+
+                placeNameLookupRow
 
                 outcome
             }
@@ -655,6 +668,26 @@ private struct LibraryStatusView: View {
             // it to only one would trade one mismatch for another.
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// FR-3.5/FR-3.4/FR-5.13: a network place-name lookup that is still
+    /// working is deferred work, and the blurb above already names the one
+    /// network exception it belongs to — this row is what keeps that work
+    /// from reading as finished the moment Vision's own "Analysis complete"
+    /// (in the card below this one) suggests everything about the library
+    /// is done. Always built, faded at zero rather than removed — matching
+    /// `AnalysisView.statRow`'s pattern, not `progressRow`'s delayed
+    /// `shownWhileWaiting`, since this reports a slow, long-lived
+    /// background fact rather than a transient wait worth debouncing —
+    /// so it never changes this card's height (FR-8.7).
+    private var placeNameLookupRow: some View {
+        let pending = catchUp.placeNamesPending
+        return Label("\(pending.counted("place name")) still being looked up", systemImage: "mappin.and.ellipse")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .opacity(pending > 0 ? 1 : 0)
+            .accessibilityHidden(pending == 0)
     }
 
     /// The running count, in a slot that is there whether or not a pass is.

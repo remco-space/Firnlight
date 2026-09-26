@@ -67,6 +67,15 @@ final class LibraryCatchUp {
     /// them for the same reason: it has nothing to do once the library is
     /// no longer fully accessible (FR-1.8).
     private var placeNameTask: Task<Void, Never>?
+    /// How many otherwise-eligible photos have no FR-5.14 fifth-scale
+    /// answer yet — `PlaceNameLookup.pendingCount()`, refreshed once per
+    /// loop iteration in `runPlaceNameLookupLoop`. Read by `LibraryStatusView`
+    /// so the Library tab says this background work is still going
+    /// (FR-3.5) instead of leaving it invisible (FR-3.4, FR-5.13). 0 both
+    /// before the loop's first iteration and once genuinely nothing remains
+    /// — a photo with no location at all was never eligible in the first
+    /// place, so it never counts against this.
+    private(set) var placeNamesPending = 0
 
     /// Starts watching the library and catches up with it now. Safe to call
     /// repeatedly — the watcher is registered once.
@@ -208,18 +217,21 @@ final class LibraryCatchUp {
     }
 
     /// FR-5.13's background place-name lookup: one `PlaceNameLookup.resolveNext()`
-    /// call at a time, forever, until `end()` cancels this task. Silent by
-    /// design — see `PlaceNameLookup`'s own doc comment for why this has no
-    /// user-facing progress the way analysis does — but not invisible to the
-    /// rest of the app: a resolved name changes what FR-5.14's fifth scale
-    /// weighs some photos on, so resolutions reload the ranker and bump
-    /// `RankingClock`, the same hand-off `AnalysisView`'s own completion
-    /// path already makes — but only every `Thresholds.placeNameLookupBatchSize`
-    /// resolutions, or once the loop runs out of work for now, never after
-    /// every single one: a reload re-walks the whole candidate pool
-    /// (`FeatureStore`), which FR-8.2 forbids paying on every couple of
-    /// seconds of background lookups the way it's fine to pay on a duel
-    /// choice a human just made.
+    /// call at a time, forever, until `end()` cancels this task. A resolved
+    /// name changes what FR-5.14's fifth scale weighs some photos on, so
+    /// resolutions reload the ranker and bump `RankingClock`, the same
+    /// hand-off `AnalysisView`'s own completion path already makes — but
+    /// only every `Thresholds.placeNameLookupBatchSize` resolutions, or once
+    /// the loop runs out of work for now, never after every single one: a
+    /// reload re-walks the whole candidate pool (`FeatureStore`), which
+    /// FR-8.2 forbids paying on every couple of seconds of background
+    /// lookups the way it's fine to pay on a duel choice a human just made.
+    ///
+    /// Not silent to the *user*, though: `placeNamesPending` is refreshed
+    /// every iteration so `LibraryStatusView` can say this work is still
+    /// going (FR-3.5) rather than let Vision's own "Analysis complete"
+    /// nearby read as if everything about the library were finished while
+    /// this deferred work remains (FR-3.4, FR-5.13).
     private func runPlaceNameLookupLoop() async {
         guard let container = context?.container else { return }
         let lookup = PlaceNameLookup(modelContainer: container)
@@ -240,6 +252,9 @@ final class LibraryCatchUp {
                 log.error("Place name lookup failed: \(error.localizedDescription, privacy: .public)")
                 outcome = .waitingForNetwork
             }
+            // Kept on failure to fetch rather than reset to 0 — a transient
+            // count error is not evidence the remaining work vanished.
+            placeNamesPending = (try? await lookup.pendingCount()) ?? placeNamesPending
             switch outcome {
             case .resolved:
                 resolvedSinceReload += 1

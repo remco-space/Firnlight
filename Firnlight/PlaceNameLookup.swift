@@ -117,6 +117,22 @@ actor PlaceNameLookup {
         return .resolved
     }
 
+    /// How many otherwise-eligible candidates have no FR-5.14 fifth-scale
+    /// answer yet — `!networkPlaceResolved`, the state `LibraryScanner
+    /// .applyNetworkPlaceNames` and `PlaceNameLookup.save` both set true
+    /// once a record has an answer either way (a name, or a confirmed "no
+    /// name"). Exposed so the Library tab can say what remains (FR-3.5)
+    /// rather than let this background work go invisible the moment
+    /// Vision's own analysis finishes — FR-3.4/FR-5.13's "the app never
+    /// claims completion while deferred work remains" applies here too,
+    /// not only to iCloud downloads. Same eligibility restriction as
+    /// `nextPendingSpot`, counted instead of stopping at the first.
+    func pendingCount() throws -> Int {
+        try modelContext.fetchCount(FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.latitude != nil && !$0.networkPlaceResolved }
+        ))
+    }
+
     private struct PendingSpot {
         let cacheKey: String
         let latitude: Double

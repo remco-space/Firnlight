@@ -95,8 +95,10 @@ nonisolated enum PlaceHierarchy {
     /// `anchorKey` — the record's own already-disambiguated offline region
     /// or country key (`PhotoRecord.gazetteerRegion ?? .gazetteerCountry`),
     /// which already carries a dataset-native, globally unique id (see
-    /// `PlaceGazetteer`'s doc comment) — so two real places that happen to
-    /// share Apple's own city name never collide into one key.
+    /// `PlaceGazetteer`'s doc comment) — so two real places sharing Apple's
+    /// own city name collide only if they *also* share the same anchor
+    /// (see the residual case below), not on every shared name the way an
+    /// unanchored key did.
     ///
     /// This anchor is load-bearing, not defensive over-engineering: Apple's
     /// reverse-geocoding answer alone carries no stable id to disambiguate
@@ -109,6 +111,18 @@ nonisolated enum PlaceHierarchy {
     /// ("United States" for all five), confirming the exact collision this
     /// anchor exists to prevent: without it, all three Springfields and
     /// both Las Vegases key identically.
+    ///
+    /// **Residual, disclosed case this anchor does not close**: two
+    /// distinct settlements that happen to share both Apple's exact
+    /// `cityName` *and* fall inside the same offline region (or the same
+    /// country, where no admin-1 boundary is published) still collide —
+    /// anchoring narrows the collision from "same name anywhere in the
+    /// world" to "same name inside the same region/country", not to zero.
+    /// Not observed against real data; narrower than what an id-bearing
+    /// dataset can promise, the same honest limit `PlaceGazetteer`'s own
+    /// doc comment states for `dedupe_ids`'s six real collisions, just
+    /// unresolved here rather than closed, since Apple gives nothing left
+    /// to disambiguate with.
     ///
     /// Nil when there's no city name to anchor (a bare `regionName` alone
     /// would just restate the offline country/region scale under a

@@ -273,18 +273,28 @@ final class LibraryScanner {
                 }
             }
 
-            // FR-5.14's fifth scale, re-derived when its key format changes
-            // (see `networkPlaceKeyVersionChanged`'s doc comment) — run
-            // after the batch above, not before, so it anchors against
-            // each record's *current* gazetteerRegion/gazetteerCountry
-            // rather than values a data change earlier in this same scan
-            // may have just superseded.
-            if Self.networkPlaceKeyVersionChanged {
-                let recomputed = (try? Self.recomputeNetworkPlaceNames(in: context)) ?? 0
-                if recomputed > 0 {
-                    contentChanged = true
-                    log.info("Network place-name key format changed; re-derived \(recomputed) cached network scale names")
-                }
+            // FR-5.14's fifth scale, applied fresh every scan — not gated
+            // behind any "did something change" check, and deliberately
+            // not restricted to records `PlaceNameLookup` hasn't already
+            // marked resolved. `PlaceNameLookup.save` already applies its
+            // answer immediately to every record sharing a cell at the
+            // moment that cell first resolves, but it only ever asks about
+            // a given cell once — so a photo imported later, a location
+            // corrected into an already-answered cell, or a record whose
+            // offline anchor genuinely wasn't ready yet at that moment
+            // (stuck resolved with a nil name) would otherwise never
+            // receive FR-5.13's "remembered answer" at all. This pass is
+            // what actually guarantees it: unconditional, so there is no
+            // "first run after the gate ships" gap the way a version-gated
+            // check would have (a store already carrying a stale answer
+            // adopts a fresh baseline silently and is never revisited).
+            // Run after the gazetteer batch above, not before, so it
+            // anchors against each record's *current*
+            // gazetteerRegion/gazetteerCountry.
+            let networkPlaceNamesChanged = try await Self.applyNetworkPlaceNames(in: context)
+            if networkPlaceNamesChanged > 0 {
+                contentChanged = true
+                log.info("Applied \(networkPlaceNamesChanged) network place-name changes")
             }
 
             // Assets deleted from the library leave orphaned records — clean up
@@ -585,63 +595,84 @@ final class LibraryScanner {
         return true
     }()
 
-    /// Whether `PlaceHierarchy.networkPlaceKey`'s composition changed since
-    /// the last scan — reusing `Thresholds.rankerAlgorithmVersion` as the
-    /// signal rather than a separate counter, since a key-format change
-    /// there and a key-format change to what `PhotoRecord.networkPlaceName`
-    /// should hold are the same event by construction (see that constant's
-    /// v15 note): whatever `PreferenceRanker.Weights.place` trains a
-    /// `"network:<name>"` key by is exactly what this cached field feeds it.
-    /// A version bump for an unrelated reason just makes `recomputeNetworkPlaceNames`
-    /// a no-op pass — every re-derived key comes out identical to what's
-    /// already cached — never a wrong answer, so sharing the counter costs
-    /// nothing but one redundant linear scan on an unrelated bump. Same
-    /// first-run-adopts-baseline reasoning as `gazetteerDataChanged`.
-    private static let networkPlaceKeyVersionChanged: Bool = {
-        let defaults = UserDefaults.standard
-        let key = "space.remco.Firnlight.networkPlaceKeyVersion.baseline"
-        let observed = Thresholds.rankerAlgorithmVersion
-        guard defaults.object(forKey: key) != nil else {
-            defaults.set(observed, forKey: key)
-            return false
-        }
-        let baseline = defaults.integer(forKey: key)
-        guard baseline != observed else { return false }
-        defaults.set(observed, forKey: key)
-        return true
-    }()
+    /// One record's identifier, the grid cell its coordinate rounds to, and
+    /// its own current offline anchor — everything `composeNetworkPlaceNames`
+    /// needs to decide FR-5.14's fifth-scale name for it, gathered here (on
+    /// the main actor, cheaply — no geometry, just field reads) so the
+    /// actual composition can run off it.
+    private struct PendingNetworkPlaceUpdate: Sendable {
+        let identifier: String
+        let cacheKey: String
+        let anchorKey: String?
+    }
 
-    /// Re-derives every already-resolved `PhotoRecord.networkPlaceName`
-    /// against `PlaceHierarchy.networkPlaceKey`'s *current* composition —
-    /// see `networkPlaceKeyVersionChanged`'s doc comment for when this
-    /// runs. No network call: `cityName` is already cached in
+    /// Applies FR-5.14's fifth scale to every located `PhotoRecord`, every
+    /// scan — unconditionally, not behind any "did the format change"
+    /// gate. `PlaceNameLookup.save` already writes this immediately, onto
+    /// every record sharing a cell, the moment that cell first resolves,
+    /// but it only ever asks about one cell once (`nextPendingSpot` skips
+    /// any cell `PlaceNameRecord` already answers) — so a photo imported
+    /// later, one whose location was corrected into an already-answered
+    /// cell, or one whose offline anchor genuinely wasn't ready yet at
+    /// write time (left `networkPlaceResolved = true` with a nil name,
+    /// permanently, with nothing else to revisit it) would otherwise never
+    /// receive FR-5.13's "remembered answer" at all. This pass is what
+    /// actually guarantees it, every time, for every record — an earlier
+    /// revision instead gated this behind a stored version baseline, which
+    /// had exactly the bug it existed to fix: the *first* run after such a
+    /// gate ships adopts the current version as its baseline and returns
+    /// "unchanged", so a store already carrying a stale answer at that
+    /// moment is the one store the gate would never revisit.
+    ///
+    /// No network call, ever: `cityName` is already cached in
     /// `PlaceNameRecord` (keyed by grid cell, from a resolution that
     /// already happened), so this only re-runs the cheap composition step
     /// against each record's current `gazetteerRegion`/`gazetteerCountry`
-    /// anchor — never re-asks Apple's maps service anything.
+    /// anchor. The composition itself runs `@concurrent`, off the main
+    /// actor — the same shape `computeGazetteerKeys` uses and for the same
+    /// reason (FR-8.2): every located record in the library, every scan, is
+    /// enough records that even cheap per-record work adds up, and none of
+    /// it needs to run on the actor the UI lives on. Only the two fetches
+    /// that gather `Sendable` inputs and the final field-assignment loop —
+    /// both cheap, no geometry — run here, on the main actor, matching
+    /// `computeGazetteerKeys`'s own call site.
     ///
     /// Returns how many records' cached value actually changed, so the
-    /// caller can log it and decide whether this counts as `contentChanged`
-    /// for `RankingClock`'s purposes — a version bump that turns out to
-    /// re-derive the exact same keys (the common case for an unrelated
-    /// bump) should not force every ranked view to reload.
-    private static func recomputeNetworkPlaceNames(in context: ModelContext) throws -> Int {
+    /// caller can decide whether this counts as `contentChanged` for
+    /// `RankingClock`'s purposes — the common case (nothing new resolved
+    /// since the last scan) should not force every ranked view to reload.
+    private static func applyNetworkPlaceNames(in context: ModelContext) async throws -> Int {
         let placeNameRecords = try context.fetch(FetchDescriptor<PlaceNameRecord>())
         guard !placeNameRecords.isEmpty else { return 0 }
-        let cityNameByCacheKey = Dictionary(uniqueKeysWithValues: placeNameRecords.map { ($0.cacheKey, $0.cityName) })
+        let cityNameByCacheKey: [String: String?] = Dictionary(uniqueKeysWithValues: placeNameRecords.map { ($0.cacheKey, $0.cityName) })
 
         let records = try context.fetch(FetchDescriptor<PhotoRecord>(
-            predicate: #Predicate { $0.networkPlaceResolved && $0.latitude != nil && $0.longitude != nil }
+            predicate: #Predicate { $0.latitude != nil && $0.longitude != nil }
         ))
+        let recordsByIdentifier = Dictionary(uniqueKeysWithValues: records.map { ($0.localIdentifier, $0) })
+        let pending: [PendingNetworkPlaceUpdate] = records.compactMap { record in
+            guard let latitude = record.latitude, let longitude = record.longitude else { return nil }
+            return PendingNetworkPlaceUpdate(
+                identifier: record.localIdentifier,
+                cacheKey: PlaceHierarchy.networkCacheKey(latitude: latitude, longitude: longitude),
+                anchorKey: record.gazetteerRegion ?? record.gazetteerCountry
+            )
+        }
+        guard !pending.isEmpty else { return 0 }
+
+        let namesByIdentifier = await Self.composeNetworkPlaceNames(for: pending, cityNameByCacheKey: cityNameByCacheKey)
+
         var changed = 0
-        for record in records {
-            guard let latitude = record.latitude, let longitude = record.longitude else { continue }
-            let cacheKey = PlaceHierarchy.networkCacheKey(latitude: latitude, longitude: longitude)
-            guard let cityName = cityNameByCacheKey[cacheKey] else { continue }
-            let anchor = record.gazetteerRegion ?? record.gazetteerCountry
-            let recomputed = PlaceHierarchy.networkPlaceKey(cityName: cityName, anchorKey: anchor)
-            if record.networkPlaceName != recomputed {
-                record.networkPlaceName = recomputed
+        for update in pending {
+            // Presence in `namesByIdentifier` means this cell has been
+            // asked about (even if the composed name itself is nil);
+            // absence means it hasn't, and `PlaceNameLookup` will get to
+            // it in due course — leave those records exactly as they are.
+            guard let composed = namesByIdentifier[update.identifier] else { continue }
+            guard let record = recordsByIdentifier[update.identifier] else { continue }
+            if record.networkPlaceName != composed || !record.networkPlaceResolved {
+                record.networkPlaceName = composed
+                record.networkPlaceResolved = true
                 changed += 1
             }
         }
@@ -649,6 +680,30 @@ final class LibraryScanner {
             try context.save()
         }
         return changed
+    }
+
+    /// The actual per-record composition for `applyNetworkPlaceNames`,
+    /// `@concurrent` so it runs off the main actor (see that function's doc
+    /// comment). Pure: reads only its `Sendable` arguments, calls
+    /// `PlaceHierarchy.networkPlaceKey`, returns a plain dictionary.
+    ///
+    /// The result only ever holds an entry for a `cacheKey` present in
+    /// `cityNameByCacheKey` — a cell `PlaceNameLookup` has genuinely asked
+    /// about — so a record whose cell is still unanswered is simply left
+    /// out, not given a nil entry; the caller's `guard let` on membership,
+    /// not on the composed value, is what tells the two apart.
+    @concurrent
+    private static func composeNetworkPlaceNames(
+        for updates: [PendingNetworkPlaceUpdate],
+        cityNameByCacheKey: [String: String?]
+    ) async -> [String: String?] {
+        var result: [String: String?] = [:]
+        result.reserveCapacity(updates.count)
+        for update in updates {
+            guard let cityName = cityNameByCacheKey[update.cacheKey] else { continue }
+            result[update.identifier] = PlaceHierarchy.networkPlaceKey(cityName: cityName, anchorKey: update.anchorKey)
+        }
+        return result
     }
 
     /// Metadata-only wallpaper pre-filter; never touches pixel data.
