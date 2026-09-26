@@ -513,6 +513,19 @@ nonisolated enum Thresholds {
     /// where this loop's answer was purely informational.
     static let placeNameLookupBatchSize = 10
 
+    /// Records `LibraryScanner.applyNetworkPlaceNames` applies between
+    /// cooperative yields (and SwiftData saves), the same
+    /// `scanProgressStride`/`cloudIdentifierBatchSize` shape for the same
+    /// reason (FR-8.2): this pass now runs unconditionally over every
+    /// located record on every scan, and a library with thousands of them
+    /// would otherwise be one long unbroken main-actor loop with nothing
+    /// interleaved. Larger than `cloudIdentifierBatchSize` — the per-record
+    /// work here is a dictionary lookup and two field writes, not a
+    /// PhotoKit call documented as "very expensive" — so a bigger chunk
+    /// still yields often enough without paying `context.save()`'s own
+    /// overhead needlessly often.
+    static let networkPlaceApplyBatchSize = 1000
+
     /// Distinct foreground objects at which the ranker's `subjectCount` trait
     /// saturates at 1.
     ///

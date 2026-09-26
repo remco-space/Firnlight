@@ -632,10 +632,15 @@ final class LibraryScanner {
     /// actor — the same shape `computeGazetteerKeys` uses and for the same
     /// reason (FR-8.2): every located record in the library, every scan, is
     /// enough records that even cheap per-record work adds up, and none of
-    /// it needs to run on the actor the UI lives on. Only the two fetches
-    /// that gather `Sendable` inputs and the final field-assignment loop —
-    /// both cheap, no geometry — run here, on the main actor, matching
-    /// `computeGazetteerKeys`'s own call site.
+    /// it needs to run on the actor the UI lives on. The two fetches that
+    /// gather `Sendable` inputs still run here, on the main actor, matching
+    /// `computeGazetteerKeys`'s own call site — restricted to the columns
+    /// actually read (never `featurePrint`, the one genuinely large field
+    /// on this model) — and the final field-assignment loop is chunked
+    /// with a yield between each batch (`Thresholds.networkPlaceApplyBatchSize`),
+    /// for the same reason the scan loop above yields on its own progress
+    /// stride: cheap per-record work is still real main-actor time in
+    /// aggregate across thousands of records.
     ///
     /// Returns how many records' cached value actually changed, so the
     /// caller can decide whether this counts as `contentChanged` for
@@ -646,9 +651,16 @@ final class LibraryScanner {
         guard !placeNameRecords.isEmpty else { return 0 }
         let cityNameByCacheKey: [String: String?] = Dictionary(uniqueKeysWithValues: placeNameRecords.map { ($0.cacheKey, $0.cityName) })
 
-        let records = try context.fetch(FetchDescriptor<PhotoRecord>(
+        // Only the columns this pass actually reads — never `featurePrint`,
+        // which every located record (thousands, on a real library) would
+        // otherwise fault in for nothing. Matches `PlaceNameLookup
+        // .nextPendingSpot`'s own restriction and `AnalysisGeneration`'s
+        // reasoning for the same kind of whole-library scan (FR-8.2).
+        var descriptor = FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.latitude != nil && $0.longitude != nil }
-        ))
+        )
+        descriptor.propertiesToFetch = [\.latitude, \.longitude, \.gazetteerRegion, \.gazetteerCountry]
+        let records = try context.fetch(descriptor)
         let recordsByIdentifier = Dictionary(uniqueKeysWithValues: records.map { ($0.localIdentifier, $0) })
         let pending: [PendingNetworkPlaceUpdate] = records.compactMap { record in
             guard let latitude = record.latitude, let longitude = record.longitude else { return nil }
@@ -662,22 +674,36 @@ final class LibraryScanner {
 
         let namesByIdentifier = await Self.composeNetworkPlaceNames(for: pending, cityNameByCacheKey: cityNameByCacheKey)
 
+        // Applied in chunks, with a yield (and a save) between each — the
+        // same shape `resolveCloudIdentifiers` and the scan loop's own
+        // progress stride already use, and for the same reason (FR-8.2):
+        // this now runs unconditionally over every located record on every
+        // scan, so even cheap per-record work (a dictionary lookup, two
+        // field writes) is a long unbroken main-actor stretch on a library
+        // with thousands of them if done in one pass with nothing
+        // interleaved.
         var changed = 0
-        for update in pending {
-            // Presence in `namesByIdentifier` means this cell has been
-            // asked about (even if the composed name itself is nil);
-            // absence means it hasn't, and `PlaceNameLookup` will get to
-            // it in due course — leave those records exactly as they are.
-            guard let composed = namesByIdentifier[update.identifier] else { continue }
-            guard let record = recordsByIdentifier[update.identifier] else { continue }
-            if record.networkPlaceName != composed || !record.networkPlaceResolved {
-                record.networkPlaceName = composed
-                record.networkPlaceResolved = true
-                changed += 1
+        for chunk in pending.chunked(into: Thresholds.networkPlaceApplyBatchSize) {
+            var chunkChanged = 0
+            for update in chunk {
+                // Presence in `namesByIdentifier` means this cell has been
+                // asked about (even if the composed name itself is nil);
+                // absence means it hasn't, and `PlaceNameLookup` will get
+                // to it in due course — leave those records exactly as
+                // they are.
+                guard let composed = namesByIdentifier[update.identifier] else { continue }
+                guard let record = recordsByIdentifier[update.identifier] else { continue }
+                if record.networkPlaceName != composed || !record.networkPlaceResolved {
+                    record.networkPlaceName = composed
+                    record.networkPlaceResolved = true
+                    chunkChanged += 1
+                }
             }
-        }
-        if changed > 0 {
-            try context.save()
+            if chunkChanged > 0 {
+                try context.save()
+                changed += chunkChanged
+            }
+            await Task.yield()
         }
         return changed
     }

@@ -126,10 +126,16 @@ actor PlaceNameLookup {
     /// Vision's own analysis finishes — FR-3.4/FR-5.13's "the app never
     /// claims completion while deferred work remains" applies here too,
     /// not only to iCloud downloads. Same eligibility restriction as
-    /// `nextPendingSpot`, counted instead of stopping at the first.
+    /// `nextPendingSpot` — both `latitude`/`longitude` required, not just
+    /// `latitude` alone, so the two predicates can never disagree about
+    /// which records are still pending (not reachable today, since both
+    /// are only ever set together from one coordinate, but a predicate
+    /// this and `nextPendingSpot` share the meaning of should say so
+    /// identically, not by coincidence) — counted instead of stopping at
+    /// the first.
     func pendingCount() throws -> Int {
         try modelContext.fetchCount(FetchDescriptor<PhotoRecord>(
-            predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.latitude != nil && !$0.networkPlaceResolved }
+            predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.latitude != nil && $0.longitude != nil && !$0.networkPlaceResolved }
         ))
     }
 

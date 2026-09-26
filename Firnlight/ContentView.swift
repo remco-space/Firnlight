@@ -639,12 +639,12 @@ private struct LibraryStatusView: View {
                 Text("Library Scan")
                     .font(.headline)
 
-                // Fixed order, every phase: blurb, progress, place-name row,
-                // outcome. Only `outcome`, at the bottom, is allowed to change
-                // this card's height (FR-8.7) — `placeNameLookupRow` between
-                // it and `progressRow` fades by opacity rather than being
-                // inserted/removed, the same reservation `progressRow` itself
-                // already uses, so it never disturbs that contract.
+                // Fixed order, every phase: blurb, activity group, outcome.
+                // Only `outcome`, at the bottom, is allowed to change this
+                // card's height (FR-8.7) — `progressRow` and
+                // `placeNameLookupRow` each fade by opacity rather than
+                // being inserted/removed, so their combined slot's height
+                // never changes either.
                 //
                 // FR-1.5's one network exception is named here, not left for
                 // the user to discover on their own: an earlier revision of
@@ -655,9 +655,27 @@ private struct LibraryStatusView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                progressRow
-
-                placeNameLookupRow
+                // Grouped tightly together, not two independent rows each
+                // carrying this VStack's outer 12pt spacing: `progressRow`
+                // and `placeNameLookupRow` toggle independently (scanning,
+                // and place-name lookups pending, are unrelated states),
+                // and either one can be the only one showing while the
+                // other's reserved slot sits empty. At the outer spacing, an
+                // empty slot next to visible text read as a stray gap in
+                // the card (observed on a real library: scanning had
+                // finished but lookups were still pending, so the paragraph
+                // was followed by an empty progress-bar-sized hole before
+                // the visible place-name line). Tight internal spacing
+                // instead — matching `progressRow`'s own bar-to-caption
+                // spacing — reads as one "current activity" unit with
+                // between zero and two active lines, never as a gap in the
+                // middle of unrelated content, while changing nothing about
+                // either row's own reservation or fade (FR-8.7 still holds:
+                // neither row's slot resizes when its own state flips).
+                VStack(alignment: .leading, spacing: 4) {
+                    progressRow
+                    placeNameLookupRow
+                }
 
                 outcome
             }
@@ -682,8 +700,13 @@ private struct LibraryStatusView: View {
     /// so it never changes this card's height (FR-8.7).
     private var placeNameLookupRow: some View {
         let pending = catchUp.placeNamesPending
+        // `.monospacedDigit()`, matching every other live-updating count in
+        // this card and in `AnalysisView`'s stat rows: this count changes
+        // while the row sits still, and a proportional face lets the text
+        // (and so the row) shift width as digits change — exactly the
+        // control-resizing FR-8.7 forbids for the app's own background work.
         return Label("\(pending.counted("place name")) still being looked up", systemImage: "mappin.and.ellipse")
-            .font(.callout)
+            .font(.callout.monospacedDigit())
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .opacity(pending > 0 ? 1 : 0)
