@@ -302,7 +302,9 @@ The app has three tabs matching the three stages of the journey:
   taken is known at three such scales at least, with no network (FR-9.3). A
   preference the user's choices reveal for one place carries to photos from
   it they have never judged, and a place barely judged leans on the larger
-  places around it (FR-5.11). *(Why: people love a region, not a coordinate —
+  places around it (FR-5.11). What the user's choices reveal about one place
+  never reaches another except through the larger places both belong to.
+  *(Why: people love a region, not a coordinate —
   "the Odenwald, but not Heidelberg; France, not the USA" — and a map
   position alone cannot tell two neighbouring places apart, or see two
   far-apart corners of one place as the same.)*
