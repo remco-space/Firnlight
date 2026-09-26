@@ -416,7 +416,18 @@ nonisolated enum Thresholds {
     /// resolutions that happen *after* the weights were last built, not the
     /// ones already sitting in `PlaceNameRecord` the first time this version
     /// runs.
-    static let rankerAlgorithmVersion = 14 // v14: Apple-resolved place is a fifth, always-separate scale (FR-5.14)
+    /// v15: `PlaceHierarchy.networkPlaceKey` now anchors Apple's `cityName`
+    /// to the record's own offline region/country key instead of pairing
+    /// it with Apple's `regionName` — verified (a standalone
+    /// `MKReverseGeocodingRequest` harness) that the unanchored v14 key
+    /// collided every real place sharing a city name into one weight (all
+    /// three Springfields, both Las Vegases), which is exactly the leak
+    /// FR-5.14's "never" forbids and the "the place" singular in "that name
+    /// counts as one more of the places the photo is known by" rules out.
+    /// Every `Weights.place` key of the form `"network:<name>"` written
+    /// under v14 is shaped differently from a v15 one for the same
+    /// coordinate, so this forces the same full replay the v14 bump did.
+    static let rankerAlgorithmVersion = 15 // v15: network scale anchored to the offline region/country id (FR-5.14)
 
     // MARK: Place hierarchy (FR-5.13, FR-5.14)
 

@@ -273,6 +273,20 @@ final class LibraryScanner {
                 }
             }
 
+            // FR-5.14's fifth scale, re-derived when its key format changes
+            // (see `networkPlaceKeyVersionChanged`'s doc comment) — run
+            // after the batch above, not before, so it anchors against
+            // each record's *current* gazetteerRegion/gazetteerCountry
+            // rather than values a data change earlier in this same scan
+            // may have just superseded.
+            if Self.networkPlaceKeyVersionChanged {
+                let recomputed = (try? Self.recomputeNetworkPlaceNames(in: context)) ?? 0
+                if recomputed > 0 {
+                    contentChanged = true
+                    log.info("Network place-name key format changed; re-derived \(recomputed) cached network scale names")
+                }
+            }
+
             // Assets deleted from the library leave orphaned records — clean up
             // (FR-2.6).
             //
@@ -570,6 +584,72 @@ final class LibraryScanner {
         defaults.set(observed, forKey: key)
         return true
     }()
+
+    /// Whether `PlaceHierarchy.networkPlaceKey`'s composition changed since
+    /// the last scan — reusing `Thresholds.rankerAlgorithmVersion` as the
+    /// signal rather than a separate counter, since a key-format change
+    /// there and a key-format change to what `PhotoRecord.networkPlaceName`
+    /// should hold are the same event by construction (see that constant's
+    /// v15 note): whatever `PreferenceRanker.Weights.place` trains a
+    /// `"network:<name>"` key by is exactly what this cached field feeds it.
+    /// A version bump for an unrelated reason just makes `recomputeNetworkPlaceNames`
+    /// a no-op pass — every re-derived key comes out identical to what's
+    /// already cached — never a wrong answer, so sharing the counter costs
+    /// nothing but one redundant linear scan on an unrelated bump. Same
+    /// first-run-adopts-baseline reasoning as `gazetteerDataChanged`.
+    private static let networkPlaceKeyVersionChanged: Bool = {
+        let defaults = UserDefaults.standard
+        let key = "space.remco.Firnlight.networkPlaceKeyVersion.baseline"
+        let observed = Thresholds.rankerAlgorithmVersion
+        guard defaults.object(forKey: key) != nil else {
+            defaults.set(observed, forKey: key)
+            return false
+        }
+        let baseline = defaults.integer(forKey: key)
+        guard baseline != observed else { return false }
+        defaults.set(observed, forKey: key)
+        return true
+    }()
+
+    /// Re-derives every already-resolved `PhotoRecord.networkPlaceName`
+    /// against `PlaceHierarchy.networkPlaceKey`'s *current* composition —
+    /// see `networkPlaceKeyVersionChanged`'s doc comment for when this
+    /// runs. No network call: `cityName` is already cached in
+    /// `PlaceNameRecord` (keyed by grid cell, from a resolution that
+    /// already happened), so this only re-runs the cheap composition step
+    /// against each record's current `gazetteerRegion`/`gazetteerCountry`
+    /// anchor — never re-asks Apple's maps service anything.
+    ///
+    /// Returns how many records' cached value actually changed, so the
+    /// caller can log it and decide whether this counts as `contentChanged`
+    /// for `RankingClock`'s purposes — a version bump that turns out to
+    /// re-derive the exact same keys (the common case for an unrelated
+    /// bump) should not force every ranked view to reload.
+    private static func recomputeNetworkPlaceNames(in context: ModelContext) throws -> Int {
+        let placeNameRecords = try context.fetch(FetchDescriptor<PlaceNameRecord>())
+        guard !placeNameRecords.isEmpty else { return 0 }
+        let cityNameByCacheKey = Dictionary(uniqueKeysWithValues: placeNameRecords.map { ($0.cacheKey, $0.cityName) })
+
+        let records = try context.fetch(FetchDescriptor<PhotoRecord>(
+            predicate: #Predicate { $0.networkPlaceResolved && $0.latitude != nil && $0.longitude != nil }
+        ))
+        var changed = 0
+        for record in records {
+            guard let latitude = record.latitude, let longitude = record.longitude else { continue }
+            let cacheKey = PlaceHierarchy.networkCacheKey(latitude: latitude, longitude: longitude)
+            guard let cityName = cityNameByCacheKey[cacheKey] else { continue }
+            let anchor = record.gazetteerRegion ?? record.gazetteerCountry
+            let recomputed = PlaceHierarchy.networkPlaceKey(cityName: cityName, anchorKey: anchor)
+            if record.networkPlaceName != recomputed {
+                record.networkPlaceName = recomputed
+                changed += 1
+            }
+        }
+        if changed > 0 {
+            try context.save()
+        }
+        return changed
+    }
 
     /// Metadata-only wallpaper pre-filter; never touches pixel data.
     private func isCandidate(_ asset: PHAsset) -> Bool {

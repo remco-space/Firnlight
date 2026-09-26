@@ -43,8 +43,11 @@
 # doesn't publish a pre-filtered "natural features only" extract the way it
 # does for cities by population; trim-place-data.py does the filtering down
 # to the few hundred thousand rows Firnlight actually keeps. Downloading and
-# filtering the whole file is slow and disk-hungry but is a one-time setup
-# cost, run on the developer's own machine, never at app build or run time.
+# filtering the whole file is slow and disk-hungry — this script runs it on
+# every CI build (build.yml/release.yml), not only once on a developer's own
+# machine, which is exactly why both upstream sources are pinned/checksummed
+# below rather than re-fetched from a moving "latest": a slow step run this
+# often would otherwise also be the step most likely to drift.
 #
 # Requires: curl, unzip, python3 (the trimming/simplification step,
 # scripts/trim-place-data.py, is plain-stdlib Python — no pip packages).

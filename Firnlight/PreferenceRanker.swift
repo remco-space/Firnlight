@@ -1669,14 +1669,25 @@ actor PreferenceRanker {
     /// Deterministic fingerprint of every record's FR-5.14 fifth-scale
     /// answer — see `Weights.networkFingerprint`'s doc comment for what
     /// this triggers. `records` is already sorted by `localIdentifier`
-    /// (`loadEntries`'s own fetch), the same determinism reasoning
-    /// `favoriteFingerprint` documents, so no separate sort is needed here;
-    /// fixed FNV-1a rather than `Hasher` for the same cross-device-agreement
-    /// reason. Only resolved records are mixed in — an unresolved one
-    /// contributes nothing, so a library with no network lookups yet
-    /// (or none at all) fingerprints identically to one with no photos
-    /// with locations, rather than churning as more spots are merely
-    /// *attempted*.
+    /// (`loadEntries`'s own fetch), so no separate sort is needed here;
+    /// fixed FNV-1a rather than `Hasher`, whose per-process random seed
+    /// would otherwise make two identical inputs fingerprint differently
+    /// across launches on the *same* device, forcing a rebuild every
+    /// `prepare()`/`reload()` rather than only when the network name set
+    /// actually changed — the same reason `favoriteFingerprint` gives for
+    /// its own choice of FNV-1a. Mixing in `localIdentifier`, not
+    /// `judgmentKey` the way `favoriteFingerprint` mixes in `entry.key`,
+    /// is deliberately not claimed to give this the same cross-device
+    /// agreement that one has: `localIdentifier` is device-scoped by its
+    /// own doc comment, so this fingerprint can differ across two devices
+    /// holding the identical resolved network names. That gap is harmless
+    /// today only because `Weights` itself never leaves the device (see
+    /// `JudgmentStore`'s two-store split) — revisit this fingerprint's key
+    /// if that ever changes. Only resolved records are mixed in — an
+    /// unresolved one contributes nothing, so a library with no network
+    /// lookups yet (or none at all) fingerprints identically to one with no
+    /// photos with locations, rather than churning as more spots are
+    /// merely *attempted*.
     private static func networkFingerprint(of records: [PhotoRecord]) -> String {
         var hash: UInt64 = 0xcbf29ce484222325 // FNV-1a 64-bit offset basis
         func mix(_ string: String) {

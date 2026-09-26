@@ -23,11 +23,15 @@ import os
 /// never a photo, never anything about the photo, exactly the "where a
 /// photo was taken — never anything else about it" FR-1.5 allows.
 /// `MKMapItem.placemark` is deprecated as of macOS/iOS 26 in favour of
-/// `.addressRepresentations`, which is what this reads: `cityName` and
-/// `regionName` (see `PlaceNameRecord`'s doc comment for why `regionName`
-/// is the country despite its name), composed into one key by
-/// `PlaceHierarchy.networkPlaceKey` and written onto every `PhotoRecord`
-/// sharing the resolved cell (see `save`) — not just cached in
+/// `.addressRepresentations`, which is what this reads: `cityName` (see
+/// `PlaceNameRecord`'s doc comment for `regionName`, cached but no longer
+/// part of the composed key — see `PlaceHierarchy.networkPlaceKey`'s doc
+/// comment for why: it is country-level only and identical across every
+/// real place sharing Apple's own city name, confirmed empirically, so it
+/// cannot disambiguate the way the key's actual anchor does) is composed
+/// with each record's own offline region/country key and written onto
+/// every `PhotoRecord` sharing the resolved cell (see `save`) — not just
+/// cached in
 /// `PlaceNameRecord`, which exists purely so the *next* photo taken near
 /// the same spot never costs a second round trip.
 ///
@@ -158,17 +162,30 @@ actor PlaceNameLookup {
     /// carries the answer rather than waiting for its cell to be re-asked
     /// about (it never will be — `nextPendingSpot` only asks once per
     /// cell).
+    ///
+    /// The composed key is built **per record**, not once for the whole
+    /// cell: `PlaceHierarchy.networkPlaceKey`'s anchor is each record's own
+    /// offline region/country key, and while every photo in one ~1.1 km
+    /// grid cell is almost always in the same region, a cell straddling a
+    /// region boundary could anchor two of its own photos differently —
+    /// correctly, since that anchor is what keeps two distinct real places
+    /// from colliding into one key in the first place. Anchors are already
+    /// resolved by the time this runs: `LibraryScanner` computes and saves
+    /// every record's `gazetteerRegion`/`gazetteerCountry` before this
+    /// actor's own `ModelContext` can see the row at all (a different
+    /// context reading the same store never observes another context's
+    /// uncommitted changes).
     private func save(cacheKey: String, cityName: String?, regionName: String?) throws {
         modelContext.insert(PlaceNameRecord(cacheKey: cacheKey, cityName: cityName, regionName: regionName))
 
-        let key = PlaceHierarchy.networkPlaceKey(cityName: cityName, regionName: regionName)
         let descriptor = FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.latitude != nil && $0.longitude != nil }
         )
         for record in try modelContext.fetch(descriptor) {
             guard let latitude = record.latitude, let longitude = record.longitude else { continue }
             guard PlaceHierarchy.networkCacheKey(latitude: latitude, longitude: longitude) == cacheKey else { continue }
-            record.networkPlaceName = key
+            let anchor = record.gazetteerRegion ?? record.gazetteerCountry
+            record.networkPlaceName = PlaceHierarchy.networkPlaceKey(cityName: cityName, anchorKey: anchor)
             record.networkPlaceResolved = true
         }
 

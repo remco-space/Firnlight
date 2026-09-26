@@ -11,13 +11,14 @@ import SwiftData
 /// the second photo taken nearby never costs a second round trip
 /// (`PlaceNameLookup.nextPendingSpot` skips any cell already recorded
 /// here). The cache key itself is purely a deduplication grid, never a
-/// place identity in its own right; `cityName`/`regionName` are what
-/// `PlaceHierarchy.networkPlaceKey` composes into FR-5.14's fifth scale,
-/// written onto every matching `PhotoRecord` by `PlaceNameLookup.save` —
-/// this row is the lookup-side cache, `PhotoRecord.networkPlaceName` is
-/// what ranking and the FR-6.1 mix actually read (see `PlaceHierarchy`'s
-/// doc comment for why that scale is always kept separate from
-/// `PlaceGazetteer`'s four offline ones).
+/// place identity in its own right; `cityName` is what
+/// `PlaceHierarchy.networkPlaceKey` anchors into FR-5.14's fifth scale
+/// (`regionName` is cached here too, but no longer part of that key — see
+/// its own doc comment for why), written onto every matching `PhotoRecord`
+/// by `PlaceNameLookup.save` — this row is the lookup-side cache,
+/// `PhotoRecord.networkPlaceName` is what ranking and the FR-6.1 mix
+/// actually read (see `PlaceHierarchy`'s doc comment for why that scale is
+/// always kept separate from `PlaceGazetteer`'s four offline ones).
 ///
 /// `cityName`/`regionName` come from `MKAddressRepresentations` (see
 /// `PlaceNameLookup`), and either or both may be nil — a genuine answer, not
@@ -38,18 +39,26 @@ import SwiftData
 final class PlaceNameRecord {
     @Attribute(.unique) var cacheKey: String
 
-    /// What Apple's maps service calls this spot's town or settlement — half
-    /// of FR-5.14's fifth scale (see `PlaceHierarchy.networkPlaceKey`). Nil
-    /// when the service answered but had no city name for this location
-    /// (open water, a wilderness with no indexed settlement nearby).
+    /// What Apple's maps service calls this spot's town or settlement — the
+    /// name half of FR-5.14's fifth scale (see
+    /// `PlaceHierarchy.networkPlaceKey`; the other half, the
+    /// disambiguating anchor, comes from the offline gazetteer, not from
+    /// Apple). Nil when the service answered but had no city name for this
+    /// location (open water, a wilderness with no indexed settlement
+    /// nearby).
     var cityName: String?
 
     /// What Apple's maps service calls this spot's country
     /// (`MKAddressRepresentations.regionName`, which Apple's own header
     /// example gives as "United States": despite the property's name this
     /// is the country-level answer, not a state or province — see
-    /// `PlaceNameLookup`) — the other half of FR-5.14's fifth scale. Nil
-    /// under the same circumstances as `cityName`.
+    /// `PlaceNameLookup`). Cached here as part of what was asked and
+    /// answered, but no longer part of `networkPlaceKey`'s composed key —
+    /// verified (a standalone `MKReverseGeocodingRequest` harness against
+    /// five real coordinates: Springfield, MA/IL/MO and Las Vegas, NV/NM)
+    /// that this value is identical for every one of them ("United
+    /// States"), so it cannot disambiguate the collision the anchor exists
+    /// to prevent. Nil under the same circumstances as `cityName`.
     var regionName: String?
 
     var lookedUpAt: Date

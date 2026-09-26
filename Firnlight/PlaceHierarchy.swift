@@ -90,25 +90,35 @@ nonisolated enum PlaceHierarchy {
         )
     }
 
-    /// FR-5.14's fifth scale, named — combines `MKAddressRepresentations
-    /// .cityName`/`.regionName` (see `PlaceNameLookup`) into the one place
-    /// name FR-5.14 speaks of ("the place", singular), since Apple's
-    /// address representation has no single field for it. Either component
-    /// may be nil (open water, a wilderness with no indexed settlement or
-    /// country nearby, or one present without the other); both nil means no
-    /// name at all. No dataset id anchors this the way every offline
-    /// table's key does — Apple's reverse-geocoding API returns none — so
-    /// two distinct real places that happen to share Apple's own city and
-    /// region strings would collide into one key here; a residual,
-    /// disclosed limitation of a single, id-less network source, not a bug
-    /// in this composition.
-    static func networkPlaceKey(cityName: String?, regionName: String?) -> String? {
-        switch (cityName, regionName) {
-        case (let city?, let region?): "\(city), \(region)"
-        case (let city?, nil): city
-        case (nil, let region?): region
-        case (nil, nil): nil
-        }
+    /// FR-5.14's fifth scale, named — Apple's own `cityName` for the spot
+    /// (`MKAddressRepresentations`, see `PlaceNameLookup`), anchored to
+    /// `anchorKey` — the record's own already-disambiguated offline region
+    /// or country key (`PhotoRecord.gazetteerRegion ?? .gazetteerCountry`),
+    /// which already carries a dataset-native, globally unique id (see
+    /// `PlaceGazetteer`'s doc comment) — so two real places that happen to
+    /// share Apple's own city name never collide into one key.
+    ///
+    /// This anchor is load-bearing, not defensive over-engineering: Apple's
+    /// reverse-geocoding answer alone carries no stable id to disambiguate
+    /// with. `MKMapItem.identifier` (`MKMapItemIdentifier`, iOS 18+/macOS
+    /// 15+) looked like a candidate, but reverse-geocoding five real,
+    /// distinct coordinates confirmed it comes back `nil` on every one
+    /// (verified with a standalone `MKReverseGeocodingRequest` harness
+    /// against Springfield, MA/IL/MO and Las Vegas, NV/NM) — Apple's own
+    /// `MKAddressRepresentations.regionName` is also country-level only
+    /// ("United States" for all five), confirming the exact collision this
+    /// anchor exists to prevent: without it, all three Springfields and
+    /// both Las Vegases key identically.
+    ///
+    /// Nil when there's no city name to anchor (a bare `regionName` alone
+    /// would just restate the offline country/region scale under a
+    /// different vocabulary, adding no place FR-5.14 doesn't already know),
+    /// or when there's no offline key to anchor to (a coordinate off any
+    /// published country boundary) — declining a network-scale name here
+    /// rather than risking the leak FR-5.14's "never" forbids.
+    static func networkPlaceKey(cityName: String?, anchorKey: String?) -> String? {
+        guard let cityName, let anchorKey else { return nil }
+        return "\(cityName) (\(anchorKey))"
     }
 
     /// The grid `PlaceNameLookup` rounds a coordinate to when deciding
