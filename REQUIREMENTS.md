@@ -39,7 +39,9 @@ The app has three tabs matching the three stages of the journey:
   never leaves them for third-party servers. There are two exceptions, both
   Apple's and both the user's own: their iCloud account, which carries their
   judgments — never photos — between their devices; and Private Cloud Compute,
-  for work the device cannot do alone.
+  for work the device cannot do alone. One further exception is Apple's alone:
+  its maps service may be told where a photo was taken — never anything else
+  about it — to learn what that place is called (FR-5.13).
 - **FR-1.6** *(macOS)* Launching the app twice just brings the already-running
   window forward instead of opening a second one. *(Why: two copies running at
   once could destroy the taste the user has trained.)*
@@ -283,18 +285,41 @@ The app has three tabs matching the three stages of the journey:
 - **FR-5.13** A trait may be derived rather than measured — what a photo
   records of itself, combined with knowledge the app itself supplies, such as
   where the sun stood given when and where the photo was taken. Two limits
-  keep that honest: the knowledge must be the app's own and computable on the
-  device, never fetched on a photo's behalf (FR-9.3); and deriving a trait
-  must never make the app pull down more of a photo than examining it already
-  requires (FR-3.4). What a photo records too little to derive is not held
-  against it (FR-3.8), and what is derived counts only as much as the user's
-  own choices imply (FR-5.2).
+  keep that honest: the knowledge is the app's own, or looked up about where a
+  photo was taken — never about the photo itself — from the one source FR-1.5
+  allows; and deriving a trait must never make the app pull down more of a
+  photo than examining it already requires (FR-3.4). A lookup asks about each
+  place once and remembers the answer, at the pace the source permits, and
+  only as the user's network choices allow (FR-3.7); what cannot be looked up
+  yet waits the way FR-3.4's deferred photos wait, and until it is complete
+  the app ranks on what it already knows (FR-5.2). What a photo records too
+  little to derive is not held against it (FR-3.8), and what is derived
+  counts only as much as the user's own choices imply (FR-5.2).
+- **FR-5.14** Where a photo was taken counts not only as a position on the map
+  but as the places people name it by, at every scale they name it — a town
+  or park, a landscape or mountain range, a region, a country — the natural
+  and the political alike. Every photo that records where on land it was
+  taken is known at three such scales at least, with no network (FR-9.3). A
+  preference the user's choices reveal for one place carries to photos from
+  it they have never judged, and a place barely judged leans on the larger
+  places around it (FR-5.11). *(Why: people love a region, not a coordinate —
+  "the Odenwald, but not Heidelberg; France, not the USA" — and a map
+  position alone cannot tell two neighbouring places apart, or see two
+  far-apart corners of one place as the same.)*
 
 ## 6. The wallpaper album (Export tab)
 
-- **FR-6.1** The app maintains a Photos album named "Firnlight" holding
-  exactly the user's top-ranked, de-duplicated photos. Each sync reports the
-  total plus how many were added and removed.
+- **FR-6.1** The app maintains a Photos album named "Firnlight" holding the
+  best set of the user's de-duplicated photos it can make at the chosen size —
+  the best of their taste taken as a whole, not merely the top-ranked photos
+  taken one by one. No place, scene, mood, season or anything else the app
+  weighs (FR-5.2) crowds the rest out: among photos the user's taste rates
+  nearly alike, one unlike those already chosen wins over one more like them,
+  while a photo the user's taste clearly rates higher never gives way to
+  variety. Each sync reports the total plus how many were added and removed.
+  *(Why: a taste learned photo by photo rewards whatever it likes most over
+  and over — a user who loves the Odenwald still wants to see Patagonia, and
+  a rotation of one place, however loved, goes stale.)*
 - **FR-6.2** The album is ordered for visual variety, so that on "rotate in
   order" consecutive wallpapers look as different as possible. *(Why: avoid
   samey streaks of the same scene or mood.)*
