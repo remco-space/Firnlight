@@ -101,14 +101,31 @@ actor FeatureStore {
         )
     }
 
-    /// Album contents in playback order: membership is the top `limit` by
-    /// rank, but the sequence greedily maximizes the minimum feature-print
-    /// distance to recently placed photos, so consecutive wallpapers look as
-    /// different as possible.
+    /// Album membership AND playback order (FR-6.1, FR-6.2).
+    ///
+    /// Membership is not simply the top `limit` by rank: `selectDiverseMix`
+    /// walks the *whole* deduplicated, ranked pool (`rankedCore(limit:
+    /// .max)` — the same uncapped-pool precedent `suggestedAlbumSize`'s own
+    /// zone walk already set for FR-6.4, "no working shortcut quietly
+    /// narrows the pool") and may prefer a lower-but-nearly-as-good, more
+    /// varied photo over a higher one that repeats what's already chosen —
+    /// see that function's doc comment for exactly how "nearly alike" is
+    /// bounded so a clearly-better photo never loses its place. Once
+    /// membership is settled, the sequence is separately reordered to
+    /// greedily maximize the minimum feature-print distance to recently
+    /// placed photos (FR-6.2), so consecutive wallpapers also look as
+    /// different as possible — a distinct concern from *which* photos are
+    /// in the album at all.
     func albumCandidates(limit: Int) throws -> RankedResult {
-        let core = try rankedCore(limit: limit)
+        let core = try rankedCore(limit: .max)
+        let mix = selectDiverseMix(
+            candidates: core.kept,
+            vectors: core.vectors,
+            signatures: core.signatures,
+            limit: limit
+        )
         return RankedResult(
-            candidates: diversityOrdered(core.kept, vectors: core.vectors),
+            candidates: diversityOrdered(mix.candidates, vectors: mix.vectors),
             acceptedCount: core.accepted,
             suppressedCount: core.suppressed
         )
@@ -162,7 +179,18 @@ actor FeatureStore {
         return Set(latest.compactMap { key, isGood in isGood ? nil : key })
     }
 
-    private func rankedCore(limit: Int) throws -> (kept: [Candidate], vectors: [[Float]], accepted: Int, suppressed: Int) {
+    /// FR-6.1's diversity signature for one candidate: the two place scales
+    /// `selectDiverseMix` counts repetition over, and which quarter of the
+    /// calendar year it was taken in. Nil fields are FR-3.8 gaps (no
+    /// location, no date) and simply never repeat anything — a candidate
+    /// missing a signal can't be judged similar-by-that-signal to anything.
+    private struct MixSignature: Sendable {
+        let placeFine: String?
+        let placeMedium: String?
+        let seasonQuarter: Int?
+    }
+
+    private func rankedCore(limit: Int) throws -> (kept: [Candidate], vectors: [[Float]], signatures: [MixSignature], accepted: Int, suppressed: Int) {
         // Same serving-generation restriction as
         // `PreferenceRanker.loadEntries()`, and for the same reason (FR-5.2):
         // this walk ranks candidates against one another by score, so a photo
@@ -193,9 +221,20 @@ actor FeatureStore {
         }
         let records = fetched.sorted { rankKey($0) > rankKey($1) }
 
+        // FR-6.1's fine-scale signature prefers a resolved city name over
+        // the offline grid key it stands in for, exactly like
+        // `PreferenceRanker.placeBuckets(of:nameCache:)` — so "the same
+        // place" means the same thing to the mix selection below as it does
+        // to the ranking itself. Fetched once, not per record.
+        let nameCache: [String: String] = Dictionary(
+            uniqueKeysWithValues: try modelContext.fetch(FetchDescriptor<PlaceNameRecord>())
+                .compactMap { record in record.cityName.map { (record.fineCellKey, $0) } }
+        )
+
         let thresholdSquared = Thresholds.nearDuplicateDistance * Thresholds.nearDuplicateDistance
         var kept: [Candidate] = []
         var keptVectors: [[Float]] = []
+        var keptSignatures: [MixSignature] = []
         var suppressed = 0
 
         // The walk stops at the cutoff. Nothing below it can change the
@@ -229,10 +268,133 @@ actor FeatureStore {
             } else {
                 kept.append(candidate(for: record, badVerdictKeys: badVerdictKeys))
                 keptVectors.append(vector)
+                keptSignatures.append(Self.mixSignature(of: record, nameCache: nameCache))
             }
         }
 
-        return (kept, keptVectors, records.count, suppressed)
+        return (kept, keptVectors, keptSignatures, records.count, suppressed)
+    }
+
+    /// FR-6.1's diversity signature for one record — see `MixSignature`.
+    private static func mixSignature(of record: PhotoRecord, nameCache: [String: String]) -> MixSignature {
+        var placeFine: String?
+        var placeMedium: String?
+        if let latitude = record.latitude, let longitude = record.longitude {
+            let keys = PlaceHierarchy.scaleKeys(latitude: latitude, longitude: longitude)
+            placeFine = nameCache[keys.fine] ?? keys.fine
+            placeMedium = keys.medium
+        }
+        // Same quarter-of-the-year granularity as the ranker's own
+        // `PreferenceRanker.seasonFraction`, coarsened from a continuous
+        // fraction to four buckets — FR-6.1 asks whether the album repeats a
+        // *season*, not whether two photos share a calendar day.
+        let seasonQuarter = record.creationDate.map {
+            min(3, Int(PreferenceRanker.seasonFraction(of: $0) * 4))
+        }
+        return MixSignature(placeFine: placeFine, placeMedium: placeMedium, seasonQuarter: seasonQuarter)
+    }
+
+    /// FR-6.1: picks exactly `limit` candidates from `candidates` (already
+    /// ranked best-first and deduplicated by `rankedCore`) favoring variety
+    /// among near-ties, never at the expense of a clear win.
+    ///
+    /// Walks the pool from the top. Each slot after the first is filled from
+    /// the *band* of remaining candidates within `Thresholds
+    /// .albumMixScoreTolerance` of whichever remaining candidate currently
+    /// ranks best — never from further down, so a photo that clearly
+    /// outranks the whole band is never skipped for one that doesn't
+    /// (FR-6.1's "a photo the user's taste clearly rates higher never gives
+    /// way to variety"). Within that band, the candidate that repeats the
+    /// fewest of the axes `MixSignature`/`repetitionCount` track against
+    /// what's already selected wins — "among photos the user's taste rates
+    /// nearly alike, one unlike those already chosen wins over one more
+    /// like them." The very first slot always takes the single best
+    /// candidate outright: with nothing chosen yet there is nothing for it
+    /// to be a repeat *of*.
+    ///
+    /// Ties within a band (equal repetition count) resolve to whichever
+    /// candidate `band.min` reaches first, i.e. the higher-ranked of the
+    /// two — deterministic, and never worse than the plain top-`limit` cut
+    /// this replaces.
+    private func selectDiverseMix(
+        candidates: [Candidate],
+        vectors: [[Float]],
+        signatures: [MixSignature],
+        limit: Int
+    ) -> (candidates: [Candidate], vectors: [[Float]]) {
+        guard limit > 0 else { return ([], []) }
+        guard candidates.count > limit else {
+            // The whole pool is "the best set... it can make" — there is
+            // nothing to leave out, so nothing to choose between either.
+            return (candidates, vectors)
+        }
+
+        var remaining = Array(candidates.indices)
+        var selected: [Int] = []
+        var selectedSignaturesVectors: [(signature: MixSignature, vector: [Float])] = []
+        selected.reserveCapacity(limit)
+
+        while selected.count < limit, !remaining.isEmpty {
+            let winnerPosition: Int
+            if selected.isEmpty {
+                winnerPosition = 0
+            } else {
+                let bestKey = Self.candidateRankKey(candidates[remaining[0]])
+                var bandEnd = 1
+                while bandEnd < remaining.count {
+                    let key = Self.candidateRankKey(candidates[remaining[bandEnd]])
+                    guard key.tier == bestKey.tier, bestKey.score - key.score <= Thresholds.albumMixScoreTolerance else { break }
+                    bandEnd += 1
+                }
+                winnerPosition = (0..<bandEnd).min {
+                    Self.repetitionCount(of: signatures[remaining[$0]], vector: vectors[remaining[$0]], against: selectedSignaturesVectors)
+                        < Self.repetitionCount(of: signatures[remaining[$1]], vector: vectors[remaining[$1]], against: selectedSignaturesVectors)
+                }!
+            }
+            let index = remaining.remove(at: winnerPosition)
+            selected.append(index)
+            selectedSignaturesVectors.append((signatures[index], vectors[index]))
+        }
+
+        return (selected.map { candidates[$0] }, selected.map { vectors[$0] })
+    }
+
+    /// Same two-tier ordering `rankedCore`'s own `rankKey` applies to
+    /// `PhotoRecord`, restated over `Candidate` — the type `selectDiverseMix`
+    /// actually has in hand once `rankedCore` has already built it. Unscored
+    /// candidates (tier 0) never enter the same "nearly alike" band as a
+    /// scored one (tier 1): the two scales aren't comparable (see
+    /// `rankedCore`'s own doc comment), so `selectDiverseMix` compares tiers
+    /// before scores, exactly like `rankedCore`'s sort already does.
+    private static func candidateRankKey(_ candidate: Candidate) -> (tier: Int, score: Float) {
+        if let score = candidate.preferenceScore {
+            (1, score)
+        } else {
+            (0, candidate.aestheticsScore + (candidate.isFavorite ? Thresholds.favoriteRankBoost : 0))
+        }
+    }
+
+    /// How many of `selected`'s signatures repeat one of `signature`'s axes
+    /// — the same place at either scale it names, the same season quarter,
+    /// or a visually similar-enough already-chosen photo (FR-6.1's "place,
+    /// scene, mood, season"). Lower is more distinct.
+    private static func repetitionCount(
+        of signature: MixSignature,
+        vector: [Float],
+        against selected: [(signature: MixSignature, vector: [Float])]
+    ) -> Int {
+        let thresholdSquared = Thresholds.albumMixVisualSimilarityDistance * Thresholds.albumMixVisualSimilarityDistance
+        var count = 0
+        for other in selected {
+            if let fine = signature.placeFine, fine == other.signature.placeFine { count += 1 }
+            if let medium = signature.placeMedium, medium == other.signature.placeMedium { count += 1 }
+            if let quarter = signature.seasonQuarter, quarter == other.signature.seasonQuarter { count += 1 }
+            if vector.count == other.vector.count,
+               vDSP.distanceSquared(vector, other.vector) < thresholdSquared {
+                count += 1
+            }
+        }
+        return count
     }
 
     /// Greedy max-min ordering: start from the top-ranked photo, then always

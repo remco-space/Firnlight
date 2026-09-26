@@ -385,7 +385,64 @@ nonisolated enum Thresholds {
     /// library-independent scales (`PreferenceRanker.seasonFraction`,
     /// latitude ÷ 90) that never move under a growing library — see
     /// `PreferenceRanker`'s type doc comment.
-    static let rankerAlgorithmVersion = 10 // v10: derived solar geometry, hemisphere-aware season, place and era (FR-5.13)
+    /// v11 is required too: it adds the three place-scale weight buckets
+    /// below (FR-5.14) — a v10 weights file has no opinion about any of
+    /// them, so only a full rebuild (re-seed + full choice/verdict replay)
+    /// folds them in, the same reasoning every earlier trait addition here
+    /// gives.
+    static let rankerAlgorithmVersion = 11 // v11: three-scale place hierarchy (FR-5.14)
+
+    // MARK: Place hierarchy (FR-5.13, FR-5.14)
+
+    /// How many learned weight buckets each scale of `PlaceHierarchy` gets in
+    /// `PreferenceRanker.Weights.place` — one photo activates exactly one
+    /// bucket per scale (a hash of its grid cell, or of the resolved place
+    /// name once `PlaceNameLookup` has one), and SGD learns each bucket's
+    /// weight from duels exactly like every other trait (FR-5.2).
+    ///
+    /// Fewer buckets at coarser scales, matching what each scale is *for*:
+    /// a library plausibly touches dozens of towns but far fewer countries,
+    /// and a smaller table means more photos share a bucket, which is what
+    /// lets a heavily-judged scale's weight dominate a barely-judged finer
+    /// one as it decays toward zero between reinforcements (FR-5.11's "leans
+    /// on the larger places around it" falls out of `rankerWeightDecay`
+    /// already applying to every weight on every SGD step, not out of any
+    /// bespoke smoothing here). Unverified against a real library's spread
+    /// of distinct places; tune by watching how many distinct fine keys a
+    /// real library resolves to, the same way every other geometric or
+    /// count-based threshold here is tuned.
+    static let placeFineBucketCount = 48
+    static let placeMediumBucketCount = 24
+    static let placeCoarseBucketCount = 12
+
+    /// How long `PlaceNameLookup` waits after successfully resolving one
+    /// cell before asking about the next — FR-5.13's "at the pace the
+    /// source permits". Apple documents no rate limit for
+    /// `MKReverseGeocodingRequest`, so this is simply a courteous, arbitrary
+    /// pace for a background enrichment nobody is waiting on, not a measured
+    /// limit — a duel or an album sync never blocks on it either way.
+    static let placeNameLookupPace: Duration = .seconds(2)
+
+    /// How long `PlaceNameLookup` waits before trying again after a call
+    /// that made no progress — no network (FR-3.7), or nothing left to look
+    /// up. Long relative to `placeNameLookupPace` for the same reason
+    /// `deferredRetryInterval` is long relative to `analysisPauseRecheckInterval`:
+    /// re-testing a condition that rarely changes moment to moment should
+    /// cost the idle loop almost nothing.
+    static let placeNameLookupIdleInterval: Duration = .seconds(60)
+
+    /// How many resolved cells `LibraryCatchUp`'s lookup loop coalesces
+    /// before it reloads the ranker and bumps `RankingClock` — the same
+    /// batch-or-idle debounce shape `preferenceCacheFlushBatchSize` already
+    /// uses for duel choices, applied here for the same reason (FR-8.2): a
+    /// library with hundreds of unresolved places would otherwise cost a
+    /// full-pool reload (`FeatureStore.albumCandidates`, `suggestedAlbumSize`)
+    /// every `placeNameLookupPace`, for a background enrichment nobody
+    /// pressed a button for. A trailing partial batch is still flushed as
+    /// soon as the loop goes idle (nothing pending, or waiting on the
+    /// network) rather than held forever, the same "idle bound" half of that
+    /// existing debounce.
+    static let placeNameLookupBatchSize = 10
 
     /// Distinct foreground objects at which the ranker's `subjectCount` trait
     /// saturates at 1.
@@ -558,6 +615,39 @@ nonisolated enum Thresholds {
     /// Album ordering maximizes the minimum feature-print distance to this
     /// many previously placed photos, so consecutive wallpapers look different.
     static let albumDiversityWindow = 5
+
+    /// How close two candidates' raw scores must be before FR-6.1 will let a
+    /// more-varied one displace a more-similar-to-what's-already-chosen one
+    /// in the album's *membership* — distinct from `albumDiversityWindow`,
+    /// which only reorders an already-decided membership for playback
+    /// (FR-6.2). This is what makes "a photo the user's taste clearly rates
+    /// higher never gives way to variety" concrete: outside this margin, a
+    /// higher-scored candidate is never skipped, however similar it is to
+    /// what's already in; inside it, `FeatureStore.selectDiverseMix` may
+    /// prefer whichever candidate in the tied band repeats the fewest
+    /// already-chosen place/season/visual axes.
+    ///
+    /// Raw-score units, same scale `duelPoolScoreMargin` already uses: the
+    /// sigmoid's slope at the centre is ¼, so a gap of this size corresponds
+    /// to roughly a 55/45 split in which photo a duel would favour — close
+    /// enough to read as "nearly alike" rather than a real preference.
+    /// Unverified against real library data; tune the same way
+    /// `verdictClassSpread` was, by watching what real near-tied stretches
+    /// of a real ranking actually contain.
+    static let albumMixScoreTolerance: Float = 0.2
+
+    /// Feature-print distance below which two already-deduplicated
+    /// candidates still count as "similar scene or mood" for FR-6.1's mix —
+    /// looser than `nearDuplicateDistance`, which has already removed actual
+    /// re-takes of the same vista before this stage ever sees the pool.
+    /// This one is about two *different* photos that nonetheless read alike
+    /// (the same kind of sunset, the same style of forest path), which is
+    /// exactly the "mood" FR-6.1 names alongside place and season.
+    /// Unverified against real library data — a wider band than
+    /// `nearDuplicateDistance`'s 0.5 by construction, since it has to catch
+    /// more than exact re-takes; tune the same way that constant was, by
+    /// watching what a real ranked pool clusters into.
+    static let albumMixVisualSimilarityDistance: Float = 0.8
 
     // MARK: The album-size scale (FR-6.3)
 

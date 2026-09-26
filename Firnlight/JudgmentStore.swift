@@ -32,7 +32,7 @@ nonisolated enum JudgmentStore {
     /// Every model the app persists. The container is built from the union;
     /// each configuration below then claims a disjoint subset.
     private static var fullSchema: Schema {
-        Schema([PhotoRecord.self, ChoiceRecord.self, VerdictRecord.self, IgnoreRecord.self])
+        Schema([PhotoRecord.self, PlaceNameRecord.self, ChoiceRecord.self, VerdictRecord.self, IgnoreRecord.self])
     }
 
     private static var applicationSupport: URL {
@@ -50,7 +50,11 @@ nonisolated enum JudgmentStore {
 
         let local = ModelConfiguration(
             "default",
-            schema: Schema([PhotoRecord.self]),
+            // `PlaceNameRecord` is derived, rebuildable cache data — the same
+            // category `PhotoRecord.featurePrint` already is (see its own
+            // doc comment) — so it belongs beside `PhotoRecord`, never in the
+            // judgments store.
+            schema: Schema([PhotoRecord.self, PlaceNameRecord.self]),
             url: localStoreURL,
             cloudKitDatabase: .none
         )

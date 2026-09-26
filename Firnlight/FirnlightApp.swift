@@ -8,11 +8,16 @@ import AppKit
 ///
 /// Platform constraints baked into the whole design: macOS 27+ and iOS 27+
 /// (iPhone and iPad), Swift 6 strict concurrency, SwiftUI + PhotoKit + Vision
-/// (modern async struct API) + SwiftData + Accelerate. No third-party
-/// dependencies and no telemetry; all processing currently runs on-device with
-/// no network calls. (FR-1.5 permits Apple's Private Cloud Compute for
-/// higher-level foundation-model work, retaining no data; the app uses none
-/// today.) Every stage that touches the store runs as a plain actor owning its
+/// (modern async struct API) + SwiftData + Accelerate + MapKit. No
+/// third-party dependencies and no telemetry; almost all processing runs
+/// on-device. The one exception is `PlaceNameLookup`'s `MKReverseGeocodingRequest`
+/// calls (FR-1.5, FR-5.13): a photo's coordinate, and nothing else about it
+/// or the photo, sent to Apple's maps service to learn what that place is
+/// called — never required for ranking to work (see `PlaceHierarchy`), only
+/// ever a refinement of it. (FR-1.5 also permits Apple's Private Cloud
+/// Compute for higher-level foundation-model work, retaining no data; the
+/// app uses none today.) Every stage that touches the store runs as a plain
+/// actor owning its
 /// own ModelContext, off the main thread (see FeatureStore for why @ModelActor
 /// can't deliver that); values crossing actor boundaries are nonisolated
 /// Sendable structs.
