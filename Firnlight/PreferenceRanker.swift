@@ -1382,33 +1382,57 @@ actor PreferenceRanker {
                 * (bothKnown ? winner.traits.values[index] - loser.traits.values[index] : 0)
         }
 
-        // FR-5.14: each scale's winning place gains exactly what its losing
-        // place loses. When winner and loser are the same place at some
-        // scale (the ordinary case for two photos from the same place —
-        // now an exact string match, never a hash collision), the two
-        // cancel to a net-zero change for that scale — correctly: a duel
-        // between two photos from the same place is evidence about whatever
-        // else distinguishes them, never about the place itself. A scale
-        // where either photo has no name trains nothing at that scale only
-        // — the same either-side-unmeasured guard the trait loop above
-        // applies, per scale rather than for the whole photo, so a photo
-        // missing just its fine-scale name still trains normally at
-        // landscape, region, coarse and network. Five scales: landscape
-        // (natural) and region (political) are independently trained,
-        // neither standing in for the other — "the natural and the
-        // political alike" — and `network` (Apple's own answer, where the
-        // network allows) trains in its own namespace, never conflated
-        // with any offline scale (see `PlaceHierarchy`'s doc comment).
-        for (scale, winnerName, loserName) in [
+        // FR-5.14: each scale's winning place gains what its losing place
+        // loses. When winner and loser are the same place at some scale
+        // (the ordinary case for two photos from the same place — now an
+        // exact string match, never a hash collision), the two cancel to a
+        // net-zero change for that scale — correctly: a duel between two
+        // photos from the same place is evidence about whatever else
+        // distinguishes them, never about the place itself. A scale where
+        // either photo has no name trains nothing at that scale only — the
+        // same either-side-unmeasured guard the trait loop above applies,
+        // per scale rather than for the whole photo, so a photo missing
+        // just its fine-scale name still trains normally at landscape,
+        // region, coarse and network. Five scales: landscape (natural) and
+        // region (political) are independently trained, neither standing
+        // in for the other — "the natural and the political alike" — and
+        // `network` (Apple's own answer, where the network allows) trains
+        // in its own namespace, never conflated with any offline scale
+        // (see `PlaceHierarchy`'s doc comment).
+        //
+        // FR-5.2: "no trait counts for more or less than the user's own
+        // decisions imply" — so *place as a whole* must learn at roughly
+        // the rate of one trait per duel, not up to five. An earlier
+        // revision gave each of the five scales above its own full
+        // `gradient` step whenever the two photos differed there, and two
+        // photos from different places differ at *every* scale at once far
+        // more often than not — they're all derived from the same
+        // coordinate, so a duel between two geographically distant photos
+        // routinely differs at fine, landscape, region, coarse and network
+        // simultaneously — meaning "where a photo was taken" could learn up
+        // to 5× faster than any other single trait from that same one
+        // duel, a multiplier no judgment implied. Splitting one shared
+        // `gradient` across however many scales actually differ (`equal`
+        // guard above already excludes same-place scales, which train
+        // nothing regardless and so must not shrink everyone else's share)
+        // keeps the place dimension's total movement comparable to one
+        // trait's, whether a duel differs by one scale or by all five.
+        let differingScales: [(scale: String, winnerName: String, loserName: String)] = [
             ("fine", winner.place.fine, loser.place.fine),
             ("landscape", winner.place.landscape, loser.place.landscape),
             ("region", winner.place.region, loser.place.region),
             ("coarse", winner.place.coarse, loser.place.coarse),
             ("network", winner.place.network, loser.place.network),
-        ] {
-            guard let winnerName, let loserName else { continue }
-            weights.place[Self.placeWeightKey(scale: scale, name: winnerName), default: 0] += gradient
-            weights.place[Self.placeWeightKey(scale: scale, name: loserName), default: 0] -= gradient
+        ].compactMap { scale, winnerName, loserName in
+            guard let winnerName, let loserName, winnerName != loserName else { return nil }
+            return (scale, winnerName, loserName)
+        }
+        if !differingScales.isEmpty {
+            let placeGradient = gradient / Float(differingScales.count)
+            for (scale, winnerName, loserName) in differingScales {
+                weights.place[Self.placeWeightKey(scale: scale, name: winnerName), default: 0] += placeGradient
+                weights.place[Self.placeWeightKey(scale: scale, name: loserName), default: 0] -= placeGradient
+            }
         }
     }
 

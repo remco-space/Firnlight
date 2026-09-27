@@ -427,7 +427,17 @@ nonisolated enum Thresholds {
     /// Every `Weights.place` key of the form `"network:<name>"` written
     /// under v14 is shaped differently from a v15 one for the same
     /// coordinate, so this forces the same full replay the v14 bump did.
-    static let rankerAlgorithmVersion = 15 // v15: network scale anchored to the offline region/country id (FR-5.14)
+    /// v16: `sgdStep`'s place-scale loop now splits one `gradient` across
+    /// however many of the five scales actually differ, instead of giving
+    /// each differing scale its own full `gradient` step — the fixed-count
+    /// version let "where a photo was taken" learn up to 5× faster than any
+    /// other single trait, since two geographically distant photos
+    /// routinely differ at all five scales in the same duel (FR-5.2: "no
+    /// trait counts for more or less than the user's own decisions
+    /// imply"). Every already-trained `Weights.place` entry was accumulated
+    /// under the old, larger per-step size, so this forces the same full
+    /// replay every place-scale-shape bump above already does.
+    static let rankerAlgorithmVersion = 16 // v16: place learns at one trait's rate, not up to five (FR-5.2)
 
     // MARK: Place hierarchy (FR-5.13, FR-5.14)
 

@@ -387,21 +387,38 @@ actor FeatureStore {
     }
 
     /// How many of `selected`'s signatures repeat one of `signature`'s axes
-    /// — the same place at any of FR-5.14's five scales, the same season
-    /// quarter, or a qualitatively similar-enough already-chosen photo
-    /// (FR-6.1's "place, scene, mood, season, or anything else the app
-    /// weighs"). Lower is more distinct.
+    /// — the same place at any of FR-5.14's five scales (one point, not up
+    /// to five — see below), the same season quarter, or a qualitatively
+    /// similar-enough already-chosen photo (FR-6.1's "place, scene, mood,
+    /// season, or anything else the app weighs"). Lower is more distinct.
     private static func repetitionCount(
         of signature: MixSignature,
         against selected: [MixSignature]
     ) -> Int {
         var count = 0
         for other in selected {
-            if let fine = signature.placeFine, fine == other.placeFine { count += 1 }
-            if let landscape = signature.placeLandscape, landscape == other.placeLandscape { count += 1 }
-            if let region = signature.placeRegion, region == other.placeRegion { count += 1 }
-            if let coarse = signature.placeCoarse, coarse == other.placeCoarse { count += 1 }
-            if let network = signature.placeNetwork, network == other.placeNetwork { count += 1 }
+            // FR-6.1: "no place, scene, mood, season... crowds the rest
+            // out" — place is one axis among several here, not five. An
+            // earlier revision counted each of FR-5.14's five place scales
+            // separately (up to +5 for two candidates sharing every one),
+            // against +1 each for season and for look, so two candidates
+            // from the same region but different towns already outweighed
+            // a season or look match on its own — place variety crowded
+            // out every other kind FR-6.1 names, the opposite of what it
+            // asks. Any place scale matching now contributes the same
+            // single point season and look each do, whether it's one scale
+            // or all five.
+            let sharesAnyPlaceScale = [
+                (signature.placeFine, other.placeFine),
+                (signature.placeLandscape, other.placeLandscape),
+                (signature.placeRegion, other.placeRegion),
+                (signature.placeCoarse, other.placeCoarse),
+                (signature.placeNetwork, other.placeNetwork),
+            ].contains { candidatePair in
+                guard let a = candidatePair.0, let b = candidatePair.1 else { return false }
+                return a == b
+            }
+            if sharesAnyPlaceScale { count += 1 }
             if let quarter = signature.seasonQuarter, quarter == other.seasonQuarter { count += 1 }
             if qualitativeDistance(signature, other) < Thresholds.albumMixQualitativeSimilarityDistance {
                 count += 1
