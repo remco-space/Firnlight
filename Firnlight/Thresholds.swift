@@ -534,16 +534,37 @@ nonisolated enum Thresholds {
     /// before it reloads the ranker and bumps `RankingClock` — the same
     /// batch-or-idle debounce shape `preferenceCacheFlushBatchSize` already
     /// uses for duel choices, applied here for the same reason (FR-8.2): a
-    /// library with hundreds of unresolved places would otherwise cost a
-    /// full-pool reload (`FeatureStore.albumCandidates`, `suggestedAlbumSize`)
-    /// every `placeNameLookupPace`, for a background enrichment nobody
-    /// pressed a button for. A trailing partial batch is still flushed as
-    /// soon as the loop goes idle (nothing pending, or waiting on the
-    /// network) rather than held forever, the same "idle bound" half of that
-    /// existing debounce. This is load-bearing again as of FR-5.14's fifth
-    /// scale — a resolution now genuinely changes ranking, unlike the round
-    /// where this loop's answer was purely informational.
-    static let placeNameLookupBatchSize = 10
+    /// library with unresolved places would otherwise cost a full-pool
+    /// reload (`FeatureStore.albumCandidates`, `suggestedAlbumSize`) every
+    /// `placeNameLookupPace`, for a background enrichment nobody pressed a
+    /// button for. A trailing partial batch is still flushed as soon as the
+    /// loop goes idle (nothing pending, or waiting on the network) rather
+    /// than held forever, the same "idle bound" half of that existing
+    /// debounce. This is load-bearing again as of FR-5.14's fifth scale — a
+    /// resolution now genuinely changes ranking, unlike the round where this
+    /// loop's answer was purely informational.
+    ///
+    /// Raised from 10 to 200 on 2026-09-27: 10 was tuned against "a library
+    /// with hundreds of unresolved places," but the fifth scale's own first
+    /// real-library run (post-FR-5.14, v0.26.0) had thousands pending —
+    /// every one of them, the first time the feature saw that library. At
+    /// batch size 10 and `placeNameLookupPace` of 2s, a bump landed roughly
+    /// every 20s for the run's whole length, each one re-triggering
+    /// `FeatureStore`'s O(pool × library) near-duplicate walk in
+    /// `rankedCore` on both of Export's `.task(id: RankingClock.shared
+    /// .version)` hooks — measured live (`sample` against a running Debug
+    /// build, real 16k-photo library) at 160–196% CPU sustained for over 20
+    /// minutes, most of it exactly this walk, re-run for a change
+    /// (a place name) that walk's own dedup logic never reads at all — only
+    /// the downstream diversity signature does. 200 keeps the *live*
+    /// `placeNamesPending` count updating every iteration regardless (see
+    /// `LibraryCatchUp.runPlaceNameLookupLoop`, which refreshes it outside
+    /// this batch/idle gate) — FR-3.5's "still going" report is unaffected —
+    /// while cutting the reload count on a several-thousand-cell backlog by
+    /// 20×. Not raised further: the idle-flush half of this debounce still
+    /// means a small backlog (the common case, after the first run) reloads
+    /// promptly rather than waiting on a batch that never fills.
+    static let placeNameLookupBatchSize = 200
 
     /// Records `LibraryScanner.applyNetworkPlaceNames` applies between
     /// cooperative yields (and SwiftData saves), the same

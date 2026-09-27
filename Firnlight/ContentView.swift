@@ -774,12 +774,24 @@ private struct LibraryStatusView: View {
     /// are only ever rendered at zero opacity, so they just have to keep the
     /// slot the size it will need.
     private var scanProgress: (value: Double?, total: Double, caption: String) {
-        guard case .scanning(let examined, let total) = scanner.phase, total > 0 else {
+        switch scanner.phase {
+        case .idle:
             return (nil, 1, "Preparing…")
+        case .scanning(let examined, let total):
+            guard total > 0 else { return (nil, 1, "Preparing…") }
+            // FR-8.1: locale-grouped digits and "photo" agreeing with `total`
+            // (the count it quantifies — "of 1 photo", not "of 1 photos").
+            return (Double(examined), Double(total), "\(examined.formatted()) of \(total.formatted()) \(total.agreeing("photo")) examined")
+        case .finishingUp:
+            // FR-2.4/FR-8.12: the asset-by-asset pass is over, but the scan
+            // isn't — see `LibraryScanner.Phase.finishingUp`'s doc comment.
+            // No denominator exists for this tail (it's several unrelated
+            // passes, not one countable one), so this is indeterminate on
+            // purpose, the same honest choice `.idle`/pre-count `.scanning`
+            // already make above, rather than a fabricated fraction FR-8.12
+            // would forbid.
+            return (nil, 1, "Finishing up…")
         }
-        // FR-8.1: locale-grouped digits and "photo" agreeing with `total`
-        // (the count it quantifies — "of 1 photo", not "of 1 photos").
-        return (Double(examined), Double(total), "\(examined.formatted()) of \(total.formatted()) \(total.agreeing("photo")) examined")
     }
 
     /// What the app last found in the library.

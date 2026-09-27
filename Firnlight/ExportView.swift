@@ -382,6 +382,12 @@ final class ExportModel {
             suggestion = try await featureStore(container).suggestedAlbumSize()
             reloadStrictnessIfChanged()
             refreshSizeScale()
+        } catch is CancellationError {
+            // A newer `RankingClock` bump re-keyed this `.task(id:)` before
+            // this call finished (see `FeatureStore.zoneScores`'s own
+            // cancellation check) — the newer call already has this one
+            // covered, so there is nothing to report. Matches
+            // `AnalysisModel.start`'s identical silent catch.
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -421,6 +427,8 @@ final class ExportModel {
             // learning the real ceiling narrows it on the spot.
             totalAccepted = result.acceptedCount
             refreshSizeScale()
+        } catch is CancellationError {
+            // See `refreshSuggestion`'s identical catch.
         } catch {
             errorMessage = error.localizedDescription
         }

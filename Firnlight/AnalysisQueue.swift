@@ -355,6 +355,12 @@ actor AnalysisQueue {
     }
 
     func statistics() throws -> AnalysisStatistics {
+        // Diagnostic timing (FR-8.2) — read live via `log stream`. Called
+        // after every analysis batch and once more when a run ends, so this
+        // is worth knowing the per-call cost of on a large store, even
+        // though eight `fetchCount`s at this cadence were not themselves
+        // the cause identified in the CPU investigation this accompanies.
+        let start = ContinuousClock.now
         let version = Thresholds.currentAnalysisVersion
         func count(_ predicate: Predicate<PhotoRecord>) throws -> Int {
             try modelContext.fetchCount(FetchDescriptor(predicate: predicate))
@@ -373,6 +379,7 @@ actor AnalysisQueue {
         })
         stats.skipped = try count(#Predicate { $0.isSkipped })
         stats.failed = try count(#Predicate { $0.analysisFailed })
+        Self.log.info("statistics(): total=\(stats.total) pending=\(stats.pending) in \(ContinuousClock.now - start, privacy: .public)")
         return stats
     }
 

@@ -24,6 +24,22 @@ final class LibraryScanner {
     enum Phase: Equatable {
         case idle
         case scanning(examined: Int, total: Int)
+        /// FR-2.4: the tail of a scan, after the asset-by-asset pass above
+        /// has examined every photo but before the scan is actually over —
+        /// cloud-identifier resolution, judgment re-keying, ignore
+        /// reconciliation, and FR-5.14's unconditional network place-name
+        /// pass over every located record (`applyNetworkPlaceNames`), none
+        /// of which advance `examined`/`total`. Without a state of its own
+        /// here, `phase` simply held its last `.scanning(total, total)`
+        /// value through this whole tail: on a library with many located
+        /// photos that pass alone can run for minutes, and the progress bar
+        /// sat frozen at "16,261 of 16,261 examined" throughout it — visually
+        /// indistinguishable from finished while real work, and real CPU,
+        /// continued underneath with nothing on screen saying so. That is
+        /// exactly the silent-background-work FR-2.4 forbids: "catching up
+        /// shows live progress and what changed," not a bar that looks done
+        /// two phases before the pass it belongs to actually is.
+        case finishingUp
     }
 
     /// How the last scan ended. Split out of `Phase` deliberately: FR-8.7 asks
@@ -45,10 +61,21 @@ final class LibraryScanner {
     /// granted is kept (FR-8.7).
     private(set) var outcome: Outcome?
 
-    private let log = Logger(subsystem: "space.remco.Firnlight", category: "LibraryScanner")
+    // `static`, not an instance property: `applyNetworkPlaceNames` and its
+    // sibling `@concurrent`/static helpers below need to log their own
+    // timing (FR-8.2) without an instance of `LibraryScanner` to hang it
+    // off — accessible unqualified from instance methods the same way.
+    private static let log = Logger(subsystem: "space.remco.Firnlight", category: "LibraryScanner")
 
+    /// True for `.scanning` and `.finishingUp` alike — both are "a scan is
+    /// running" as far as anything gating on this (the progress row's
+    /// `shownWhileWaiting`, the re-entrancy guard in `scan(into:)`) needs to
+    /// know; only `scanProgress` (ContentView) needs to tell the two apart.
     var isScanning: Bool {
-        if case .scanning = phase { true } else { false }
+        switch phase {
+        case .scanning, .finishingUp: true
+        case .idle: false
+        }
     }
 
     /// Set while a scan is running by a change that arrived during it, so the
@@ -101,11 +128,14 @@ final class LibraryScanner {
             // there to backfill records that predate the fields at all)
             // picks every one of them up in this same pass, rather than
             // leaving them cached against stale data indefinitely.
-            if Self.gazetteerDataChanged {
+            //
+            // See `consumeGazetteerDataChanged`'s doc comment for why this
+            // is a function call, not a read of a cached property.
+            if Self.consumeGazetteerDataChanged() {
                 for record in existingRecords {
                     record.gazetteerResolved = false
                 }
-                log.info("Place gazetteer data changed; re-resolving \(existingRecords.count) records' cached place names")
+                Self.log.info("Place gazetteer data changed; re-resolving \(existingRecords.count) records' cached place names")
             }
 
             let options = PHFetchOptions()
@@ -113,7 +143,12 @@ final class LibraryScanner {
             let assets = PHAsset.fetchAssets(with: options)
             let total = assets.count
             phase = .scanning(examined: 0, total: total)
-            log.info("Scan started: \(total) images in library, \(existingRecords.count) records already stored")
+            // Diagnostic timing only (FR-8.2's "measure before fixing") — not
+            // persisted; read live via `log stream` while the app runs, as
+            // the app's other `Logger` output already is.
+            let clock = ContinuousClock()
+            let passStart = clock.now
+            Self.log.info("Scan started: \(total) images in library, \(existingRecords.count) records already stored")
 
             var newlyAdded = 0
             var editedQueued = 0
@@ -253,6 +288,13 @@ final class LibraryScanner {
                     await Task.yield()
                 }
             }
+            Self.log.info("Scan's asset-by-asset pass finished in \(clock.now - passStart, privacy: .public); starting the finishing-up tail (\(pendingGazetteerUpdates.count) gazetteer lookups pending)")
+
+            // FR-2.4: the asset-by-asset pass above is done, but the scan
+            // isn't — see `Phase.finishingUp`'s doc comment for why this
+            // can't simply be left at its last `.scanning` value.
+            phase = .finishingUp
+            let finishingUpStart = clock.now
 
             // FR-5.14's offline place hierarchy, resolved for every record
             // this pass touched — in one batch, entirely off the main actor
@@ -294,7 +336,7 @@ final class LibraryScanner {
             let networkPlaceNamesChanged = try await Self.applyNetworkPlaceNames(in: context)
             if networkPlaceNamesChanged > 0 {
                 contentChanged = true
-                log.info("Applied \(networkPlaceNamesChanged) network place-name changes")
+                Self.log.info("Applied \(networkPlaceNamesChanged) network place-name changes")
             }
 
             // Assets deleted from the library leave orphaned records — clean up
@@ -325,7 +367,7 @@ final class LibraryScanner {
                     contentChanged = true
                 }
             } else {
-                log.info("Access narrowed mid-scan; skipping orphan cleanup so photos outside this fetch are not mistaken for deleted")
+                Self.log.info("Access narrowed mid-scan; skipping orphan cleanup so photos outside this fetch are not mistaken for deleted")
             }
 
             try context.save()
@@ -350,7 +392,7 @@ final class LibraryScanner {
                 removed: removed
             )
             phase = .idle
-            log.info("Scan finished: \(total) examined, \(candidates) candidates (\(newlyAdded) new, \(editedQueued) edited queued for re-analysis, \(removed) removed)")
+            Self.log.info("Scan finished: \(total) examined, \(candidates) candidates (\(newlyAdded) new, \(editedQueued) edited queued for re-analysis, \(removed) removed); finishing-up tail took \(clock.now - finishingUpStart, privacy: .public), whole scan took \(clock.now - passStart, privacy: .public)")
             // FR-4.5: the visible Library view brings itself up to date for
             // content, not just order. A scan can change what belongs in the
             // grid — add, remove, or re-flag a favorite (FR-2.2), drop a
@@ -364,7 +406,7 @@ final class LibraryScanner {
                 RankingClock.shared.bump()
             }
         } catch {
-            log.error("Scan failed: \(error.localizedDescription)")
+            Self.log.error("Scan failed: \(error.localizedDescription)")
             outcome = .failed(error.localizedDescription)
             phase = .idle
         }
@@ -380,6 +422,7 @@ final class LibraryScanner {
     /// back to the local identifier, so an unresolved photo is still fully
     /// usable, just not yet portable.
     private func resolveCloudIdentifiers(in context: ModelContext) async throws {
+        let start = ContinuousClock.now
         let unresolved = try context.fetch(
             FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.cloudIdentifier == nil })
         )
@@ -409,7 +452,7 @@ final class LibraryScanner {
             try context.save()
             await Task.yield()
         }
-        log.info("Resolved \(resolved) of \(unresolved.count) cloud identifiers")
+        Self.log.info("Resolved \(resolved) of \(unresolved.count) cloud identifiers in \(ContinuousClock.now - start, privacy: .public)")
     }
 
     /// The blocking PhotoKit call, off the main actor.
@@ -456,6 +499,7 @@ final class LibraryScanner {
     /// hadn't happened or had failed. Both are healed the same way, so there
     /// is one path rather than a migration special case.
     private func rekeyJudgments(in context: ModelContext) throws {
+        let start = ContinuousClock.now
         let records = try context.fetch(
             FetchDescriptor<PhotoRecord>(predicate: #Predicate { $0.cloudIdentifier != nil })
         )
@@ -478,7 +522,7 @@ final class LibraryScanner {
         }
         guard moved > 0 else { return }
         try context.save()
-        log.info("Re-keyed \(moved) judgment references onto cloud identifiers")
+        Self.log.info("Re-keyed \(moved) judgment references onto cloud identifiers in \(ContinuousClock.now - start, privacy: .public)")
     }
 
     /// Brings `PhotoRecord.isExcluded` in line with the ignore judgments
@@ -494,6 +538,7 @@ final class LibraryScanner {
     /// the judgment is the thing being honoured, not overwritten.
     @discardableResult
     private func reconcileIgnores(in context: ModelContext) throws -> Int {
+        let start = ContinuousClock.now
         let ignores = try context.fetch(
             FetchDescriptor<IgnoreRecord>(sortBy: [SortDescriptor(\.timestamp)])
         )
@@ -509,7 +554,7 @@ final class LibraryScanner {
         }
         guard changed > 0 else { return 0 }
         try context.save()
-        log.info("Applied \(changed) ignore judgments from the shared store")
+        Self.log.info("Applied \(changed) ignore judgments from the shared store in \(ContinuousClock.now - start, privacy: .public)")
         return changed
     }
 
@@ -574,15 +619,38 @@ final class LibraryScanner {
     /// `gazetteerCountry` from before the change is simply wrong now, not
     /// merely out of date the way an untouched photo's location is not.
     ///
-    /// Checked once per process and persisted in `UserDefaults`, mirroring
-    /// `VisionRevisionFingerprint.generation`'s baseline pattern: the very
-    /// first read on a device with no stored baseline adopts the current
-    /// fingerprint without forcing a reset — there is nothing to compare
-    /// against yet, and a record with no cached gazetteer fields at all is
-    /// already picked up by the ordinary `!record.gazetteerResolved` check,
-    /// so treating "nothing on record" as "a change happened" would only
-    /// force a redundant second pass over the exact same records.
-    private static let gazetteerDataChanged: Bool = {
+    /// Checked on every scan, against a baseline persisted in `UserDefaults`,
+    /// mirroring `VisionRevisionFingerprint.generation`'s baseline pattern:
+    /// the very first read on a device with no stored baseline adopts the
+    /// current fingerprint without forcing a reset — there is nothing to
+    /// compare against yet, and a record with no cached gazetteer fields at
+    /// all is already picked up by the ordinary `!record.gazetteerResolved`
+    /// check, so treating "nothing on record" as "a change happened" would
+    /// only force a redundant second pass over the exact same records.
+    ///
+    /// A plain function, not a `static let`: a `static let` computes its
+    /// closure exactly once and caches *that* result for the rest of the
+    /// process, which is wrong here — the whole point is "did the data
+    /// change *since the baseline stored on disk*", and the closure already
+    /// updates that baseline as its side effect. A cached `static let` froze
+    /// whichever answer the very first call in the process happened to get:
+    /// once one scan found the data changed, `true` was cached forever, and
+    /// every later scan in that same process re-read the *cached* `true`
+    /// instead of re-running the comparison against the now-current
+    /// baseline — marking every `PhotoRecord` unresolved and re-resolving
+    /// the whole library again on every subsequent scan for as long as the
+    /// process lived, not just the one scan that genuinely followed the
+    /// change. Worse, since batch saves happen mid-loop (`Thresholds
+    /// .scanSaveBatchSize`), an app quit mid-scan could persist some records
+    /// with `gazetteerResolved = false` while `Self.gazetteerDataChanged`
+    /// never got the chance to write its own baseline update — the two are
+    /// meant to move together and a cached `let` broke that. A method
+    /// re-runs the comparison — and updates the on-disk baseline — every
+    /// time it's called, so only the scan that actually follows a genuine
+    /// change ever sees `true`; the very next call, in this process or the
+    /// next, compares against the baseline that call already wrote and
+    /// correctly finds nothing new.
+    private static func consumeGazetteerDataChanged() -> Bool {
         let defaults = UserDefaults.standard
         let key = "space.remco.Firnlight.placeGazetteerFingerprint.baseline"
         let observed = PlaceGazetteer.dataFingerprint
@@ -593,7 +661,7 @@ final class LibraryScanner {
         guard baseline != observed else { return false }
         defaults.set(observed, forKey: key)
         return true
-    }()
+    }
 
     /// One record's identifier, the grid cell its coordinate rounds to, and
     /// its own current offline anchor — everything `composeNetworkPlaceNames`
@@ -647,6 +715,15 @@ final class LibraryScanner {
     /// `RankingClock`'s purposes — the common case (nothing new resolved
     /// since the last scan) should not force every ranked view to reload.
     private static func applyNetworkPlaceNames(in context: ModelContext) async throws -> Int {
+        // Diagnostic timing (FR-8.2) — logged unconditionally below, unlike
+        // the caller's own "\(n) network place-name changes" line, which
+        // only fires when `changed > 0`. This pass's whole cost is paid on
+        // *every* scan regardless of whether anything changed (see the
+        // function's own doc comment on why it's unconditional), so a log
+        // line gated the same way as the caller's would hide this exact
+        // pass's duration from `log stream` on precisely the common runs
+        // that are otherwise invisible — the runs most worth measuring.
+        let start = ContinuousClock.now
         let placeNameRecords = try context.fetch(FetchDescriptor<PlaceNameRecord>())
         guard !placeNameRecords.isEmpty else { return 0 }
         let cityNameByCacheKey: [String: String?] = Dictionary(uniqueKeysWithValues: placeNameRecords.map { ($0.cacheKey, $0.cityName) })
@@ -705,6 +782,7 @@ final class LibraryScanner {
             }
             await Task.yield()
         }
+        Self.log.info("applyNetworkPlaceNames: \(records.count) located records, \(pending.count) pending, \(changed) changed, in \(ContinuousClock.now - start, privacy: .public)")
         return changed
     }
 
