@@ -386,45 +386,54 @@ actor FeatureStore {
         }
     }
 
-    /// How many of `selected`'s signatures repeat one of `signature`'s axes
-    /// — the same place at any of FR-5.14's five scales (one point, not up
-    /// to five — see below), the same season quarter, or a qualitatively
-    /// similar-enough already-chosen photo (FR-6.1's "place, scene, mood,
-    /// season, or anything else the app weighs"). Lower is more distinct.
+    /// How much `selected`'s signatures repeat one of `signature`'s axes —
+    /// place (graded by how many of FR-5.14's five scales match, see below),
+    /// the same season quarter (one point), or a qualitatively similar-enough
+    /// already-chosen photo (one point) — FR-6.1's "place, scene, mood,
+    /// season, or anything else the app weighs". Lower is more distinct.
     private static func repetitionCount(
         of signature: MixSignature,
         against selected: [MixSignature]
-    ) -> Int {
-        var count = 0
+    ) -> Double {
+        var total = 0.0
         for other in selected {
-            // FR-6.1: "no place, scene, mood, season... crowds the rest
-            // out" — place is one axis among several here, not five. An
+            // FR-6.1 read with FR-5.14: place must count neither more than
+            // season or look, nor less finely than the app knows it. An
             // earlier revision counted each of FR-5.14's five place scales
             // separately (up to +5 for two candidates sharing every one),
             // against +1 each for season and for look, so two candidates
             // from the same region but different towns already outweighed
-            // a season or look match on its own — place variety crowded
-            // out every other kind FR-6.1 names, the opposite of what it
-            // asks. Any place scale matching now contributes the same
-            // single point season and look each do, whether it's one scale
-            // or all five.
-            let sharesAnyPlaceScale = [
+            // a season or look match on its own — place crowded out every
+            // other kind FR-6.1 names. Collapsing that to a flat "any scale
+            // matches → +1" over-corrected: it made every pair within a
+            // single-country library score the same "place repeats" point
+            // (they all share at least `coarse`), so place stopped
+            // distinguishing a same-town repeat from a same-country-only
+            // pair at all. Counting how many of the five scales match and
+            // scaling by a fifth keeps both bounds: matching every scale
+            // (the same town, landscape, region, country and network name —
+            // as exact a repeat as FR-5.14 can express) is one full point,
+            // the same weight season or look each get; matching only the
+            // single coarsest shared scale is a fifth of that, so a
+            // same-country-different-town pair still counts as far more
+            // distinct than an exact repeat.
+            let matchingPlaceScales = [
                 (signature.placeFine, other.placeFine),
                 (signature.placeLandscape, other.placeLandscape),
                 (signature.placeRegion, other.placeRegion),
                 (signature.placeCoarse, other.placeCoarse),
                 (signature.placeNetwork, other.placeNetwork),
-            ].contains { candidatePair in
+            ].filter { candidatePair in
                 guard let a = candidatePair.0, let b = candidatePair.1 else { return false }
                 return a == b
-            }
-            if sharesAnyPlaceScale { count += 1 }
-            if let quarter = signature.seasonQuarter, quarter == other.seasonQuarter { count += 1 }
+            }.count
+            total += Double(matchingPlaceScales) / 5
+            if let quarter = signature.seasonQuarter, quarter == other.seasonQuarter { total += 1 }
             if qualitativeDistance(signature, other) < Thresholds.albumMixQualitativeSimilarityDistance {
-                count += 1
+                total += 1
             }
         }
-        return count
+        return total
     }
 
     /// Combined per-dimension mean-squared distance over the feature print
