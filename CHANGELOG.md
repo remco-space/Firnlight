@@ -12,6 +12,8 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-09-27
+
 ### Added
 
 - A photo's location now counts as a place at four scales — a town or park,
@@ -33,6 +35,9 @@ heading when that version is released (FR-10.3).
   among photos rated nearly alike, one unlike what's already in the album
   wins over one that repeats its place, its season, or its look — while a
   photo rated clearly better never loses its place to variety (FR-6.1).
+- The Library tab shows how many place names are still being looked up, and
+  its description says exactly what is sent to Apple's maps service
+  (FR-1.5, FR-3.5).
 
 ## [0.25.0] - 2026-09-18
 
