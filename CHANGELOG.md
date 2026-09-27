@@ -14,6 +14,41 @@ heading when that version is released (FR-10.3).
 
 ### Fixed
 
+- Catching up with a large library could burn 160–196% CPU for 20+ minutes
+  with nothing on screen saying so (FR-2.4, FR-8.2, FR-8.12): the Library
+  Scan card's progress bar froze at "examined = total" the moment the
+  asset-by-asset pass finished, even though the scan's own post-loop tail —
+  cloud-identifier resolution, judgment re-keying, ignore reconciliation,
+  and FR-5.14's unconditional network-place-name pass — kept running
+  underneath it, sometimes for a long time on a library with many located
+  photos. That tail now has its own `LibraryScanner.Phase` case, so the
+  existing progress row shows "Finishing up…" instead of a bar that looks
+  done two steps early. Separately, a resolved place name legitimately
+  changes the wallpaper album's diversity mix (FR-6.1), so `LibraryCatchUp`'s
+  background lookup loop bumps the ranking clock as names resolve — but at
+  the tuning this shipped with, a large library's first run under FR-5.14
+  could bump it roughly every 20 seconds for as long as the backlog lasted,
+  each bump re-running Export's O(candidate pool × library) near-duplicate
+  walk (`FeatureStore.rankedCore`/`zoneScores`) from scratch even though
+  that walk never reads a place name at all — measured live at up to ~2.1s
+  per call on a real 16k-photo library. The batch this loop coalesces
+  before bumping is raised from 10 to 200 resolutions, cutting that reload
+  count by roughly the same factor on a multi-thousand-cell backlog without
+  changing what "still being looked up" reports live. `rankedCore` and
+  `zoneScores` also now check for cancellation periodically, so a bump that
+  supersedes an in-flight recompute (`.task(id:)` already cancels the old
+  one) stops it quickly instead of burning the CPU to completion on a
+  result nobody will see — `ExportModel` treats that cancellation as
+  nothing to report, matching how `AnalysisModel` already treats a stopped
+  run.
+- `LibraryScanner`'s check for the place-data gazetteer having changed since
+  the last scan was cached as a `static let`, so once one scan in a running
+  process found it changed, every later scan in that same process re-read
+  the same cached `true` — marking every `PhotoRecord` unresolved and
+  re-resolving the whole library's place names again on every subsequent
+  catch-up, not just the one scan that actually followed the change. It is
+  now a plain function, consumed fresh (and its on-disk baseline updated)
+  on every call, so only the scan genuinely following a change sees it.
 - The preference ranker learned from duels one online gradient step at a
   time, which an offline study replaying a real user's judgment history
   found overconfident (predicting each held-out choice worse than a coin

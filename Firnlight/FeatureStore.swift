@@ -205,6 +205,15 @@ actor FeatureStore {
     }
 
     private func rankedCore(limit: Int) throws -> (kept: [Candidate], vectors: [[Float]], signatures: [MixSignature], accepted: Int, suppressed: Int) {
+        // Diagnostic timing (FR-8.2) — read live via `log stream`, not
+        // persisted. `rankedCore(limit: .max)` (`albumCandidates`) is the
+        // walk measured live at 160–196% CPU sustained for 20+ minutes
+        // against a real 16k-photo library, re-run on every `RankingClock`
+        // bump including ones (a resolved place name) this walk's own
+        // near-duplicate logic never reads at all — see `Thresholds
+        // .placeNameLookupBatchSize`'s tuning note.
+        let start = ContinuousClock.now
+        let limitDescription = limit == .max ? "max" : String(limit)
         // Same serving-generation restriction as
         // `PreferenceRanker.loadEntries()`, and for the same reason (FR-5.2):
         // this walk ranks candidates against one another by score, so a photo
@@ -248,8 +257,20 @@ actor FeatureStore {
         // passed it. `suppressed` therefore counts the duplicates found down
         // to the cutoff, which is also what keeps the walk off
         // O(library × limit × dims) on every load.
-        for record in records {
+        for (index, record) in records.enumerated() {
             if kept.count >= limit { break }
+            // A newer `RankingClock` bump may already have superseded this
+            // call (SwiftUI's `.task(id:)` cancels the old one), most often
+            // from something (a resolved place name) this exact walk never
+            // reads — see `Thresholds.placeNameLookupBatchSize`'s tuning
+            // note. Checked periodically, not every record: the check
+            // itself is real work too, and this loop already runs up to
+            // library size on the `.max`-limit call `albumCandidates` makes.
+            // Bailing out here is a pure win either way — a cancelled call's
+            // result was always going to be discarded, so cutting the walk
+            // short changes nothing about what a call that finishes ever
+            // returns.
+            if index % 2000 == 0 { try Task.checkCancellation() }
             guard let data = record.featurePrint else { continue }
             let vector = data.floatVector
 
@@ -276,6 +297,7 @@ actor FeatureStore {
             }
         }
 
+        Self.log.info("rankedCore(limit: \(limitDescription, privacy: .public)): \(records.count) records, \(kept.count) kept, \(suppressed) suppressed, in \(ContinuousClock.now - start, privacy: .public)")
         return (kept, keptVectors, keptSignatures, records.count, suppressed)
     }
 
@@ -608,6 +630,10 @@ actor FeatureStore {
         greatFloor: Float?,
         analysisVersion version: Int
     ) throws -> (great: [Float], middle: [Float]) {
+        // Diagnostic timing (FR-8.2) — same rationale as `rankedCore`'s own;
+        // this walk is the other O(pool × library) near-duplicate cost
+        // `suggestedAlbumSize` pays on the same `RankingClock` bumps.
+        let start = ContinuousClock.now
         let fetched = try modelContext.fetch(FetchDescriptor<PhotoRecord>(
             predicate: #Predicate { $0.isNature && !$0.isExcluded && $0.analysisVersion == version }
         ))
@@ -619,9 +645,12 @@ actor FeatureStore {
         var keptVectors: [[Float]] = []
         var great: [Float] = []
         var middle: [Float] = []
-        for record in records {
+        for (index, record) in records.enumerated() {
             guard let score = record.preferenceScore else { break }
             if let badCeiling, score <= badCeiling { break }
+            // See `rankedCore`'s identical check for why this is safe and
+            // periodic rather than per-record.
+            if index % 2000 == 0 { try Task.checkCancellation() }
             let isGreat = greatFloor.map { score >= $0 } ?? false
             guard let data = record.featurePrint else { continue }
             let vector = data.floatVector
@@ -636,6 +665,7 @@ actor FeatureStore {
                 middle.append(score)
             }
         }
+        Self.log.info("zoneScores: \(records.count) records, \(great.count) great, \(middle.count) middle, in \(ContinuousClock.now - start, privacy: .public)")
         return (great, middle)
     }
 
