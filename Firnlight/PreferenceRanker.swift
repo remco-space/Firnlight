@@ -3,7 +3,7 @@ import Foundation
 import SwiftData
 import os
 
-/// Online logistic (Bradley–Terry) preference ranker over Vision feature prints.
+/// Batch logistic (Bradley–Terry) preference ranker over Vision feature prints.
 ///
 /// Raw score: s = w·featurePrint + Σᵢ bᵢ·traitᵢ + Σₛ pₛ, over every
 /// `ScalarTrait` — how the photo scored, how level it is, how many pixels it
@@ -42,22 +42,56 @@ import os
 /// values, on every device, at every library size, so every learned weight
 /// means the same thing for as long as it exists. A photo never measured for
 /// a trait gets that trait's own no-information value (`ScalarTrait.neutral`)
-/// rather than a penalty (FR-3.8), and `sgdStep` additionally skips the
-/// gradient term entirely for any duel where either side lacks it, so an
-/// unmeasured trait never itself becomes a trained signal, only ever a
-/// genuinely uninformative one.
-/// Choice model: P(winner beats loser) = sigmoid(s_winner − s_loser)
-/// One SGD step per recorded choice; `PhotoRecord.preferenceScore` caches the
-/// raw score s after every update so the grid can re-rank live. A bad
-/// verdict ("Both Are Bad" / "Not Wallpaper Material") trains the same way,
-/// as one SGD step against a fixed neutral reference rather than a real
-/// opponent — see `penalizeBadVerdict` (FR-4.7/FR-5.7). A good verdict never
-/// touches these weights (deferred — see REQUIREMENTS.md).
+/// rather than a penalty (FR-3.8), and `fitWeights`'s design matrix
+/// additionally masks that column to 0 entirely for any duel where either
+/// side lacks it, so an unmeasured trait never itself becomes a trained
+/// signal, only ever a genuinely uninformative one.
+/// Choice model: P(winner beats loser) = sigmoid(s_winner − s_loser).
 ///
-/// Weights persist as JSON in Application Support. If the file is missing,
-/// weights are rebuilt by seeding from Photos favorites (pseudo-choices:
-/// favorite beats random non-favorite) and then replaying every ChoiceRecord
-/// and bad VerdictRecord, interleaved in timestamp order (FR-5.3).
+/// The weights are a **batch MAP fit**, not one online step per choice: every
+/// choice (and every pseudo-choice — the favorites seed and each bad verdict,
+/// see below) is a term Σ c·softplus(−(s_winner − s_loser)) in one convex
+/// objective (c = 1, except `Thresholds.rankerFavoriteSeedWeight` for a
+/// favorite pseudo-choice), minimized in one shot by `fitWeights`'s L-BFGS solver, with an
+/// L2 penalty pulling each of three parameter blocks (feature print, scalar
+/// traits, place) toward its own prior — `initialScalarWeights`/0/0, FR-5.4's
+/// opening guess — so an untrained weight starts exactly where it always has
+/// and only moves as far as the accumulated evidence pulls it. This replaced
+/// an earlier revision's online SGD (`Thresholds.rankerAlgorithmVersion`
+/// v16 and before: one decayed gradient step per choice, in whatever order
+/// the choices happened to arrive) after an offline study replaying a real
+/// user's duels found that path overconfident (prequential log-loss 1.02,
+/// worse than a coin flip) and order-dependent — swapping roughly a quarter
+/// of a 200-photo album on one new duel — while the identical score function
+/// fit in batch was neither: see `Thresholds.rankerAlgorithmVersion`'s v17
+/// paragraph for the numbers. A **convex** objective has one global optimum
+/// regardless of the order its terms are summed in or the point an L-BFGS
+/// run starts iterating from, so this also *proves* FR-5.2/FR-7.1's "the
+/// same library and the same judgments always produce the same ranking" —
+/// weight decay's path-dependence was the previous revision's actual source
+/// of order-sensitivity, and there is no decay here to be order-sensitive.
+///
+/// `PhotoRecord.preferenceScore` caches the raw score s after every fit so
+/// the grid can re-rank live. A bad verdict ("Both Are Bad" / "Not Wallpaper
+/// Material") is one pseudo-choice term against a fixed neutral reference
+/// rather than a real opponent — see `appendBadVerdictTerm`
+/// (FR-4.7/FR-5.7). A good verdict never touches these weights (deferred —
+/// see REQUIREMENTS.md).
+///
+/// Weights persist as JSON in Application Support. If the file is missing (or
+/// stale — see `Weights.algorithmVersion`), weights are rebuilt by seeding
+/// from Photos favorites (pseudo-choices: favorite beats random
+/// non-favorite) and then fitting every ChoiceRecord and bad VerdictRecord
+/// term at once (FR-5.3) — order no longer matters (see above), so unlike
+/// the SGD revision this replaced, the replay needs no interleaved
+/// timestamp ordering across the two record kinds, only every term present.
+/// Every later choice or verdict (`record`/`recordVerdicts`) appends one more
+/// term to the same running set and re-fits, **warm-started** from the
+/// current weights (`fitWeights(warmStart: true)`) purely so L-BFGS
+/// converges in a handful of iterations instead of from a cold prior; being
+/// convex, the fit lands on the exact same weights either way. A rebuild
+/// always cold-starts from the prior (`fitWeights(warmStart: false)`), since
+/// there is no previous fit of *this* term set to warm-start from.
 /// Plain actor with its own `ModelContext`, not `@ModelActor`, so its work
 /// truly runs off the main thread — see FeatureStore's doc comment for the
 /// `DefaultSerialModelExecutor` caller-thread pitfall this avoids (FR-8.2).
@@ -191,8 +225,9 @@ nonisolated enum ScalarTrait: Int, CaseIterable, Sendable {
     /// it (FR-3.8): the point on the trait's own scale that carries no
     /// information, so an unmeasured photo sits where "nothing is known"
     /// belongs rather than at one extreme. It is *only* a scoring
-    /// placeholder — `sgdStep` additionally trains nothing on a trait either
-    /// side is missing, so a gap never becomes a signal in its own right.
+    /// placeholder — `fitWeights`'s design matrix additionally trains
+    /// nothing on a trait either side is missing, so a gap never becomes a
+    /// signal in its own right.
     var neutral: Float {
         switch self {
         // Zero-centred scales: their own midpoint is 0.
@@ -229,7 +264,7 @@ nonisolated enum ScalarTrait: Int, CaseIterable, Sendable {
     /// Only `aesthetics`. A verdict has no opponent photo to contrast
     /// against, so it is no evidence that tilt, resolution, when, where, or
     /// how bright the photo is *caused* the badness — see
-    /// `penalizeBadVerdict`. Aesthetics is exempt because it is the app's own
+    /// `appendBadVerdictTerm`. Aesthetics is exempt because it is the app's own
     /// quality reading and 0 is a real neutral on its scale, so "worse than
     /// neutral quality" is a claim a verdict genuinely makes.
     var trainsOnVerdict: Bool { self == .aesthetics }
@@ -387,26 +422,6 @@ actor PreferenceRanker {
         }
     }
 
-    /// A durable judgment being replayed into the ranker during a rebuild —
-    /// either a relative choice or a bad-quality verdict (FR-5.3/FR-5.7).
-    /// See `prepare()` for why these need a single, deterministically
-    /// ordered replay stream rather than two separate passes.
-    private enum TrainingEvent {
-        case choice(winnerKey: String, loserKey: String)
-        case badVerdict(key: String)
-
-        /// Deterministic secondary sort key for same-timestamp events
-        /// (both event kinds sort by their own persisted identifiers, never
-        /// by anything that could vary between runs), so ties always
-        /// resolve the same way on every rebuild.
-        var orderKey: String {
-            switch self {
-            case .choice(let winnerKey, let loserKey): return "0|\(winnerKey)|\(loserKey)"
-            case .badVerdict(let key): return "1|\(key)"
-            }
-        }
-    }
-
     // FR-5.14's five-scale place hierarchy is `PlaceHierarchy.ScaleKeys` —
     // a real, published name per scale (a town, a landscape, a region, a
     // country, and — where the network allows — what Apple's maps call the
@@ -446,6 +461,34 @@ actor PreferenceRanker {
         var isNotWallpaperMaterial: Bool = false
     }
 
+    /// One term of `fitWeights`'s objective: "winner" scores higher than
+    /// "loser". Built from real `Entry`s for an ordinary choice, or from a
+    /// synthetic `Entry` for a pseudo-choice (`appendFavoriteTerms`'s
+    /// favorite-over-random-non-favorite, `appendBadVerdictTerm`'s
+    /// neutral-reference-over-bad-photo) — the fit treats every term
+    /// identically either way, which is exactly FR-5.7's "the same signal
+    /// strength as losing a duel". Value type, holding its own copies of
+    /// whatever `Entry` fields the fit reads: a term stays valid for the
+    /// life of the ranker even after `loadEntries()` replaces `entries` with
+    /// a fresh snapshot on the next `reload()`.
+    private struct DuelTerm {
+        let winner: Entry
+        let loser: Entry
+        /// How much this term counts in the objective: 1 for a real choice
+        /// or a bad verdict, `Thresholds.rankerFavoriteSeedWeight` for a
+        /// favorite pseudo-choice (see that constant for why a favorite is
+        /// weaker evidence than a duel).
+        var weight: Float = 1
+    }
+
+    /// Every term `fitWeights` minimizes over — the running set `prepare()`
+    /// builds (seed favorites + every applicable choice + every applicable
+    /// bad verdict) and `record`/`recordVerdicts` append one term to at a
+    /// time. See this actor's own doc comment for why appending one term and
+    /// re-fitting from here, rather than taking one online step, is what
+    /// FR-5.2/FR-7.1's order-independence now rests on.
+    private var trainingTerms: [DuelTerm] = []
+
     // An algorithmVersion mismatch (or undecodable file) triggers an automatic
     // rebuild: re-seed from current favorites + full choice replay + re-rank.
     private struct Weights: Codable {
@@ -469,19 +512,21 @@ actor PreferenceRanker {
         /// `applicableJudgmentCount`. Optional so weights written before this
         /// existed decode, and simply trigger one rebuild.
         var judgmentCount: Int?
-        /// Fingerprint of the favorite set these weights were last seeded
-        /// from — see `favoriteFingerprint(of:)`. FR-5.4: "What the user has
+        /// Fingerprint of the favorite set these weights were last fit
+        /// against — see `favoriteFingerprint(of:)`. FR-5.4: "What the user has
         /// said [in Photos] is folded in whenever the app learns of it — a
         /// favorite found by a later scan counts the same as one found by the
-        /// first." `seedFromFavorites()` only runs during a rebuild, so a
-        /// change to the favorite set has to be detected the same way a
-        /// change to the judgment set already is (`judgmentCount`) — by
-        /// comparing against what these weights were built from — or a
-        /// favorite discovered after the first rebuild would never be
-        /// seeded. Optional so weights written before this existed decode,
-        /// and simply trigger one rebuild (favorites already folded into
-        /// them get re-seeded exactly the same way a version bump's full
-        /// replay always does — deterministic, so this costs nothing new).
+        /// first." `prepare()` regenerates `appendFavoriteTerms()`'s
+        /// pseudo-choices into `trainingTerms` on every call, but only a
+        /// *rebuild* actually re-fits `weights` against them, so a change to
+        /// the favorite set has to be detected the same way a change to the
+        /// judgment set already is (`judgmentCount`) — by comparing against
+        /// what these weights were built from — or a favorite discovered
+        /// after the first rebuild would never be folded into the fit.
+        /// Optional so weights written before this existed decode, and
+        /// simply trigger one rebuild (favorites already folded into them
+        /// get re-fit exactly the same way a version bump's full rebuild
+        /// always does — deterministic, so this costs nothing new).
         var favoriteFingerprint: String?
         /// `PlaceGazetteer.dataFingerprint` these weights were last built
         /// against. The gazetteer's bundled data can change underneath an
@@ -566,6 +611,25 @@ actor PreferenceRanker {
         let currentFavorites = Self.favoriteFingerprint(of: entries)
 
         let dimension = entries.first?.vector.count ?? 0
+
+        // Every term `fitWeights` minimizes over, rebuilt from scratch here
+        // regardless of whether the stored weights below turn out to still
+        // be valid: an incremental `record`/`recordVerdicts` call needs the
+        // full running set to append one more term to and re-fit, not just
+        // whichever weights happened to load. Order doesn't matter — the
+        // fit is convex, see this actor's own doc comment — so favorites,
+        // choices and bad verdicts are simply appended one group at a time,
+        // unlike the SGD revision this replaced, which needed them
+        // interleaved in the exact timestamp order the user produced them.
+        trainingTerms = []
+        let seededPairs = appendFavoriteTerms()
+        for choice in choices {
+            appendChoiceTerm(winnerKey: choice.winnerKey, loserKey: choice.loserKey)
+        }
+        for badVerdict in badVerdicts {
+            appendBadVerdictTerm(key: badVerdict.photoKey)
+        }
+
         if let stored = loadWeights(),
            stored.algorithmVersion == Thresholds.rankerAlgorithmVersion,
            stored.feature.count == dimension,
@@ -581,41 +645,15 @@ actor PreferenceRanker {
                 feature: Array(repeating: 0, count: dimension),
                 scalars: Self.initialScalarWeights,
                 place: [:],
-                seededWithFavorites: false,
+                seededWithFavorites: true,
                 judgmentCount: applicable,
                 favoriteFingerprint: currentFavorites,
                 gazetteerFingerprint: currentGazetteerFingerprint,
                 networkFingerprint: currentNetworkFingerprint
             )
-            seedFromFavorites()
-            // Choices and bad verdicts both train the ranker (FR-5.7), so a
-            // rebuild must replay them interleaved in the order the user
-            // actually produced them, not choices-then-verdicts or vice
-            // versa — SGD is order-dependent (weight decay + gradient path),
-            // so a different order would rebuild a different ranking and
-            // break the FR-5.3 guarantee. `TrainingEvent.orderKey` gives a
-            // deterministic tie-break for same-timestamp events (e.g. both
-            // photos of a single "Both Are Bad" verdict share one Date()),
-            // since SwiftData doesn't promise fetch order beyond the given
-            // SortDescriptors.
-            var events: [(timestamp: Date, event: TrainingEvent)] =
-                choices.map { ($0.timestamp, .choice(winnerKey: $0.winnerKey, loserKey: $0.loserKey)) }
-                + badVerdicts.map { ($0.timestamp, .badVerdict(key: $0.photoKey)) }
-            events.sort {
-                $0.timestamp != $1.timestamp
-                    ? $0.timestamp < $1.timestamp
-                    : $0.event.orderKey < $1.event.orderKey
-            }
-            for (_, event) in events {
-                switch event {
-                case .choice(let winnerKey, let loserKey):
-                    sgdStep(winnerKey: winnerKey, loserKey: loserKey)
-                case .badVerdict(let key):
-                    penalizeBadVerdict(key: key)
-                }
-            }
+            let elapsed = fitWeights(warmStart: false)
             saveWeights()
-            Self.log.info("Rebuilt weights: seeded=\(self.weights.seededWithFavorites), replayed \(choices.count) choices, \(badVerdicts.count) bad verdicts")
+            Self.log.info("Rebuilt weights: seeded \(seededPairs) favorite pseudo-choices, fit \(choices.count) choices + \(badVerdicts.count) bad verdicts (\(self.trainingTerms.count) terms) in \(elapsed.milliseconds, format: .fixed(precision: 1))ms, \(elapsed.iterations) L-BFGS iterations")
         }
 
         recomputeScores()
@@ -641,16 +679,21 @@ actor PreferenceRanker {
         ))
 
         // If the set of judgments that *apply here* changed, the weights no
-        // longer contain what the user has decided, and only a replay can fold
-        // the difference in — SGD has no way to add one historical step after
-        // the fact. Rebuilding from scratch is the same path a version bump
-        // takes and is what makes an arriving photo's judgments count.
+        // longer contain what the user has decided, and only a full rebuild
+        // can fold the difference in: unlike `record`/`recordVerdicts`, this
+        // path has no specific new term to append and warm-start-refit —
+        // judgments synced in from another device (FR-9.2) or a photo
+        // newly arriving change *which* terms `trainingTerms` should hold,
+        // not just add one more, so `trainingTerms` has to be rebuilt from
+        // the current judgment set from scratch, same as a version bump.
         //
-        // Same for the favorite set (FR-5.4): `seedFromFavorites()` only ever
-        // runs as part of a rebuild, so a favorite Photos discovers after the
-        // weights were last built — or one a rescan un-favorites — needs the
-        // same rebuild trigger `judgmentCount` already gives explicit choices,
-        // or it would never be folded in (or un-folded) at all.
+        // Same for the favorite set (FR-5.4): `appendFavoriteTerms()`'s
+        // pseudo-choices only get re-fit into `weights` as part of a
+        // rebuild (see `Weights.favoriteFingerprint`'s doc comment), so a
+        // favorite Photos discovers after the weights were last built — or
+        // one a rescan un-favorites — needs the same rebuild trigger
+        // `judgmentCount` already gives explicit choices, or it would never
+        // be folded in (or un-folded) at all.
         // Third trigger, same reasoning as the two above: the gazetteer's
         // own bundled data changing changes what `placeWeightKey` computes
         // for the photos there (see `Weights.gazetteerFingerprint`'s doc
@@ -813,8 +856,8 @@ actor PreferenceRanker {
     /// device — the count folded into `Weights.judgmentCount`.
     ///
     /// This is the mechanism behind FR-9.2. A choice about a photo that hasn't
-    /// arrived here yet trains nothing, because `sgdStep` can't find it; when
-    /// the photo does arrive, the count changes and `prepare()`/`reload()`
+    /// arrived here yet trains nothing, because `appendChoiceTerm` can't find
+    /// it; when the photo does arrive, the count changes and `prepare()`/`reload()`
     /// rebuild so the judgment finally takes effect. It moves for every reason
     /// it should — a photo arriving or leaving, judgments synced in from
     /// another device — and a local `record()` bumps it in step, so the
@@ -922,7 +965,7 @@ actor PreferenceRanker {
     /// duel, or a single-photo "Not Wallpaper Material") — always durable
     /// and always feeding the album-size calibration (FR-6.x). A BAD verdict
     /// additionally trains the pairwise ranking, the same signal strength as
-    /// losing a duel (FR-4.7/FR-5.7): see `penalizeBadVerdict`. A GOOD
+    /// losing a duel (FR-4.7/FR-5.7): see `appendBadVerdictTerm`. A GOOD
     /// verdict never touches ranking weights — good photos already rise by
     /// winning duels, and using "good" as an upward signal is explicitly
     /// deferred (REQUIREMENTS.md Deferred ideas).
@@ -966,10 +1009,11 @@ actor PreferenceRanker {
         let receipt = VerdictReceipt(keys: keys, isGood: isGood, timestamp: now)
 
         guard !isGood else { return receipt }
-        for key in keys {
-            penalizeBadVerdict(key: key)
+        for key in keys where appendBadVerdictTerm(key: key) {
             weights.judgmentCount = (weights.judgmentCount ?? 0) + 1
         }
+        let elapsed = fitWeights(warmStart: true)
+        Self.log.debug("Fit weights after \(keys.count) bad verdict(s): \(self.trainingTerms.count) terms, \(elapsed.milliseconds, format: .fixed(precision: 1))ms, \(elapsed.iterations) L-BFGS iterations")
         saveWeights()
         recomputeScores()
         if flushSynchronously {
@@ -989,18 +1033,22 @@ actor PreferenceRanker {
     /// the user did last, and only an added row can express that against a
     /// racing sync).
     ///
-    /// Unlike `recordVerdicts`, this cannot take an incremental SGD step to
-    /// undo the training: SGD has no inverse, so the only way to un-apply a
-    /// bad verdict's step is to leave it out of a full replay. That means
+    /// Unlike `recordVerdicts`, this cannot just append one more pseudo-term
+    /// and warm-start-refit: the fit is convex, so it *could* in principle
+    /// re-fit against `trainingTerms` minus this photo's bad-verdict term,
+    /// but nothing here tracks which array index that term is, and rebuilding
+    /// that mapping is no simpler than just rebuilding the whole set — so
     /// this forces exactly the rebuild path a version bump or an arriving
     /// synced judgment already takes — `isPrepared = false` then `prepare()`,
-    /// which reloads entries, replays every judgment still applicable
-    /// (`VerdictCalibration.trainingBadVerdicts` now excludes this photo's
-    /// bad verdicts, having seen the clearing record), saves weights,
-    /// recomputes scores and rewrites the preference cache. A full weights
-    /// replay is real cost, but it is paid only here: clearing is a rare,
-    /// deliberate, single-photo action, not the rapid per-choice duel path
-    /// FR-8.2 guards (`record`'s debounced cache flush).
+    /// which reloads entries, rebuilds `trainingTerms` from every judgment
+    /// still applicable (`VerdictCalibration.trainingBadVerdicts` now
+    /// excludes this photo's bad verdicts, having seen the clearing record),
+    /// cold-refits, saves weights, recomputes scores and rewrites the
+    /// preference cache. A full re-fit is real cost, but it is paid only
+    /// here: clearing is a rare, deliberate, single-photo action, not the
+    /// rapid per-choice duel path FR-8.2 guards (`record`'s debounced cache
+    /// flush) — and being convex, this cold re-fit lands on exactly the
+    /// weights a warm-started one would have (FR-5.2/FR-7.1).
     ///
     /// There is deliberately no `flushSynchronously` parameter, unlike
     /// `recordVerdicts`: that one exists because a short-lived, one-off
@@ -1058,7 +1106,11 @@ actor PreferenceRanker {
     /// prepare()), so it is *not* done here per choice; that per-choice full
     /// write is what beachballed the UI (FR-8.2). Instead the new scores live in
     /// `entries` immediately and the store cache is flushed on a debounce (see
-    /// `scheduleCacheFlush`). Weights are a small file write, kept synchronous.
+    /// `scheduleCacheFlush`). Weights are re-fit synchronously
+    /// (`fitWeights(warmStart: true)`, warm-started from the weights this
+    /// choice is being added to) and then a small file write — this actor's
+    /// own doc comment measures that fit in the tens of milliseconds, well
+    /// inside FR-8.2's budget for a synchronous step on this off-main actor.
     ///
     /// Throws `RankerError.candidateNotLive` — never silently records nothing
     /// — if either photo has stopped being a live candidate since the pair
@@ -1083,11 +1135,13 @@ actor PreferenceRanker {
         try modelContext.save()
         judgedPairs.insert(Self.pairKey(winnerKey, loserKey))
 
-        sgdStep(winnerKey: winnerKey, loserKey: loserKey)
+        appendChoiceTerm(winnerKey: winnerKey, loserKey: loserKey)
         choiceCount += 1
         // Kept in step with the weights so the next reload doesn't mistake
         // this incremental step for a divergence and rebuild needlessly.
         weights.judgmentCount = (weights.judgmentCount ?? 0) + 1
+        let elapsed = fitWeights(warmStart: true)
+        Self.log.debug("Fit weights after 1 choice: \(self.trainingTerms.count) terms, \(elapsed.milliseconds, format: .fixed(precision: 1))ms, \(elapsed.iterations) L-BFGS iterations")
         saveWeights()
 
         recomputeScores()
@@ -1116,9 +1170,10 @@ actor PreferenceRanker {
     ///
     /// Voids the matching `ChoiceRecord` in place (see its doc comment) rather
     /// than deleting it — an append-only ledger, like every other judgment
-    /// here — then forces the same full-replay rebuild `clearVerdicts` already
-    /// takes: SGD has no inverse, so un-applying the step this choice took is
-    /// only possible by leaving it out of a fresh replay.
+    /// here — then forces the same full rebuild `clearVerdicts` already takes:
+    /// see that method's doc comment for why leaving the voided choice's
+    /// term out of a fresh `prepare()` is simpler than surgically removing
+    /// it from `trainingTerms`, even though the fit itself is convex.
     func undoLastChoice(_ receipt: ChoiceReceipt) throws {
         let winnerKey = receipt.winnerKey
         let loserKey = receipt.loserKey
@@ -1163,13 +1218,12 @@ actor PreferenceRanker {
     /// `RankerError.nothingToUndo` instead of quietly voiding some other
     /// verdict, or nothing at all while reporting success (FR-8.12).
     ///
-    /// Forces the same full-replay rebuild as `undoLastChoice`/`clearVerdicts`:
-    /// a bad verdict took an SGD step, and SGD has no inverse, so un-applying
-    /// it is only possible by leaving it out of a fresh replay. A *good*
-    /// verdict trains nothing and would need no replay, but it does feed the
-    /// album-size calibration, which `prepare()` is what refreshes — and one
-    /// path for both is worth more here than saving a rebuild on the rarer of
-    /// two rare actions.
+    /// Forces the same full rebuild as `undoLastChoice`/`clearVerdicts`, for
+    /// the same reason `clearVerdicts` documents. A *good* verdict trains
+    /// nothing and would need no re-fit, but it does feed the album-size
+    /// calibration, which `prepare()` is what refreshes — and one path for
+    /// both is worth more here than saving a rebuild on the rarer of two
+    /// rare actions.
     func undoVerdicts(_ receipt: VerdictReceipt) throws {
         let timestamp = receipt.timestamp
         let isGood = receipt.isGood
@@ -1340,109 +1394,26 @@ actor PreferenceRanker {
     /// trains this one. A key with no local entry — the photo hasn't arrived,
     /// or has left — is skipped, and `applicableJudgmentCount` is what notices
     /// when that changes (FR-9.2).
-    private func sgdStep(winnerKey: String, loserKey: String) {
-        guard let w = indexByKey[winnerKey], let l = indexByKey[loserKey] else { return }
-        sgdStep(winner: entries[w], loser: entries[l])
+    @discardableResult
+    private func appendChoiceTerm(winnerKey: String, loserKey: String) -> Bool {
+        guard let w = indexByKey[winnerKey], let l = indexByKey[loserKey] else { return false }
+        trainingTerms.append(DuelTerm(winner: entries[w], loser: entries[l]))
+        return true
     }
 
-    /// One pairwise SGD step, "winner" beating "loser" — the primitive both
-    /// real duel choices and bad-verdict pseudo-duels (`penalizeBadVerdict`)
-    /// go through, so both train the exact same model the exact same way.
-    private func sgdStep(winner: Entry, loser: Entry) {
-        let probability = Candidate.sigmoid(rawScore(winner) - rawScore(loser))
-        let gradient = (1 - probability) * Thresholds.rankerLearningRate
-
-        // L2 weight decay before the gradient step, bounding weight growth.
-        let decay = 1 - Thresholds.rankerLearningRate * Thresholds.rankerWeightDecay
-        weights.feature = vDSP.multiply(decay, weights.feature)
-        weights.scalars = vDSP.multiply(decay, weights.scalars)
-        // No fixed-size vector to hand vDSP: `Weights.place` only ever holds
-        // entries for places actually seen, so every one of them (not a
-        // fixed table) gets the same decay applied on every SGD step —
-        // which is what lets a barely-reinforced place's own weight fade
-        // toward zero between reinforcements while a heavily-judged
-        // ancestor stays up (FR-5.11's "leans on the larger places around
-        // it"), the same mechanism the fixed-table design used, just over a
-        // table that only grows as large as the places actually judged.
-        for placeKey in weights.place.keys {
-            weights.place[placeKey]! *= decay
-        }
-
-        let difference = vDSP.subtract(winner.vector, loser.vector)
-        weights.feature = vDSP.add(weights.feature, vDSP.multiply(gradient, difference))
-        // FR-3.8: a duel where either side was never measured for a trait
-        // trains nothing on it — the difference is forced to 0 rather than
-        // comparing a real value against the other side's neutral
-        // placeholder, which would otherwise treat "unknown" as if it meant
-        // "average" and let the gap itself become a trained signal.
-        for trait in ScalarTrait.allCases {
-            let index = trait.rawValue
-            let bothKnown = winner.traits.known[index] && loser.traits.known[index]
-            weights.scalars[index] += gradient
-                * (bothKnown ? winner.traits.values[index] - loser.traits.values[index] : 0)
-        }
-
-        // FR-5.14: each scale's winning place gains what its losing place
-        // loses. When winner and loser are the same place at some scale
-        // (the ordinary case for two photos from the same place — now an
-        // exact string match, never a hash collision), the two cancel to a
-        // net-zero change for that scale — correctly: a duel between two
-        // photos from the same place is evidence about whatever else
-        // distinguishes them, never about the place itself. A scale where
-        // either photo has no name trains nothing at that scale only — the
-        // same either-side-unmeasured guard the trait loop above applies,
-        // per scale rather than for the whole photo, so a photo missing
-        // just its fine-scale name still trains normally at landscape,
-        // region, coarse and network. Five scales: landscape (natural) and
-        // region (political) are independently trained, neither standing
-        // in for the other — "the natural and the political alike" — and
-        // `network` (Apple's own answer, where the network allows) trains
-        // in its own namespace, never conflated with any offline scale
-        // (see `PlaceHierarchy`'s doc comment).
-        //
-        // FR-5.2: "no trait counts for more or less than the user's own
-        // decisions imply" — so *place as a whole* must learn at roughly
-        // the rate of one trait per duel, not up to five. An earlier
-        // revision gave each of the five scales above its own full
-        // `gradient` step whenever the two photos differed there, and two
-        // photos from different places differ at *every* scale at once far
-        // more often than not — they're all derived from the same
-        // coordinate, so a duel between two geographically distant photos
-        // routinely differs at fine, landscape, region, coarse and network
-        // simultaneously — meaning "where a photo was taken" could learn up
-        // to 5× faster than any other single trait from that same one
-        // duel, a multiplier no judgment implied. Splitting one shared
-        // `gradient` across however many scales actually differ (`equal`
-        // guard above already excludes same-place scales, which train
-        // nothing regardless and so must not shrink everyone else's share)
-        // keeps the place dimension's total movement comparable to one
-        // trait's, whether a duel differs by one scale or by all five.
-        let differingScales: [(scale: String, winnerName: String, loserName: String)] = [
-            ("fine", winner.place.fine, loser.place.fine),
-            ("landscape", winner.place.landscape, loser.place.landscape),
-            ("region", winner.place.region, loser.place.region),
-            ("coarse", winner.place.coarse, loser.place.coarse),
-            ("network", winner.place.network, loser.place.network),
-        ].compactMap { scale, winnerName, loserName in
-            guard let winnerName, let loserName, winnerName != loserName else { return nil }
-            return (scale, winnerName, loserName)
-        }
-        if !differingScales.isEmpty {
-            let placeGradient = gradient / Float(differingScales.count)
-            for (scale, winnerName, loserName) in differingScales {
-                weights.place[Self.placeWeightKey(scale: scale, name: winnerName), default: 0] += placeGradient
-                weights.place[Self.placeWeightKey(scale: scale, name: loserName), default: 0] -= placeGradient
-            }
-        }
-    }
-
-    private func seedFromFavorites() {
+    /// Appends FR-5.4's favorite-seed pseudo-choices — a deterministic
+    /// sample of "some favorite beats some random non-favorite" — to
+    /// `trainingTerms`, and returns how many were appended (0 if there are
+    /// no favorites or no non-favorites to pair them against). Pure: unlike
+    /// the online SGD revision's `seedFromFavorites`, this never touches
+    /// `weights` — every term it appends is just one more summand in
+    /// `fitWeights`'s objective, down-weighted by
+    /// `Thresholds.rankerFavoriteSeedWeight` relative to a real choice.
+    @discardableResult
+    private func appendFavoriteTerms() -> Int {
         let favorites = entries.indices.filter { entries[$0].isFavorite }
         let others = entries.indices.filter { !entries[$0].isFavorite }
-        guard !favorites.isEmpty, !others.isEmpty else {
-            weights.seededWithFavorites = true
-            return
-        }
+        guard !favorites.isEmpty, !others.isEmpty else { return 0 }
 
         // Deterministic RNG so an identical rebuild reproduces the same seeding.
         var rng = SplitMix64(seed: Thresholds.rankerSeedRNG)
@@ -1450,39 +1421,49 @@ actor PreferenceRanker {
         outer: for favorite in favorites.shuffled(using: &rng) {
             for _ in 0..<Thresholds.favoriteSeedOpponents {
                 guard pairs < Thresholds.favoriteSeedMaxPairs else { break outer }
-                sgdStep(winnerKey: entries[favorite].key, loserKey: entries[others.randomElement(using: &rng)!].key)
+                trainingTerms.append(DuelTerm(
+                    winner: entries[favorite],
+                    loser: entries[others.randomElement(using: &rng)!],
+                    weight: Thresholds.rankerFavoriteSeedWeight
+                ))
                 pairs += 1
             }
         }
-        weights.seededWithFavorites = true
-        Self.log.info("Seeded ranker with \(pairs) favorite pseudo-choices")
+        return pairs
     }
 
-    /// Trains a bad verdict into the ranking the same way a lost duel does
-    /// (FR-4.7/FR-5.7), as one pairwise SGD step against a fixed "neutral"
-    /// reference point rather than a real opponent photo:
+    /// Appends a bad verdict's pseudo-choice term to `trainingTerms` — the
+    /// same "against a fixed neutral reference" shape `penalizeBadVerdict`
+    /// used to feed straight into one SGD step (FR-4.7/FR-5.7):
     /// - feature vector = all zeros, aesthetics = 0 — aestheticsScore is
     ///   already zero-centered (−1…1), so 0 is a genuine neutral midpoint,
-    ///   not an arbitrary choice. These are the two terms the gradient
-    ///   actually moves, and they're what generalizes: pushing
-    ///   `weights.feature` away from this photo's feature direction is what
-    ///   drags visually-similar photos down too ("and others like it",
-    ///   FR-4.7), independent of anything else in the candidate set.
+    ///   not an arbitrary choice. These are the two terms whose difference
+    ///   from the bad photo's own values is nonzero, and they're what
+    ///   generalizes: pulling `weights.feature` away from this photo's
+    ///   feature direction is what drags visually-similar photos down too
+    ///   ("and others like it", FR-4.7), independent of anything else in
+    ///   the candidate set.
     /// - every other trait = copied from the bad photo's own values, known
-    ///   flags included, so those SGD terms are always exactly zero. A single
-    ///   bad verdict on its own isn't evidence that tilt, resolution, when,
-    ///   where, or how bright the photo is *caused* the badness — unlike a
-    ///   real duel, there's no second photo to contrast against — so those
-    ///   weights stay untouched by verdict training and only ever move from
-    ///   actual duel choices. `ScalarTrait.trainsOnVerdict` is where that
-    ///   split lives, so a trait added later inherits the safe side of it.
+    ///   flags included, so those columns of this one term are always
+    ///   exactly zero. A single bad verdict on its own isn't evidence that
+    ///   tilt, resolution, when, where, or how bright the photo is *caused*
+    ///   the badness — unlike a real duel, there's no second photo to
+    ///   contrast against — so those weights stay untouched by verdict
+    ///   training and only ever move from actual duel choices.
+    ///   `ScalarTrait.trainsOnVerdict` is where that split lives, so a
+    ///   trait added later inherits the safe side of it.
+    /// - place = copied from the bad photo's own place at every scale, so
+    ///   every scale is "the same place" for this term and contributes
+    ///   nothing to the fit's place columns — same reasoning as the trait
+    ///   bullet above, extended to place.
     ///
-    /// Using a fixed reference instead of a live opponent is also what makes
-    /// this replay-safe (FR-5.3): the pseudo-duel is fully determined by the
-    /// bad photo's own stored feature print, never by which other
-    /// candidates happen to exist at rebuild time.
-    private func penalizeBadVerdict(key: String) {
-        guard let index = indexByKey[key] else { return }
+    /// Using a fixed reference instead of a live opponent is also what keeps
+    /// this replay-safe (FR-5.3): the pseudo-choice is fully determined by
+    /// the bad photo's own stored feature print, never by which other
+    /// candidates happen to exist when `trainingTerms` is rebuilt.
+    @discardableResult
+    private func appendBadVerdictTerm(key: String) -> Bool {
+        guard let index = indexByKey[key] else { return false }
         let entry = entries[index]
         var reference = entry.traits
         for trait in ScalarTrait.allCases where trait.trainsOnVerdict {
@@ -1494,14 +1475,314 @@ actor PreferenceRanker {
             vector: Array(repeating: 0, count: entry.vector.count),
             isFavorite: false,
             traits: reference,
-            // Copied, not nil: matching the bad photo's own place at every
-            // scale makes `sgdStep`'s place gradient cancel to zero for it,
-            // same reasoning as the trait loop just above — a verdict with
-            // no second photo to contrast against is no evidence that the
-            // *place* caused the badness.
             place: entry.place
         )
-        sgdStep(winner: neutral, loser: entry)
+        trainingTerms.append(DuelTerm(winner: neutral, loser: entry))
+        return true
+    }
+
+    /// What one `fitWeights` call returned — its wall-clock cost and how
+    /// many L-BFGS iterations it took, logged by every caller
+    /// (`prepare`/`record`/`recordVerdicts`) so FR-8.2's "stays in the tens
+    /// of milliseconds" is something the unified log actually shows, not
+    /// only a doc-comment claim.
+    private struct FitResult {
+        let milliseconds: Double
+        let iterations: Int
+    }
+
+    /// Minimizes `trainingTerms`'s batch MAP objective and writes the
+    /// result into `weights.feature`/`scalars`/`place` — the batch fit this
+    /// actor's own doc comment describes, replacing the online SGD revision
+    /// (`Thresholds.rankerAlgorithmVersion` v16 and before) that used to
+    /// mutate `weights` one `sgdStep` at a time.
+    ///
+    /// `warmStart` chooses only where L-BFGS starts iterating from: the
+    /// *prior* (`initialScalarWeights`/0/0, `warmStart: false`, used by a
+    /// cold rebuild with no previous fit to start from) or the *current*
+    /// `weights` (`warmStart: true`, used by `record`/`recordVerdicts` right
+    /// after appending one more term). The objective — and so its unique
+    /// global minimum — is identical either way, because it is convex: the
+    /// L2 penalty below is strictly convex in every parameter, and a
+    /// strictly-convex-plus-convex sum stays strictly convex. Two fits over
+    /// the same `trainingTerms` converge to the same weights to float32
+    /// precision regardless of the starting point — which is what makes
+    /// FR-5.2/FR-7.1's "the same library and the same judgments always
+    /// produce the same ranking" hold for this algorithm, unlike the SGD
+    /// revision it replaced, whose weight decay made the *order* choices
+    /// arrived in part of what the final weights meant.
+    ///
+    /// **Objective:** Σ over `trainingTerms` of softplus(−(s_winner −
+    /// s_loser)) + ½ Σ over three parameter blocks of λ_block·‖block −
+    /// prior_block‖², with prior = `initialScalarWeights`/0/0 (feature print
+    /// and place start untrained; aesthetics starts at 1, every other
+    /// scalar trait at 0 — FR-5.4's opening guess). λ_block is
+    /// `Thresholds.rankerFeaturePrintPenalty`/`rankerScalarPenalty`/
+    /// `rankerPlacePenalty`, all three from the same offline-study grid
+    /// search — see those constants' doc comments for the numbers.
+    ///
+    /// **The score inside each term's softplus is *not* a plain
+    /// `rawScore(winner) − rawScore(loser)`.** Its place contribution
+    /// divides by however many of the five scales the winner and loser
+    /// differ at, mirroring what the online SGD revision's `sgdStep` used
+    /// to split its *gradient step* by (see `Thresholds.rankerAlgorithmVersion`'s
+    /// v16 paragraph for why: without the split, "where a photo was taken"
+    /// could learn up to 5× faster than any other single trait, since two
+    /// geographically distant photos routinely differ at all five scales in
+    /// one duel — FR-5.2). Baking the same division into the *design
+    /// matrix* built below — rather than special-casing one block's
+    /// gradient after the fact — keeps the objective an ordinary sum of
+    /// softplus terms, still convex, still solvable by a generic L-BFGS:
+    /// the division only changes what each term's design-matrix place
+    /// columns *are* (1/differingScaleCount rather than 1), not how the
+    /// solver treats them, so the standard chain rule through those columns
+    /// reproduces the split automatically. This is training-time only —
+    /// `rawScore`, what every candidate is actually ranked and served by,
+    /// still sums a photo's full, undivided place weights across every
+    /// scale it is named at, exactly as before this method replaced
+    /// `sgdStep`.
+    ///
+    /// **Feature-print conditioning:** the feature-print block is fit in a
+    /// rescaled parameterization — see `Thresholds.rankerFeaturePrintScale`'s
+    /// doc comment for why, and for the algebraic identity that makes it
+    /// score-function-neutral — and converted back to `weights.feature`'s
+    /// raw units by `applySolution` before this returns.
+    @discardableResult
+    private func fitWeights(warmStart: Bool) -> FitResult {
+        let start = Date()
+        let featureDim = weights.feature.count
+        let scalarDim = ScalarTrait.allCases.count
+
+        // Every place key any term actually differs at — the fit's place
+        // parameter space, and each term's place columns (delta 0 unless
+        // this scale differs, ±1/differingScaleCount where it does — see
+        // this method's doc comment for why that division belongs here
+        // rather than in the solver).
+        var placeIndex: [String: Int] = [:]
+        struct PlaceColumn { let index: Int; let delta: Float }
+        var placeColumns: [[PlaceColumn]] = []
+        placeColumns.reserveCapacity(trainingTerms.count)
+        for term in trainingTerms {
+            let differingScales: [(scale: String, winnerName: String, loserName: String)] = [
+                ("fine", term.winner.place.fine, term.loser.place.fine),
+                ("landscape", term.winner.place.landscape, term.loser.place.landscape),
+                ("region", term.winner.place.region, term.loser.place.region),
+                ("coarse", term.winner.place.coarse, term.loser.place.coarse),
+                ("network", term.winner.place.network, term.loser.place.network),
+            ].compactMap { scale, winnerName, loserName in
+                guard let winnerName, let loserName, winnerName != loserName else { return nil }
+                return (scale, winnerName, loserName)
+            }
+            guard !differingScales.isEmpty else {
+                placeColumns.append([])
+                continue
+            }
+            let delta = 1 / Float(differingScales.count)
+            var columns: [PlaceColumn] = []
+            columns.reserveCapacity(differingScales.count * 2)
+            for (scale, winnerName, loserName) in differingScales {
+                let winnerKey = Self.placeWeightKey(scale: scale, name: winnerName)
+                let loserKey = Self.placeWeightKey(scale: scale, name: loserName)
+                let winnerIndex = placeIndex[winnerKey] ?? {
+                    let i = placeIndex.count
+                    placeIndex[winnerKey] = i
+                    return i
+                }()
+                let loserIndex = placeIndex[loserKey] ?? {
+                    let i = placeIndex.count
+                    placeIndex[loserKey] = i
+                    return i
+                }()
+                columns.append(PlaceColumn(index: winnerIndex, delta: delta))
+                columns.append(PlaceColumn(index: loserIndex, delta: -delta))
+            }
+            placeColumns.append(columns)
+        }
+        let placeDim = placeIndex.count
+        let dimension = featureDim + scalarDim + placeDim
+        let n = trainingTerms.count
+
+        var prior = [Float](repeating: 0, count: dimension)
+        prior[featureDim + ScalarTrait.aesthetics.rawValue] = 1
+
+        var lambda = [Float](repeating: 0, count: dimension)
+        for j in 0..<featureDim { lambda[j] = Thresholds.rankerFeaturePrintPenalty }
+        for j in featureDim..<(featureDim + scalarDim) { lambda[j] = Thresholds.rankerScalarPenalty }
+        for j in (featureDim + scalarDim)..<dimension { lambda[j] = Thresholds.rankerPlacePenalty }
+
+        let fpScale = Thresholds.rankerFeaturePrintScale
+        var x0 = prior
+        if warmStart {
+            for j in 0..<featureDim { x0[j] = weights.feature[j] / fpScale }
+            for j in 0..<scalarDim { x0[featureDim + j] = weights.scalars[j] }
+            for (key, index) in placeIndex { x0[featureDim + scalarDim + index] = weights.place[key] ?? 0 }
+        }
+
+        guard n > 0 else {
+            // No terms at all (an empty library, or a rebuild with no
+            // judgments yet): the fit is exactly its prior — matching the
+            // offline study's `LinearBT.fit`'s own `if not duels: self.w =
+            // prior; return`, which this ported from.
+            applySolution(prior, featureDim: featureDim, scalarDim: scalarDim, placeIndex: placeIndex)
+            return FitResult(milliseconds: Date().timeIntervalSince(start) * 1000, iterations: 0)
+        }
+
+        // Dense row-major design matrix: row t is `trainingTerms[t]`'s
+        // contribution to the score difference, one column per parameter —
+        // feature print (scaled by `rankerFeaturePrintScale`), scalar
+        // traits (masked to 0 wherever either side is unmeasured, FR-3.8 —
+        // the same masking `sgdStep`'s gradient used to apply), then place
+        // (the divided ±1/count columns built above).
+        var designMatrix = [Float](repeating: 0, count: n * dimension)
+        designMatrix.withUnsafeMutableBufferPointer { buffer in
+            for (t, term) in trainingTerms.enumerated() {
+                let base = t * dimension
+                for j in 0..<featureDim {
+                    buffer[base + j] = (term.winner.vector[j] - term.loser.vector[j]) * fpScale
+                }
+                for i in 0..<scalarDim {
+                    let bothKnown = term.winner.traits.known[i] && term.loser.traits.known[i]
+                    buffer[base + featureDim + i] = bothKnown
+                        ? term.winner.traits.values[i] - term.loser.traits.values[i] : 0
+                }
+                for column in placeColumns[t] {
+                    buffer[base + featureDim + scalarDim + column.index] = column.delta
+                }
+            }
+        }
+
+        let (solution, iterations, _) = Self.lbfgs(
+            designMatrix: designMatrix, rows: n, dimension: dimension,
+            termWeights: trainingTerms.map(\.weight),
+            prior: prior, lambda: lambda, start: x0
+        )
+        applySolution(solution, featureDim: featureDim, scalarDim: scalarDim, placeIndex: placeIndex)
+        return FitResult(milliseconds: Date().timeIntervalSince(start) * 1000, iterations: iterations)
+    }
+
+    /// Unpacks a solved parameter vector back into `weights` — the inverse
+    /// of `fitWeights`'s design-matrix layout. The feature-print block is
+    /// converted out of its fit-time conditioning (see
+    /// `Thresholds.rankerFeaturePrintScale`'s doc comment); scalars and
+    /// place are copied straight across, place by name via `placeIndex`.
+    private func applySolution(_ solution: [Float], featureDim: Int, scalarDim: Int, placeIndex: [String: Int]) {
+        let fpScale = Thresholds.rankerFeaturePrintScale
+        weights.feature = (0..<featureDim).map { solution[$0] * fpScale }
+        weights.scalars = Array(solution[featureDim..<(featureDim + scalarDim)])
+        var place: [String: Float] = [:]
+        place.reserveCapacity(placeIndex.count)
+        for (key, index) in placeIndex {
+            place[key] = solution[featureDim + scalarDim + index]
+        }
+        weights.place = place
+    }
+
+    /// Batch L2-regularized pairwise-logistic fit — minimizes Σₜ
+    /// cₜ·softplus(−(designMatrix·u)ₜ) + ½ Σⱼ λⱼ(uⱼ − priorⱼ)² over `u`
+    /// (cₜ = `termWeights[t]`), via
+    /// L-BFGS (two-loop recursion, `Thresholds.rankerLBFGSMemory` pairs of
+    /// history) with Armijo backtracking, on Accelerate (`cblas_sgemv` for
+    /// the forward and transposed matrix-vector products, `vDSP` for the
+    /// vector arithmetic in between).
+    ///
+    /// Pure numerical core, no actor state: every semantic that makes this
+    /// *the ranker's* fit — the trait masking, the place-gradient split, the
+    /// feature-print conditioning — lives entirely in how `fitWeights`
+    /// builds `designMatrix`/`prior`/`lambda`, not here, so this function
+    /// can't accidentally depend on `Entry`/`Weights`/`ScalarTrait`. Ported
+    /// from the offline study's Swift prototype (`fable/swift/fit.swift`),
+    /// itself verified there against the same study's Python
+    /// `scipy.optimize.minimize` L-BFGS-B solution on the frozen judgment
+    /// snapshot to ~1e-3 — see this file's own numerical-parity check for
+    /// the equivalent verification against this port.
+    private static func lbfgs(
+        designMatrix X: [Float], rows n: Int, dimension d: Int,
+        termWeights c: [Float],
+        prior: [Float], lambda: [Float], start: [Float]
+    ) -> (solution: [Float], iterations: Int, finalLoss: Float) {
+        func objective(_ u: [Float]) -> (Float, [Float]) {
+            var z = [Float](repeating: 0, count: n)
+            cblas_sgemv(CblasRowMajor, CblasNoTrans, Int32(n), Int32(d), 1, X, Int32(d), u, 1, 0, &z, 1)
+            var loss: Float = 0
+            var r = [Float](repeating: 0, count: n) // d(softplus(-z))/dz = -sigmoid(-z)
+            for i in 0..<n {
+                let zi = z[i]
+                // Stable softplus(-z): log(1 + exp(-z)) computed without
+                // ever exponentiating a large positive number.
+                loss += c[i] * (zi > 0 ? log1p(exp(-zi)) : -zi + log1p(exp(zi)))
+                r[i] = -c[i] / (1 + exp(zi))
+            }
+            var g = [Float](repeating: 0, count: d)
+            cblas_sgemv(CblasRowMajor, CblasTrans, Int32(n), Int32(d), 1, X, Int32(d), r, 1, 0, &g, 1)
+            for j in 0..<d {
+                let diff = u[j] - prior[j]
+                loss += 0.5 * lambda[j] * diff * diff
+                g[j] += lambda[j] * diff
+            }
+            return (loss, g)
+        }
+
+        var u = start
+        var (f, g) = objective(u)
+        var s: [[Float]] = [], y: [[Float]] = [], rho: [Float] = []
+        var iterations = 0
+        for it in 0..<Thresholds.rankerLBFGSMaxIterations {
+            iterations = it + 1
+            let gradientNorm = sqrt(vDSP.dot(g, g))
+            if gradientNorm < Thresholds.rankerLBFGSGradientTolerance { break }
+
+            // Two-loop recursion: the L-BFGS search direction from the last
+            // `rankerLBFGSMemory` (step, gradient-change) pairs, with no
+            // explicit Hessian ever formed.
+            var q = g
+            var alpha = [Float](repeating: 0, count: s.count)
+            for i in stride(from: s.count - 1, through: 0, by: -1) {
+                alpha[i] = rho[i] * vDSP.dot(s[i], q)
+                q = vDSP.add(q, vDSP.multiply(-alpha[i], y[i]))
+            }
+            var gamma: Float = 1
+            if let lastS = s.last, let lastY = y.last { gamma = vDSP.dot(lastS, lastY) / vDSP.dot(lastY, lastY) }
+            var z = vDSP.multiply(gamma, q)
+            for i in 0..<s.count {
+                let beta = rho[i] * vDSP.dot(y[i], z)
+                z = vDSP.add(z, vDSP.multiply(alpha[i] - beta, s[i]))
+            }
+            let direction = vDSP.multiply(-1, z)
+            let slope = vDSP.dot(g, direction)
+
+            // Armijo backtracking: halve the step until it gives a
+            // sufficient decrease, or the step is too small to matter — the
+            // objective is convex and smooth, so this always terminates.
+            var step: Float = 1
+            var uNew = u, fNew = f, gNew = g
+            while true {
+                uNew = vDSP.add(u, vDSP.multiply(step, direction))
+                (fNew, gNew) = objective(uNew)
+                if fNew <= f + Thresholds.rankerLBFGSArmijoConstant * step * slope
+                    || step < Thresholds.rankerLBFGSMinimumStep { break }
+                step *= Thresholds.rankerLBFGSStepShrinkFactor
+            }
+
+            let sStep = vDSP.subtract(uNew, u), yStep = vDSP.subtract(gNew, g)
+            let sy = vDSP.dot(sStep, yStep)
+            if sy > Thresholds.rankerLBFGSCurvatureMinimum {
+                s.append(sStep); y.append(yStep); rho.append(1 / sy)
+                if s.count > Thresholds.rankerLBFGSMemory { s.removeFirst(); y.removeFirst(); rho.removeFirst() }
+            }
+
+            // Relative function-decrease stop — see
+            // `Thresholds.rankerLBFGSFunctionTolerance`'s doc comment for
+            // why this, not the gradient-norm check above, is what actually
+            // ends the loop on a fit this size: without it, float32's noise
+            // floor in the gradient norm keeps this loop spending the full
+            // `rankerLBFGSMaxIterations` re-backtracking to a vanishing step
+            // long after the objective stopped improving, which is exactly
+            // what FR-8.2 forbids.
+            let relativeDecrease = (f - fNew) / max(1, abs(f))
+            u = uNew; f = fNew; g = gNew
+            if relativeDecrease < Thresholds.rankerLBFGSFunctionTolerance { break }
+        }
+        return (u, iterations, f)
     }
 
     private func rawScore(_ entry: Entry) -> Float {

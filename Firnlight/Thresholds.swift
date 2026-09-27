@@ -437,7 +437,29 @@ nonisolated enum Thresholds {
     /// imply"). Every already-trained `Weights.place` entry was accumulated
     /// under the old, larger per-step size, so this forces the same full
     /// replay every place-scale-shape bump above already does.
-    static let rankerAlgorithmVersion = 16 // v16: place learns at one trait's rate, not up to five (FR-5.2)
+    /// v17: replaced the online per-choice SGD step with the batch MAP fit
+    /// `PreferenceRanker.fitWeights` runs — same score function (same
+    /// `traits(of:)`, same unknown-trait masking, same place weights, same
+    /// place-gradient split across differing scales), but minimized in one
+    /// shot over every choice and pseudo-choice at once instead of one
+    /// decayed gradient step per choice in whatever order they arrived.
+    /// An offline study replaying a real user's duels through both found the
+    /// online SGD path overconfident (prequential log-loss 1.02, worse than
+    /// a coin flip's 0.693) and order-dependent enough that one new duel
+    /// swapped ~52 of the 200-photo album's photos; the same score function
+    /// fit in batch (pairwise logistic loss + this file's per-block L2
+    /// penalty anchored at `PreferenceRanker.initialScalarWeights`) scored
+    /// log-loss 0.65, verdict AUC 0.87 vs. the online path's 0.73, and
+    /// churned 16–18 photos per duel instead of ~52 — see this bump's
+    /// tunable constants below for exactly which fitted setting. A v16
+    /// weights file has no L-BFGS solution to warm-start from and its
+    /// `feature`/`scalars`/`place` values were fit by a different
+    /// optimizer entirely, so only a full rebuild (re-seed + full
+    /// choice/verdict replay, now as one batch fit from
+    /// `PreferenceRanker.initialScalarWeights`/0/0 rather than a sequence of
+    /// steps) produces a weights file this version's fit actually
+    /// converged to.
+    static let rankerAlgorithmVersion = 17 // v17: batch MAP fit replaces online SGD, favorite seed down-weighted (FR-5.2)
 
     // MARK: Place hierarchy (FR-5.13, FR-5.14)
 
@@ -588,12 +610,145 @@ nonisolated enum Thresholds {
     /// the last. See `PreferenceRanker.sunElevationBasis`.
     static let sunElevationHorizonScaleDegrees: Double = 6
 
-    /// SGD learning rate for the online Bradley–Terry ranker.
-    static let rankerLearningRate: Float = 0.5
+    /// L2 penalty strength on the feature-print block of `PreferenceRanker`'s
+    /// batch fit, anchored at that block's prior (0 — an untrained photo
+    /// carries no feature-print preference). Applied to the block's
+    /// *conditioned* parameterization — see `rankerFeaturePrintScale` — not
+    /// to the raw `Weights.feature` the fit finally stores.
+    ///
+    /// From the offline study (`fable/models.py`'s `LinearBT`, `fable/stability.py`,
+    /// `fable/results_grid.log`/`results_items.log`): a grid over λ ∈
+    /// {0.3, 1, 3, 10, 30} × feature-print scale ∈ {1, 5, 20} on a real
+    /// user's duel history found λ ∈ [3, 30] statistically indistinguishable
+    /// on held-out prequential log-loss and accuracy (`results_grid.log`),
+    /// with λ=10, scale=5 among the best (log-loss 0.653, accuracy 0.617,
+    /// verdict AUC 0.886 — `results_items.log`) and its churn (16–18 photos
+    /// swapped per duel, vs. the online path's ~52) measured in
+    /// `results_stability.log`. All three block penalties below share this
+    /// same λ=10, since the study never found evidence a different value
+    /// helped any one block over the others; retune per-block only if a
+    /// future replay of a larger judgment history shows one block wants to
+    /// move independently of the rest.
+    static let rankerFeaturePrintPenalty: Float = 10
 
-    /// L2 weight-decay factor applied before each SGD step; bounds weight growth
-    /// so raw scores stay in a sane range and one duel can't swing the ranking.
-    static let rankerWeightDecay: Float = 0.01
+    /// Same L2 penalty, on the scalar-trait block (`ScalarTrait`), anchored
+    /// at `PreferenceRanker.initialScalarWeights` (aesthetics = 1, every
+    /// other trait = 0 — FR-5.4's opening guess). See
+    /// `rankerFeaturePrintPenalty` for where λ=10 comes from.
+    static let rankerScalarPenalty: Float = 10
+
+    /// Same L2 penalty, on the place block (`Weights.place`), anchored at 0
+    /// (an unjudged place carries no preference, FR-5.2) — one λ shared
+    /// across every place actually seen, not per-scale, since the score
+    /// function's place-gradient split (`PreferenceRanker.fitWeights`'s doc
+    /// comment) is what already keeps the place block from moving faster
+    /// than any other single trait. See `rankerFeaturePrintPenalty` for
+    /// where λ=10 comes from.
+    static let rankerPlacePenalty: Float = 10
+
+    /// Conditioning scale the batch fit multiplies the feature-print
+    /// block's pairwise difference by before minimizing, then divides back
+    /// out of the fitted weight before storing it in `Weights.feature` —
+    /// purely a change of variables for the optimizer (feature prints are
+    /// unit-norm 768-vectors, so a pairwise difference component is tiny
+    /// next to a trait or place difference of ~1; without this the
+    /// feature-print block's gradient is negligible relative to the
+    /// others' and L-BFGS conditions poorly). It does not change the fitted
+    /// score function: penalizing the scaled parameter by
+    /// `rankerFeaturePrintPenalty` and then dividing the solution by this
+    /// same scale is algebraically identical to penalizing the raw
+    /// `Weights.feature` by `rankerFeaturePrintPenalty / scale²` directly,
+    /// for any scale — see `PreferenceRanker.fitWeights`'s doc comment.
+    /// 5, from the same study grid as `rankerFeaturePrintPenalty` (feature
+    /// print scale ∈ {1, 5, 20}; 5 was part of the best-supported setting
+    /// found, `results_items.log`'s `linearBT(lam=10,fps=5)`).
+    static let rankerFeaturePrintScale: Float = 5
+
+    /// L-BFGS memory (how many past step/gradient-change pairs the two-loop
+    /// recursion keeps) for `PreferenceRanker.fitWeights`. 10 is the
+    /// conventional default for L-BFGS on a smooth convex objective this
+    /// size (a few hundred to a few thousand parameters) — enough curvature
+    /// history to converge in a handful of iterations without the O(memory
+    /// × dimension) cost of keeping more; verified against the offline
+    /// study's Swift prototype (`fable/swift/fit.swift`), which uses the
+    /// same value.
+    static let rankerLBFGSMemory = 10
+
+    /// Iteration cap for `PreferenceRanker.fitWeights`'s L-BFGS loop — a
+    /// backstop, not a target: the gradient-norm tolerance below is what
+    /// ordinarily ends the loop, in single digits of iterations once
+    /// warm-started from a converged previous fit (FR-8.2 measured this in
+    /// the tens of milliseconds; see that method's doc comment). Matches
+    /// the offline study's Swift prototype.
+    static let rankerLBFGSMaxIterations = 500
+
+    /// L-BFGS stops once the gradient's L2 norm drops below this — in
+    /// practice, on a fit this size, it never does: measured against a real
+    /// judgment history (382 choices, 300 favorite pseudo-choices, 33 bad
+    /// verdicts; d≈1400 parameters), the gradient norm plateaus around
+    /// 0.03–0.06 once the objective itself has visibly converged, a float32
+    /// noise floor from the L2 penalty term's own rounding at this
+    /// dimension — not a sign the fit is unconverged. Kept (rather than
+    /// loosened to match that floor, which would be this-dataset-specific)
+    /// as a correctness backstop for a small or unusually well-conditioned
+    /// fit where it *can* be reached; `rankerLBFGSFunctionTolerance` below is
+    /// what actually stops the loop in the common case. Matches the offline
+    /// study's Swift prototype's value.
+    static let rankerLBFGSGradientTolerance: Float = 1e-5
+
+    /// L-BFGS also stops once one iteration's relative loss decrease —
+    /// (previous loss − new loss) / max(1, |previous loss|) — drops below
+    /// this. Added after timing `fitWeights` against the offline study's
+    /// frozen judgment snapshot: with only `rankerLBFGSGradientTolerance` to
+    /// stop it, the loop ran the full `rankerLBFGSMaxIterations` every time,
+    /// cold or warm-started (≈500 iterations, ≈3–4 seconds) — the gradient
+    /// norm's float32 noise floor (see that constant's doc comment) meant it
+    /// never triggered, so L-BFGS kept re-backtracking to a vanishingly
+    /// small step every iteration for hundreds of iterations after the
+    /// objective had already stopped improving, which is squarely what
+    /// FR-8.2 forbids. Tracing the same fit's loss per iteration found it
+    /// essentially flat (relative decrease below 1e-6) by iteration
+    /// 15–20, with a solution already agreeing with scipy's independent
+    /// L-BFGS-B solve to ~1e-4 at that point — so stopping there costs
+    /// nothing in accuracy and turns a several-second fit into a
+    /// few-millisecond one. 1e-6 is deliberately looser than
+    /// `rankerLBFGSGradientTolerance`'s spirit would suggest for the same
+    /// reason: float32 arithmetic has roughly 7 significant digits, so a
+    /// relative decrease smaller than this is normally unmeasurable noise
+    /// rather than genuine remaining progress. 1e-7 (rather than a rounder
+    /// 1e-6) is where the numerical-parity check
+    /// (`fable/swift`-derived harness) found the fit stopping at 21
+    /// iterations/≈11 ms cold, ≈2–8 ms warm-started, agreeing with scipy's
+    /// independent L-BFGS-B solve on the same objective to ~4×10⁻⁴ in every
+    /// weight — comfortably inside this file's ~1e-3 parity target with
+    /// room to spare, at 1e-6 the same fit stops a few iterations earlier
+    /// (~9 ms) at ~1.2×10⁻³ agreement, right at that target rather than
+    /// under it.
+    static let rankerLBFGSFunctionTolerance: Float = 1e-7
+
+    /// Armijo sufficient-decrease constant for `fitWeights`'s backtracking
+    /// line search — the standard small value (a much larger one rejects
+    /// steps that are actually fine; a much smaller one accepts steps that
+    /// barely decrease the objective). Matches the offline study's Swift
+    /// prototype.
+    static let rankerLBFGSArmijoConstant: Float = 1e-4
+
+    /// Backtracking step-size shrink factor: each rejected trial step is
+    /// halved. Matches the offline study's Swift prototype.
+    static let rankerLBFGSStepShrinkFactor: Float = 0.5
+
+    /// Backtracking gives up (accepting whatever step remains) below this
+    /// step size — the objective is convex and smooth, so a step this
+    /// small only happens right at convergence, never mid-fit. Matches the
+    /// offline study's Swift prototype.
+    static let rankerLBFGSMinimumStep: Float = 1e-10
+
+    /// L-BFGS only banks a (step, gradient-change) pair into its history
+    /// when the curvature condition step·gradientChange exceeds this —
+    /// otherwise the pair is numerically too flat to safely invert and is
+    /// dropped rather than corrupting the next search direction. Matches
+    /// the offline study's Swift prototype.
+    static let rankerLBFGSCurvatureMinimum: Float = 1e-10
 
     /// Fixed seed for the deterministic RNG used when seeding fresh weights from
     /// favorites, so an identical choice history rebuilds the same ranking.
@@ -620,6 +775,27 @@ nonisolated enum Thresholds {
 
     /// Cap on total favorite pseudo-choices during seeding.
     static let favoriteSeedMaxPairs = 300
+
+    /// How much one favorite pseudo-choice counts in the ranker's fit
+    /// relative to a real duel choice or bad verdict (1). A Photos favorite
+    /// is weaker evidence than a duel. It was marked for reasons other than
+    /// wallpaper fitness, and the seed's opponent is a random photo, not a
+    /// considered alternative. Up to `favoriteSeedMaxPairs` of them would
+    /// otherwise outweigh a few hundred real choices.
+    ///
+    /// Tuning history (2026-09-27, offline replay of one real library: 382
+    /// usable choices, 33 bad verdicts, 300 seed pairs; λ = 10, feature-print
+    /// scale 5). Columns: prequential accuracy / log-loss, then verdict AUC
+    /// on 86 never-dueled photos:
+    /// - 1.0 (the first batch-fit draft): 0.608 / 0.679, AUC 0.79. Worse
+    ///   log-loss than aesthetics alone (0.678).
+    /// - 0.3: 0.611 / 0.650, AUC 0.84.
+    /// - 0 (no seed): 0.581 / 0.662, AUC 0.87.
+    ///
+    /// 0.3 keeps FR-5.4's seed while letting duels outvote it. On this
+    /// library the user's favorites ran against their duel choices (AUC
+    /// 0.44 under the old ranker).
+    static let rankerFavoriteSeedWeight: Float = 0.3
 
     /// Long-edge pixel size for duel images.
     static let duelImagePixelSize = 1024
