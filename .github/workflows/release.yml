@@ -40,6 +40,12 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Fetch place data
+        run: scripts/fetch-place-data.sh
+        # See build.yml's identical step: without this, the published
+        # release's Firnlight/PlaceData/ is empty and FR-5.14 is false for
+        # every user who downloads it, silently (the build still succeeds).
+
       - name: Select Xcode 27
         run: |
           # See build.yml's "Select Xcode 27" step for why this resolves

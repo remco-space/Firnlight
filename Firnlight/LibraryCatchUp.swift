@@ -60,6 +60,22 @@ final class LibraryCatchUp {
     private var againRequested = false
     /// The slow fallback recheck described on the type's own doc comment.
     private var authorizationNarrowingRecheckTask: Task<Void, Never>?
+    /// FR-5.13's background place-name enrichment, whose answer is
+    /// ranking-relevant again per FR-5.14's fifth scale (see
+    /// `runPlaceNameLookupLoop`) — silent, never gates anything the
+    /// scan/analysis pair above does, and started and stopped alongside
+    /// them for the same reason: it has nothing to do once the library is
+    /// no longer fully accessible (FR-1.8).
+    private var placeNameTask: Task<Void, Never>?
+    /// How many otherwise-eligible photos have no FR-5.14 fifth-scale
+    /// answer yet — `PlaceNameLookup.pendingCount()`, refreshed once per
+    /// loop iteration in `runPlaceNameLookupLoop`. Read by `LibraryStatusView`
+    /// so the Library tab says this background work is still going
+    /// (FR-3.5) instead of leaving it invisible (FR-3.4, FR-5.13). 0 both
+    /// before the loop's first iteration and once genuinely nothing remains
+    /// — a photo with no location at all was never eligible in the first
+    /// place, so it never counts against this.
+    private(set) var placeNamesPending = 0
 
     /// Starts watching the library and catches up with it now. Safe to call
     /// repeatedly — the watcher is registered once.
@@ -82,6 +98,9 @@ final class LibraryCatchUp {
                 }
             }
         }
+        if placeNameTask == nil {
+            placeNameTask = Task { [weak self] in await self?.runPlaceNameLookupLoop() }
+        }
         request(afterSettling: false)
     }
 
@@ -103,6 +122,8 @@ final class LibraryCatchUp {
         watcher = nil
         authorizationNarrowingRecheckTask?.cancel()
         authorizationNarrowingRecheckTask = nil
+        placeNameTask?.cancel()
+        placeNameTask = nil
         task?.cancel()
         task = nil
         againRequested = false
@@ -193,5 +214,58 @@ final class LibraryCatchUp {
         await analysis.standDownForCatchUp()
         await scanner.scan(into: context)
         analysis.startUnlessStopped(container: context.container)
+    }
+
+    /// FR-5.13's background place-name lookup: one `PlaceNameLookup.resolveNext()`
+    /// call at a time, forever, until `end()` cancels this task. A resolved
+    /// name changes what FR-5.14's fifth scale weighs some photos on, so
+    /// resolutions reload the ranker and bump `RankingClock`, the same
+    /// hand-off `AnalysisView`'s own completion path already makes — but
+    /// only every `Thresholds.placeNameLookupBatchSize` resolutions, or once
+    /// the loop runs out of work for now, never after every single one: a
+    /// reload re-walks the whole candidate pool (`FeatureStore`), which
+    /// FR-8.2 forbids paying on every couple of seconds of background
+    /// lookups the way it's fine to pay on a duel choice a human just made.
+    ///
+    /// Not silent to the *user*, though: `placeNamesPending` is refreshed
+    /// every iteration so `LibraryStatusView` can say this work is still
+    /// going (FR-3.5) rather than let Vision's own "Analysis complete"
+    /// nearby read as if everything about the library were finished while
+    /// this deferred work remains (FR-3.4, FR-5.13).
+    private func runPlaceNameLookupLoop() async {
+        guard let container = context?.container else { return }
+        let lookup = PlaceNameLookup(modelContainer: container)
+        var resolvedSinceReload = 0
+
+        func flushIfNeeded() async {
+            guard resolvedSinceReload > 0 else { return }
+            resolvedSinceReload = 0
+            try? await PreferenceRanker(modelContainer: container).reload()
+            RankingClock.shared.bump()
+        }
+
+        while !Task.isCancelled {
+            let outcome: PlaceNameLookup.Outcome
+            do {
+                outcome = try await lookup.resolveNext()
+            } catch {
+                log.error("Place name lookup failed: \(error.localizedDescription, privacy: .public)")
+                outcome = .waitingForNetwork
+            }
+            // Kept on failure to fetch rather than reset to 0 — a transient
+            // count error is not evidence the remaining work vanished.
+            placeNamesPending = (try? await lookup.pendingCount()) ?? placeNamesPending
+            switch outcome {
+            case .resolved:
+                resolvedSinceReload += 1
+                if resolvedSinceReload >= Thresholds.placeNameLookupBatchSize {
+                    await flushIfNeeded()
+                }
+                try? await Task.sleep(for: Thresholds.placeNameLookupPace)
+            case .nothingPending, .waitingForNetwork:
+                await flushIfNeeded()
+                try? await Task.sleep(for: Thresholds.placeNameLookupIdleInterval)
+            }
+        }
     }
 }

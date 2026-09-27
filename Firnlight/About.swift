@@ -37,6 +37,21 @@ enum AppIdentity {
     /// app rather than marketing copy: what it does, where it does it.
     static let summary = "Curates desktop wallpapers from your own Photos library, entirely on your device: it finds the nature photos worth showing, learns your taste from quick comparisons, and keeps a Photos album in sync."
 
+    /// FR-10.5's exception for world reference data — "the app may carry it
+    /// inside itself or fetch it for itself, and credits it as its authors
+    /// ask, alongside the facts FR-8.8 gives about the app" — for the place
+    /// gazetteer FR-5.14 needs (`PlaceGazetteer`, `Firnlight/PlaceData/`),
+    /// sourced from two datasets (see `THIRD_PARTY_NOTICES.md`'s
+    /// `Firnlight/PlaceData/` section for what each supplies, including the
+    /// license link neither this short in-app line nor a plain `Text` in
+    /// this file's undecorated style carries). Natural Earth's own terms
+    /// (naturalearthdata.com/about/terms-of-use) say crediting them is
+    /// unnecessary, but offer this exact short text "if you wish to cite
+    /// the map data"; GeoNames' CC BY 4.0 license does require attribution
+    /// that names the license, not merely the source — hence "CC BY 4.0"
+    /// appears here verbatim rather than only in `THIRD_PARTY_NOTICES.md`.
+    static let mapDataCredit = "Made with Natural Earth. Place names from GeoNames.org, CC BY 4.0."
+
     /// `CFBundleShortVersionString` — FR-8.9's major.minor.patch.
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -104,8 +119,13 @@ struct AboutCommand: Commands {
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
             Button("About \(AppIdentity.name)") {
+                // Two lines, not two calls to `orderFrontStandardAboutPanel`:
+                // the panel takes one credits string, so FR-10.5's map-data
+                // credit joins FR-8.8's one sentence in the same
+                // `NSAttributedString` rather than needing a second place to
+                // show it.
                 let credits = NSAttributedString(
-                    string: AppIdentity.summary,
+                    string: "\(AppIdentity.summary)\n\(AppIdentity.mapDataCredit)",
                     attributes: [
                         .font: NSFont.preferredFont(forTextStyle: .callout),
                         .foregroundColor: NSColor.secondaryLabelColor
@@ -192,6 +212,17 @@ struct AboutFooter: View {
                 // have come here to read, the same as the version, so it gets
                 // the same contrast rather than being stepped down twice.
                 .foregroundStyle(.secondary)
+
+            // FR-10.5's "credits it as its authors ask, alongside the facts
+            // FR-8.8 gives about the app" — `.tertiary` here, unlike the
+            // facts above: this reads as a courtesy credit even though one
+            // half of it (GeoNames' CC BY 4.0) is a real license
+            // requirement, not a fact the user came here to check, so it
+            // steps down rather than competing for the same attention as
+            // the version and copyright.
+            Text(AppIdentity.mapDataCredit)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 32)

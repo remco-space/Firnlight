@@ -12,6 +12,28 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Added
+
+- A photo's location now counts as a place at four scales — a town or park,
+  a landscape or mountain range, a region, and a country, each the real,
+  published name a world atlas (or, for a locally named landscape like the
+  Odenwald, a more detailed map) would give it — not only a coordinate, so a
+  preference for one place carries to photos from it never judged, and a
+  barely-judged place leans on the larger places around it without ever
+  leaking to an unrelated one. The natural and the political scales are
+  always both known, never one standing in for the other, and where a
+  reference gives a place only as a point it resolves to the nearest such
+  place. This works with no network at all, from map data the app carries
+  with it; where a network connection is available, the app also asks
+  Apple's maps service what a place is called (never anything else about
+  it, and no more than once per spot), and learns from that too — one more
+  of the places a preference for it can carry to and from (FR-1.5, FR-5.13,
+  FR-5.14, FR-10.5).
+- The wallpaper album no longer just takes the top-ranked photos one by one:
+  among photos rated nearly alike, one unlike what's already in the album
+  wins over one that repeats its place, its season, or its look — while a
+  photo rated clearly better never loses its place to variety (FR-6.1).
+
 ## [0.25.0] - 2026-09-18
 
 ### Fixed

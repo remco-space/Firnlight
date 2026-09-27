@@ -1,13 +1,21 @@
 # Third-party notices
 
-This repository does not vendor third-party skill content (FR-10.5): every
+This repository does not vendor third-party *skill* content (FR-10.5): every
 skill under `.claude/skills/` that isn't first-party is a symlink into a git
 submodule, or generated locally from the developer's own Xcode install —
 see [`.claude/skills/README.md`](.claude/skills/README.md) for the mechanism
 and provenance table. Nothing there is redistributed by this repository's
-own git history. This file exists because MIT still requires its copyright
-notice to travel with anyone who ends up with a copy of the code — including
-a submodule checkout most contributors won't open by hand.
+own git history. Most of this file exists because MIT still requires its
+copyright notice to travel with anyone who ends up with a copy of the code —
+including a submodule checkout most contributors won't open by hand.
+
+One section below is different in kind: FR-10.5 makes an explicit exception
+for "reference data about the world" the app itself needs to work, letting
+the *app* carry it while "the repository still only carries the means to
+obtain it" — exactly the shape the skills above already take.
+`Firnlight/PlaceData/` follows that same shape: gitignored, obtained by
+`scripts/fetch-place-data.sh`, and credited below and in the app itself
+(About.swift) per "credits it as its authors ask."
 
 ## `ui-review-tahoe`, `liquid-glass`
 
@@ -58,6 +66,44 @@ PolyForm Perimeter License 1.0.0
 The full license text is in that submodule's own `LICENSE` file. It permits
 any use except building a competing product; Firnlight does not compete with
 a Claude Code skills collection, so this applies without restriction here.
+
+## `Firnlight/PlaceData/` (map data)
+
+Two sources, fetched, trimmed and simplified by `scripts/fetch-place-data.sh` /
+`scripts/trim-place-data.py` — see those scripts for exactly what was kept
+and why. Both obtained under FR-10.5's exception for world reference data,
+the same "means to obtain it" shape the skills above already use — never
+committed to this repository (`Firnlight/PlaceData/` is gitignored).
+
+**[Natural Earth](https://www.naturalearthdata.com)** — the
+`ne_10m_admin_0_countries`, `ne_10m_geography_regions_polys`,
+`ne_10m_admin_1_states_provinces` and `ne_10m_populated_places` datasets
+(`countries.json`, `natural.json`, `regions.json`, and half of `places.json`).
+The [terms of use](https://www.naturalearthdata.com/about/terms-of-use/)
+place it in the public domain outright —
+
+> All versions of Natural Earth raster + vector map data found on this
+> website are in the public domain. You may use the maps in any manner...
+> No permission is needed to use Natural Earth. Crediting the authors is
+> unnecessary.
+
+— which the same terms page immediately follows with the one line they
+*do* ask for if a user credits them anyway ("Made with Natural Earth.").
+
+**[GeoNames](https://www.geonames.org)** — `allCountries.txt`, filtered down
+to the areal/extended landscape feature codes (hills, ranges, forests,
+valleys, plateaus: `landscapes.json`) and the park/reserve feature codes
+(`parks.json`), plus the other half of `places.json`'s parks. This is
+FR-5.14's local-granularity tier — "known down to the landscapes people name
+locally... not only those a world map names" — which Natural Earth's own
+~600 world-significant physical features don't reach. GeoNames' data is
+licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), which
+does require attribution ("Made with Natural Earth. Place names from
+GeoNames.org.").
+
+Both credits are what `AppIdentity.mapDataCredit` shows in the app itself
+(About.swift), per FR-10.5's "credits it as its authors ask, alongside the
+facts FR-8.8 gives about the app."
 
 ## `swiftui-specialist`, `swiftui-whats-new-27`
 

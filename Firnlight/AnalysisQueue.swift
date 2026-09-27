@@ -94,6 +94,13 @@ nonisolated final class NetworkPolicy: Sendable {
         if path.isExpensive { return .cellularNetwork }
         return nil
     }
+
+    /// The same policy, as a bare yes/no, for a caller with nothing to show
+    /// the user about *why* it's waiting — `PlaceNameLookup`'s reverse
+    /// geocoding is a silent background enrichment (FR-5.13), never a state
+    /// the Library tab reports on, so it has no use for `AnalysisWait`'s
+    /// worded cases and just backs off uniformly until this turns true again.
+    var allowsNetworkUse: Bool { iCloudDownloadWait == nil }
 }
 
 /// The system conditions that decide whether a run may proceed at all, and

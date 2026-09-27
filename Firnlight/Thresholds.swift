@@ -385,7 +385,156 @@ nonisolated enum Thresholds {
     /// library-independent scales (`PreferenceRanker.seasonFraction`,
     /// latitude ÷ 90) that never move under a growing library — see
     /// `PreferenceRanker`'s type doc comment.
-    static let rankerAlgorithmVersion = 10 // v10: derived solar geometry, hemisphere-aware season, place and era (FR-5.13)
+    /// v11 is required too: it adds the three place-scale weight dictionary
+    /// (FR-5.14) — a v10 weights file has no opinion about it, so only a
+    /// full rebuild (re-seed + full choice/verdict replay) folds it in, the
+    /// same reasoning every earlier trait addition here gives.
+    /// v12 is required too: v11 keyed each scale's weights into a small
+    /// fixed-size hashed bucket table, which let two unrelated places share
+    /// a bucket by hash collision — exactly the leak FR-5.14's "never
+    /// reaches another except through the larger places both belong to"
+    /// forbids. v12 replaces the bucket table with an exact
+    /// `[String: Float]` dictionary, one entry per place actually seen, so
+    /// there is nothing left for two places to collide into; a v11 file's
+    /// bucket weights mean something different from a v12 file's per-place
+    /// ones, so this forces the same full rebuild.
+    /// v13 is required too: FR-5.14's landscape and region scales are now
+    /// independently known (an earlier revision let a landscape match
+    /// suppress the region fallback, which is the opposite of "the natural
+    /// and the political alike"), so there are four place scales instead of
+    /// three and `sgdStep`'s scale list changed shape.
+    /// v14: FR-5.14 now requires "where the network allows, the app also
+    /// learns what Apple's maps call the place... and that name counts as
+    /// one more of the places the photo is known by" — a fifth, genuinely
+    /// separate scale (`network`, never conflated with the four offline
+    /// ones — see `PlaceHierarchy`'s doc comment for the leak that produced
+    /// when an earlier revision tried folding a resolved name into an
+    /// offline scale key instead). Without this bump, judgments replayed
+    /// from before this capability shipped would never retroactively train
+    /// the network scale for a spot already resolved at the time, which
+    /// `Weights.networkFingerprint`'s own rebuild trigger only catches for
+    /// resolutions that happen *after* the weights were last built, not the
+    /// ones already sitting in `PlaceNameRecord` the first time this version
+    /// runs.
+    /// v15: `PlaceHierarchy.networkPlaceKey` now anchors Apple's `cityName`
+    /// to the record's own offline region/country key instead of pairing
+    /// it with Apple's `regionName` — verified (a standalone
+    /// `MKReverseGeocodingRequest` harness) that the unanchored v14 key
+    /// collided every real place sharing a city name into one weight (all
+    /// three Springfields, both Las Vegases), which is exactly the leak
+    /// FR-5.14's "never" forbids and the "the place" singular in "that name
+    /// counts as one more of the places the photo is known by" rules out.
+    /// Every `Weights.place` key of the form `"network:<name>"` written
+    /// under v14 is shaped differently from a v15 one for the same
+    /// coordinate, so this forces the same full replay the v14 bump did.
+    /// v16: `sgdStep`'s place-scale loop now splits one `gradient` across
+    /// however many of the five scales actually differ, instead of giving
+    /// each differing scale its own full `gradient` step — the fixed-count
+    /// version let "where a photo was taken" learn up to 5× faster than any
+    /// other single trait, since two geographically distant photos
+    /// routinely differ at all five scales in the same duel (FR-5.2: "no
+    /// trait counts for more or less than the user's own decisions
+    /// imply"). Every already-trained `Weights.place` entry was accumulated
+    /// under the old, larger per-step size, so this forces the same full
+    /// replay every place-scale-shape bump above already does.
+    static let rankerAlgorithmVersion = 16 // v16: place learns at one trait's rate, not up to five (FR-5.2)
+
+    // MARK: Place hierarchy (FR-5.13, FR-5.14)
+
+    /// Beyond this distance (degrees, equirectangular — see
+    /// `PlaceGazetteer.squaredDistance`) from the nearest entry in
+    /// `PlaceData/places.json`/`parks.json`, a coordinate gets no fine-scale
+    /// name at all (FR-3.8's gap, not a penalty) rather than one from a town
+    /// or park that isn't plausibly "this photo's town or park". Roughly
+    /// 110 km at the equator. Tighter than `regionGazetteerMaxDistanceDegrees`
+    /// on purpose: FR-5.11's "leans on the larger places around it" already
+    /// covers a fine scale that comes up empty, so there is no cost to being
+    /// strict here and a real one (a nearest-town match hundreds of
+    /// kilometres off) to being loose. Unverified against a real library's
+    /// spread of locations; tune by watching how often real photos land
+    /// inside vs. outside this radius, the same way every other geometric
+    /// threshold here is tuned.
+    static let placeGazetteerMaxDistanceDegrees = 1.0
+
+    /// The region scale's fallback-only cutoff, against `PlaceData/regions.json`'s
+    /// label points — consulted only where `PlaceGazetteer.region`'s
+    /// point-in-polygon test against the same file's real admin-1 boundaries
+    /// already came back empty (a country with no published admin-1
+    /// subdivisions in the source data). Wider than the fine cutoff because
+    /// a region's label point can legitimately sit hundreds of kilometres
+    /// from a photo taken at the far edge of a large, unsubdivided area —
+    /// the nearest-label-point approximation is coarse for those, and a
+    /// tight cutoff would only turn that coarseness into a missing region
+    /// instead of an approximate one. Roughly 880 km at the equator.
+    /// Unverified; tune the same way as the fine cutoff.
+    static let regionGazetteerMaxDistanceDegrees = 8.0
+
+    /// The cutoff for the landscape scale's local-granularity tier, against
+    /// `PlaceData/landscapes.json` (GeoNames hills, ranges, forests,
+    /// valleys) — only consulted once `PlaceGazetteer.landscape` has already
+    /// tried the world-significant Natural Earth polygons and found no
+    /// containing feature. Between the fine and region cutoffs: a named
+    /// local landscape is usually a broader, less precisely-bounded thing
+    /// than a town but still more local than "which state/province" —
+    /// roughly 330 km at the equator. Unverified; tune the same way as the
+    /// other two.
+    static let landscapeGazetteerMaxDistanceDegrees = 3.0
+
+    /// The grid `PlaceNameLookup` rounds a coordinate to when deciding
+    /// whether it has already asked Apple's maps service about "this spot"
+    /// (`PlaceHierarchy.networkCacheKey`) — purely a cache-deduplication
+    /// granularity, distinct from the place *identity* FR-5.14's fifth
+    /// scale actually trains by (that identity is the resolved name itself,
+    /// composed by `PlaceHierarchy.networkPlaceKey`). ~1.1 km at the
+    /// equator: fine enough that two genuinely different small towns rarely
+    /// round to the same key, and coarse enough that a cluster of photos
+    /// taken walking around one spot shares a single lookup rather than one
+    /// each.
+    static let placeNameLookupCacheGridDegrees = 0.01
+
+    /// How long `PlaceNameLookup` waits after successfully resolving one
+    /// spot before asking about the next — FR-5.13's "at the pace the
+    /// source permits". Apple documents no rate limit for
+    /// `MKReverseGeocodingRequest`, so this is simply a courteous, arbitrary
+    /// pace for a background enrichment nobody is waiting on, not a measured
+    /// limit — a duel or an album sync never blocks on it either way.
+    static let placeNameLookupPace: Duration = .seconds(2)
+
+    /// How long `PlaceNameLookup` waits before trying again after a call
+    /// that made no progress — no network (FR-3.7), or nothing left to look
+    /// up. Long relative to `placeNameLookupPace` for the same reason
+    /// `deferredRetryInterval` is long relative to `analysisPauseRecheckInterval`:
+    /// re-testing a condition that rarely changes moment to moment should
+    /// cost the idle loop almost nothing.
+    static let placeNameLookupIdleInterval: Duration = .seconds(60)
+
+    /// How many resolved cells `LibraryCatchUp`'s lookup loop coalesces
+    /// before it reloads the ranker and bumps `RankingClock` — the same
+    /// batch-or-idle debounce shape `preferenceCacheFlushBatchSize` already
+    /// uses for duel choices, applied here for the same reason (FR-8.2): a
+    /// library with hundreds of unresolved places would otherwise cost a
+    /// full-pool reload (`FeatureStore.albumCandidates`, `suggestedAlbumSize`)
+    /// every `placeNameLookupPace`, for a background enrichment nobody
+    /// pressed a button for. A trailing partial batch is still flushed as
+    /// soon as the loop goes idle (nothing pending, or waiting on the
+    /// network) rather than held forever, the same "idle bound" half of that
+    /// existing debounce. This is load-bearing again as of FR-5.14's fifth
+    /// scale — a resolution now genuinely changes ranking, unlike the round
+    /// where this loop's answer was purely informational.
+    static let placeNameLookupBatchSize = 10
+
+    /// Records `LibraryScanner.applyNetworkPlaceNames` applies between
+    /// cooperative yields (and SwiftData saves), the same
+    /// `scanProgressStride`/`cloudIdentifierBatchSize` shape for the same
+    /// reason (FR-8.2): this pass now runs unconditionally over every
+    /// located record on every scan, and a library with thousands of them
+    /// would otherwise be one long unbroken main-actor loop with nothing
+    /// interleaved. Larger than `cloudIdentifierBatchSize` — the per-record
+    /// work here is a dictionary lookup and two field writes, not a
+    /// PhotoKit call documented as "very expensive" — so a bigger chunk
+    /// still yields often enough without paying `context.save()`'s own
+    /// overhead needlessly often.
+    static let networkPlaceApplyBatchSize = 1000
 
     /// Distinct foreground objects at which the ranker's `subjectCount` trait
     /// saturates at 1.
@@ -558,6 +707,46 @@ nonisolated enum Thresholds {
     /// Album ordering maximizes the minimum feature-print distance to this
     /// many previously placed photos, so consecutive wallpapers look different.
     static let albumDiversityWindow = 5
+
+    /// How close two candidates' raw scores must be before FR-6.1 will let a
+    /// more-varied one displace a more-similar-to-what's-already-chosen one
+    /// in the album's *membership* — distinct from `albumDiversityWindow`,
+    /// which only reorders an already-decided membership for playback
+    /// (FR-6.2). This is what makes "a photo the user's taste clearly rates
+    /// higher never gives way to variety" concrete: outside this margin, a
+    /// higher-scored candidate is never skipped, however similar it is to
+    /// what's already in; inside it, `FeatureStore.selectDiverseMix` may
+    /// prefer whichever candidate in the tied band repeats the fewest
+    /// already-chosen place/season/visual axes.
+    ///
+    /// Raw-score units, same scale `duelPoolScoreMargin` already uses: the
+    /// sigmoid's slope at the centre is ¼, so a gap of this size corresponds
+    /// to roughly a 55/45 split in which photo a duel would favour — close
+    /// enough to read as "nearly alike" rather than a real preference.
+    /// Unverified against real library data; tune the same way
+    /// `verdictClassSpread` was, by watching what real near-tied stretches
+    /// of a real ranking actually contain.
+    static let albumMixScoreTolerance: Float = 0.2
+
+    /// Combined per-dimension mean-squared distance, over the feature print
+    /// *and* every `ScalarTrait` together (each block normalized by its own
+    /// dimension count first, so the feature print's much larger dimension
+    /// count can't drown out the scalar traits — see
+    /// `FeatureStore.repetitionCount`), below which two already-deduplicated
+    /// candidates still count as "similar" for FR-6.1's mix. FR-6.1 names
+    /// "scene, mood... or anything else the app weighs (FR-5.2)" alongside
+    /// place and season — the feature print alone speaks to scene and mood;
+    /// folding in every scalar trait is what makes this the rest of "anything
+    /// else", rather than a hand-picked subset of it.
+    ///
+    /// Looser than `nearDuplicateDistance` (which has already removed actual
+    /// re-takes of the same vista before this stage ever sees the pool) by
+    /// construction, and on a different scale entirely (a per-dimension mean
+    /// rather than a raw summed distance) — the two are not directly
+    /// comparable. Unverified against real library data; tune by watching
+    /// what a real ranked pool's per-dimension distances actually spread
+    /// across, the same way every other geometric threshold here is tuned.
+    static let albumMixQualitativeSimilarityDistance: Float = 0.1
 
     // MARK: The album-size scale (FR-6.3)
 

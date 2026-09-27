@@ -55,6 +55,72 @@ final class PhotoRecord {
     var latitude: Double?
     var longitude: Double?
 
+    /// FR-5.14's four-scale place hierarchy, resolved offline from
+    /// `latitude`/`longitude` via `PlaceHierarchy.offlineKeys` and cached
+    /// here rather than recomputed on every ranker reload — a
+    /// point-in-polygon/nearest-point search over the whole gazetteer for
+    /// every candidate on every duel would cost real time (FR-8.2) for a
+    /// coordinate that essentially never changes. `LibraryScanner` computes
+    /// these whenever it (re)assigns `latitude`/`longitude`, the same
+    /// re-sync-on-change treatment `cameraHeading` and the rest already get,
+    /// and also whenever `PlaceGazetteer.dataFingerprint` no longer matches
+    /// the fingerprint the last scan resolved against (the gazetteer's own
+    /// data changed underneath an unchanged coordinate).
+    /// `gazetteerLandscape` is FR-5.14's natural scale ("a landscape or
+    /// mountain range... known down to the landscapes people name
+    /// locally") and `gazetteerRegion` is its political counterpart — both
+    /// always independently resolved, never one standing in for the other
+    /// ("the natural and the political alike"). Independently nil where the
+    /// gazetteer has no answer at that scale — see `PlaceGazetteer`'s doc
+    /// comment — which `gazetteerResolved` tells apart from "not computed
+    /// yet" (a record that predates this field, or one with no location at
+    /// all).
+    var gazetteerTown: String?
+    var gazetteerLandscape: String?
+    var gazetteerRegion: String?
+    var gazetteerCountry: String?
+    /// True once the four fields above have been computed for this
+    /// record's current `latitude`/`longitude` against the gazetteer data's
+    /// current `PlaceGazetteer.dataFingerprint` (even if all four came back
+    /// nil) — distinguishes "the gazetteer genuinely has nothing here" from
+    /// "this record predates the field, or the gazetteer data has since
+    /// changed, and hasn't been looked at yet", which a plain nil check on
+    /// the four fields above cannot.
+    var gazetteerResolved: Bool = false
+
+    /// FR-5.14's fifth scale — "where the network allows, the app also
+    /// learns what Apple's maps call the place... and that name counts as
+    /// one more of the places the photo is known by." Composed by
+    /// `PlaceHierarchy.networkPlaceKey` from `MKAddressRepresentations
+    /// .cityName` (see `PlaceNameLookup`), anchored to this record's own
+    /// `gazetteerRegion`/`gazetteerCountry` — not Apple's own `.regionName`,
+    /// which is country-level only and cannot tell two same-named real
+    /// places apart (see `networkPlaceKey`'s doc comment for the residual
+    /// case even the anchor doesn't). Cached here the same way the four
+    /// offline fields above are, so ranking never re-reads `PlaceNameRecord`'s
+    /// per-grid-cell cache on every reload.
+    ///
+    /// Written two ways: immediately, by `PlaceNameLookup.save` onto every
+    /// `PhotoRecord` sharing a spot's grid cell the moment that cell first
+    /// resolves; and, every scan thereafter, by `LibraryScanner`'s own
+    /// unconditional pass over every located record, which is what actually
+    /// guarantees FR-5.13's "remembers the answer" reaches a photo the first
+    /// write missed — one imported later into an already-answered cell, one
+    /// whose location was corrected into one, or one whose anchor above
+    /// wasn't resolved yet at write time. `PlaceNameLookup` itself never
+    /// asks about a cell twice, so without that second, always-reapplying
+    /// pass, a record present at write time but wrong or missing then would
+    /// stay that way forever.
+    ///
+    /// Nil until resolved, or if Apple genuinely had no name for this spot;
+    /// `networkPlaceResolved` tells the two apart the same way
+    /// `gazetteerResolved` does for the offline fields. Deliberately never
+    /// merged with any `gazetteer*` field above — see `PlaceHierarchy`'s doc
+    /// comment for why conflating an offline scale with a network answer is
+    /// exactly the leak FR-5.14's "never reaches another" forbids.
+    var networkPlaceName: String?
+    var networkPlaceResolved: Bool = false
+
     /// Metres above sea level, from the same `CLLocation` latitude and
     /// longitude come from.
     ///

@@ -52,6 +52,7 @@ cover the obtained ones:
 | `ios-localization` | dpearson2699/swift-ios-skills | see upstream repo | String Catalogs, pluralization, RTL. Auto-updates. |
 | `swift-concurrency` | dpearson2699/swift-ios-skills | see upstream repo | Sendable/actor isolation, Swift 6 strict concurrency. Auto-updates. |
 | `app-store-review` | dpearson2699/swift-ios-skills | see upstream repo | Submission readiness, privacy manifest — relevant once FR-10's manual release process gives way to distribution. Auto-updates. |
+| `mapkit` | dpearson2699/swift-ios-skills | see upstream repo | MapKit/CoreLocation — `PlaceNameLookup`'s `MKReverseGeocodingRequest` (FR-1.5, FR-5.13). Auto-updates. |
 
 `ui-review-tahoe` and `liquid-glass` are pinned to `claude-code-apple-skills`'
 `pre-overhaul-2026-07` tag — its only other tag (`wwdc25-era-final`) predates
