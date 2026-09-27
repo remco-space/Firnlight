@@ -251,7 +251,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 58;
+				CURRENT_PROJECT_VERSION = 59;
 				VERSIONING_SYSTEM = "apple-generic";
 				DEVELOPMENT_TEAM = VGZ5MZ2P8B;
 				ENABLE_APP_SANDBOX = YES;
@@ -281,8 +281,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.26.0;
-				OTHER_SWIFT_FLAGS = "-enable-upcoming-feature ImmutableWeakCaptures";
+				MARKETING_VERSION = 0.26.1;
+				OTHER_SWIFT_FLAGS = "-enable-upcoming-feature ImmutableWeakCaptures -Xcc -DACCELERATE_NEW_LAPACK";
 				PRODUCT_BUNDLE_IDENTIFIER = space.remco.Firnlight;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -313,7 +313,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 58;
+				CURRENT_PROJECT_VERSION = 59;
 				VERSIONING_SYSTEM = "apple-generic";
 				DEVELOPMENT_TEAM = VGZ5MZ2P8B;
 				ENABLE_APP_SANDBOX = YES;
@@ -343,8 +343,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.26.0;
-				OTHER_SWIFT_FLAGS = "-enable-upcoming-feature ImmutableWeakCaptures";
+				MARKETING_VERSION = 0.26.1;
+				OTHER_SWIFT_FLAGS = "-enable-upcoming-feature ImmutableWeakCaptures -Xcc -DACCELERATE_NEW_LAPACK";
 				PRODUCT_BUNDLE_IDENTIFIER = space.remco.Firnlight;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

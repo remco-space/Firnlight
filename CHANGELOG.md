@@ -12,6 +12,22 @@ heading when that version is released (FR-10.3).
 
 ## [Unreleased]
 
+### Fixed
+
+- The preference ranker learned from duels one online gradient step at a
+  time, which an offline study replaying a real user's judgment history
+  found overconfident (predicting each held-out choice worse than a coin
+  flip on average) and order-dependent enough that one new duel could swap
+  roughly a quarter of the 200-photo album — the same duels weighing more,
+  or less, than the user's decisions imply depending only on which order
+  they happened to be made in (FR-5.2). The ranker now fits the identical
+  score function in one batch: every choice and pseudo-choice (the
+  favorites seed, each bad verdict) as a term in one convex objective,
+  solved by L-BFGS, which the same judgments always converge to the same
+  weights regardless of order. Photos favorites still seed the ranking, but
+  each counts for less than a real duel, so the user's own choices outvote
+  them. Existing weights rebuild once to the new fit.
+
 ## [0.26.0] - 2026-09-27
 
 ### Added
